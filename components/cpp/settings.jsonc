@@ -1,0 +1,20 @@
+{
+  "[c]": {
+    "editor.defaultFormatter": "ms-vscode.cpptools"
+  },
+  "[cpp]": {
+    "editor.defaultFormatter": "ms-vscode.cpptools",
+    "editor.semanticHighlighting.enabled": true,
+    "editor.stickyScroll.defaultModel": "foldingProviderModel",
+    "editor.suggest.insertMode": "replace",
+    "editor.wordBasedSuggestions": "allDocuments"
+  },
+  "[cuda-cpp]": {
+    "editor.defaultFormatter": "ms-vscode.cpptools"
+  },
+
+  "C_Cpp.autoAddFileAssociations": true,
+  "C_Cpp.autocompleteAddParentheses": true,
+  "C_Cpp.default.recursiveIncludes.priority": "afterSystemIncludes",
+  "C_Cpp.intelliSenseEngine": "default"
+}

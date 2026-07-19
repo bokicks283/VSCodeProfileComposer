@@ -1,0 +1,15 @@
+{
+  // Bash remains the default. PowerShell is available without becoming the default.
+  "terminal.external.linuxExec": "x-terminal-emulator",
+  "terminal.integrated.defaultProfile.linux": "Bash",
+  "terminal.integrated.profiles.linux": {
+    "Bash": {
+      "path": "bash",
+      "icon": "terminal-bash"
+    },
+    "PowerShell": {
+      "path": "pwsh",
+      "icon": "terminal-powershell"
+    }
+  }
+}

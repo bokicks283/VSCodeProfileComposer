@@ -1,0 +1,52 @@
+{
+  // Personal daily-driver preferences beyond the Suggested Baseline.
+  "[markdown]": {
+    "editor.unicodeHighlight.ambiguousCharacters": false,
+    "editor.unicodeHighlight.invisibleCharacters": false,
+    "editor.wordWrap": "on",
+    "editor.quickSuggestions": {
+      "comments": "on",
+      "strings": "on",
+      "other": "on"
+    }
+  },
+  "[xml]": {
+    "editor.defaultFormatter": "redhat.vscode-xml"
+  },
+  "[jsonc]": {
+    "editor.defaultFormatter": "vscode.json-language-features"
+  },
+
+  "debug.toolBarLocation": "docked",
+  "editor.colorDecoratorsActivatedOn": "click",
+  "editor.minimap.scale": 2,
+  "editor.minimap.showSlider": "always",
+  "editor.parameterHints.cycle": false,
+  "editor.quickSuggestionsDelay": 5,
+  "editor.semanticTokenColorCustomizations": {
+    "enabled": true
+  },
+  "editor.showDeprecated": false,
+  "editor.suggest.localityBonus": true,
+  "editor.suggest.showReferences": false,
+  "editor.suggestSelection": "recentlyUsedByPrefix",
+  "editor.tabSize": 2,
+
+  "files.autoSave": "afterDelay",
+
+  "rainbow_csv.comment_prefix": "#",
+
+  "search.quickOpen.includeSymbols": true,
+  "search.searchView.keywordSuggestions": true,
+
+  "task.problemMatchers.neverPrompt": false,
+  "terminal.explorerKind": "both",
+  "terminal.integrated.persistentSessionScrollback": 1000,
+  "terminal.integrated.shellIntegration.environmentReporting": true,
+
+  "vsicons.dontShowNewVersionMessage": true,
+  "workbench.colorTheme": "One Dark Pro Darker",
+  "workbench.editorLargeFileConfirmation": 4096,
+  "workbench.iconTheme": "vscode-icons",
+  "workbench.settings.enableNaturalLanguageSearch": false
+}

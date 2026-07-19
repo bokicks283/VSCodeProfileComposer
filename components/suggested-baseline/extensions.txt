@@ -1,0 +1,17 @@
+aaron-bond.better-comments
+bierner.emojisense
+codezombiech.gitignore
+github.vscode-pull-request-github
+gruntfuggly.todo-tree
+ibm.output-colorizer
+lacroixdavid1.vscode-format-context-menu
+mikestead.dotenv
+mkxml.vscode-filesize
+redhat.vscode-xml
+redhat.vscode-yaml
+streetsidesoftware.code-spell-checker
+tamasfe.even-better-toml
+usernamehw.errorlens
+vscode-icons-team.vscode-icons
+yzhang.markdown-all-in-one
+zhuangtongfa.one-dark-pro

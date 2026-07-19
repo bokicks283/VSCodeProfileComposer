@@ -1,0 +1,8 @@
+{
+  // Copy to machine/local/linux.jsonc and replace placeholders locally.
+
+  // Examples only:
+  // "todo-tree.ripgrep.ripgrep": "/home/<username>/.local/bin/rg",
+  // "C_Cpp.default.compilerPath": "/usr/bin/clang++",
+  // "vscode-kubernetes.kubectl-path": "/usr/local/bin/kubectl"
+}

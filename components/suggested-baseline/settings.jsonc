@@ -1,0 +1,100 @@
+{
+  // Portable daily-driver behavior shared by every profile.
+  "accessibility.dimUnfocused.enabled": true,
+  "accessibility.signals.terminalBell": {
+    "sound": "on"
+  },
+  "accessibility.verbosity.panelChat": false,
+  "accessibility.verbosity.terminal": false,
+  "accessibility.verbosity.terminalChatOutput": false,
+
+  "diffEditor.codeLens": true,
+  "editor.accessibilityPageSize": 14,
+  "editor.autoClosingBrackets": "always",
+  "editor.autoClosingDelete": "always",
+  "editor.autoClosingOvertype": "always",
+  "editor.autoClosingQuotes": "always",
+  "editor.codeActionWidget.includeNearbyQuickFixes": true,
+  "editor.insertSpaces": true,
+  "editor.suggest.shareSuggestSelections": true,
+  "editor.suggest.showStatusBar": true,
+
+  "explorer.compactFolders": false,
+  "explorer.confirmDelete": false,
+  "explorer.confirmDragAndDrop": false,
+  "explorer.incrementalNaming": "smart",
+
+  "files.associations": {
+    ".env": "dotenv",
+    "*.cfg": "properties",
+    "*.ini": "properties",
+    "*.md": "markdown",
+    "*.ps1": "powershell",
+    "*.toml": "toml"
+  },
+  "files.eol": "\n",
+  "files.insertFinalNewline": true,
+  "files.trimFinalNewlines": true,
+
+  "git.allowForcePush": true,
+  "git.autofetch": true,
+  "git.enableSmartCommit": true,
+  "git.ignoreMissingGitWarning": true,
+  "git.openRepositoryInParentFolders": "always",
+  "scm.alwaysShowActions": true,
+  "scm.alwaysShowRepositories": true,
+
+  "security.workspace.trust.enabled": true,
+  "security.workspace.trust.untrustedFiles": "open",
+
+  "terminal.integrated.accessibleViewFocusOnCommandExecution": false,
+  "terminal.integrated.allowedLinkSchemes": [
+    "file",
+    "http",
+    "https",
+    "mailto",
+    "vscode",
+    "vscode-insiders",
+    "openDialog",
+    "dialog"
+  ],
+  "terminal.integrated.confirmOnKill": "never",
+  "terminal.integrated.copyOnSelection": true,
+  "terminal.integrated.cursorBlinking": true,
+  "terminal.integrated.enableMultiLinePasteWarning": "never",
+  "terminal.integrated.enableVisualBell": true,
+  "terminal.integrated.initialHint": false,
+  "terminal.integrated.scrollback": 10000,
+
+  "todo-tree.filtering.excludeGlobs": [
+    "**/vendor/**",
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/bower_components/**",
+    "**/build/**",
+    "**/.vscode/**",
+    "**/.github/**",
+    "**/_output/**",
+    "**/*.min.*",
+    "**/*.map"
+  ],
+  "todo-tree.filtering.ignoreGitSubmodules": true,
+  "todo-tree.filtering.useBuiltInExcludes": "file and search excludes",
+  "todo-tree.general.showActivityBarBadge": true,
+  "todo-tree.general.showIconsInsteadOfTagsInStatusBar": true,
+  "todo-tree.general.statusBar": "tags",
+  "todo-tree.ripgrep.ripgrep": "rg",
+  "todo-tree.tree.showCountsInTree": true,
+
+  "workbench.editor.closeOnFileDelete": true,
+  "workbench.editor.empty.hint": "hidden",
+  "workbench.editor.enablePreviewFromCodeNavigation": true,
+  "workbench.editor.enablePreviewFromQuickOpen": true,
+  "workbench.editor.openSideBySideDirection": "down",
+  "workbench.editor.tabSizing": "shrink",
+  "workbench.editor.tabSizingFixedMaxWidth": 200,
+  "workbench.editor.tabSizingFixedMinWidth": 38,
+  "workbench.editor.titleScrollbarSizing": "large",
+  "workbench.editor.untitled.labelFormat": "name",
+  "workbench.editor.wrapTabs": true
+}

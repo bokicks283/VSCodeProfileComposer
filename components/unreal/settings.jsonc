@@ -1,0 +1,4 @@
+{
+  // Unreal-specific portable settings remain intentionally minimal.
+  // Add only values validated across more than one Unreal repository.
+}

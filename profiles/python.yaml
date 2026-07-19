@@ -1,0 +1,4 @@
+name: "Python"
+components:
+  - suggested-baseline
+  - python

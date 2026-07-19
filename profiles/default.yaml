@@ -1,0 +1,4 @@
+name: "Default"
+components:
+  - suggested-baseline
+  - default

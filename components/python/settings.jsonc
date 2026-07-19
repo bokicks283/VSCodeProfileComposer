@@ -1,0 +1,46 @@
+{
+  "[python]": {
+    "editor.formatOnSave": true,
+    "editor.formatOnType": false,
+    "editor.tabSize": 4
+  },
+
+  "python-envs.terminal.autoActivationType": "off",
+  "python.analysis.autoFormatStrings": true,
+  "python.analysis.autoImportCompletions": true,
+  "python.analysis.completeFunctionParens": true,
+  "python.analysis.diagnosticMode": "openFilesOnly",
+  "python.analysis.generateWithTypeAnnotation": true,
+  "python.analysis.packageIndexDepths": [
+    {
+      "name": "sklearn",
+      "depth": 2
+    },
+    {
+      "name": "matplotlib",
+      "depth": 2
+    },
+    {
+      "name": "scipy",
+      "depth": 2
+    },
+    {
+      "name": "django",
+      "depth": 2
+    },
+    {
+      "name": "flask",
+      "depth": 2
+    },
+    {
+      "name": "fastapi",
+      "depth": 2
+    }
+  ],
+  "python.analysis.typeCheckingMode": "basic",
+  "python.analysis.typeEvaluation.strictParameterNoneValue": false,
+  "python.createEnvironment.trigger": "off",
+  "python.globalModuleInstallation": true,
+  "python.languageServer": "Pylance",
+  "python.terminal.shellIntegration.enabled": true
+}

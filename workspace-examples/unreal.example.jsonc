@@ -1,0 +1,29 @@
+{
+  // Example only: copy reviewed entries into the owning Unreal workspace.
+  "files.exclude": {
+    "**/.trunk/*actions/": true,
+    "**/.trunk/*logs/": true,
+    "**/.trunk/*notifications/": true,
+    "**/.trunk/*out/": true,
+    "**/.trunk/*plugins/": true,
+    "**/Content/__ExternalActors__/": true,
+    "**/Content/__ExternalObjects__/": true
+  },
+  "files.watcherExclude": {
+    "**/.trunk/*actions/**": true,
+    "**/.trunk/*logs/**": true,
+    "**/.trunk/*notifications/**": true,
+    "**/.trunk/*out/**": true,
+    "**/.trunk/*plugins/**": true,
+    "**/Binaries/**": true,
+    "**/DerivedDataCache/**": true,
+    "**/Intermediate/**": true,
+    "**/Saved/**": true
+  },
+  "search.exclude": {
+    "**/Binaries/**": true,
+    "**/DerivedDataCache/**": true,
+    "**/Intermediate/**": true,
+    "**/Saved/**": true
+  }
+}

@@ -1,0 +1,11 @@
+# Real machine-local overrides are private.
+machine/local/*
+!machine/local/.gitkeep
+
+# VS Code profile exports may contain account or machine state.
+exports/*.code-profile
+
+# Common local/editor noise.
+.vscode/
+.DS_Store
+Thumbs.db

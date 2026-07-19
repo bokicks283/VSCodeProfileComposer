@@ -1,0 +1,4 @@
+name: "PowerShell"
+components:
+  - suggested-baseline
+  - powershell

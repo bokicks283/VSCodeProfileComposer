@@ -1,0 +1,14 @@
+arturodent.problems-copy
+bierner.markdown-checkbox
+bierner.markdown-emoji
+bierner.markdown-footnotes
+bierner.markdown-preview-github-styles
+eamodio.gitlens
+editorconfig.editorconfig
+github.vscode-github-actions
+grapecity.gc-excelviewer
+mechatroner.rainbow-csv
+ms-vscode.hexeditor
+rangav.vscode-thunder-client
+tomoki1207.pdf
+wmaurer.change-case

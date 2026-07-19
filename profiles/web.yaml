@@ -1,0 +1,4 @@
+name: "Web"
+components:
+  - suggested-baseline
+  - web

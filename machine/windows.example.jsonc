@@ -1,0 +1,8 @@
+{
+  // Copy to machine/local/windows.jsonc and replace placeholders locally.
+  "todo-tree.ripgrep.ripgrep": "C:\\Users\\<username>\\AppData\\Local\\Microsoft\\WinGet\\Links\\rg.exe",
+
+  // Examples only:
+  // "C_Cpp.default.compilerPath": "C:\\Path\\To\\compiler.exe",
+  // "vscode-kubernetes.kubectl-path": "C:\\Path\\To\\kubectl.exe"
+}

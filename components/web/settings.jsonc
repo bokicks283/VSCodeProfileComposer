@@ -1,0 +1,52 @@
+{
+  "[html]": {
+    "editor.suggest.insertMode": "replace"
+  },
+  "[typescriptreact]": {
+    "js/ts.autoClosingTags.enabled": true,
+    "js/ts.preferences.jsxAttributeCompletionStyle": "auto",
+    "js/ts.suggest.jsdoc.enabled": true
+  },
+
+  "css.lint.unknownAtRules": "ignore",
+  "css.validate": true,
+  "emmet.excludeLanguages": [
+    "markdown",
+    "php"
+  ],
+  "emmet.includeLanguages": {
+    "php": "php",
+    "kendo": "text/x-kendo-template"
+  },
+  "emmet.optimizeStylesheetParsing": false,
+  "emmet.showSuggestionsAsSnippets": true,
+  "emmet.triggerExpansionOnTab": true,
+  "html.validate.scripts": false,
+  "js/ts.locale": "en",
+  "js/ts.referencesCodeLens.enabled": true,
+  "js/ts.referencesCodeLens.showOnAllFunctions": true,
+  "js/ts.suggest.completeFunctionCalls": true,
+  "js/ts.suggest.paths": false,
+  "js/ts.tsserver.automaticTypeAcquisition.enabled": false,
+  "js/ts.updateImportsOnFileMove.enabled": "always",
+  "js/ts.validate.enabled": true,
+  "less.completion.triggerPropertyValueCompletion": false,
+  "less.validate": true,
+  "scss.validate": true,
+
+  "tailwindCSS.classAttributes": [
+    "class",
+    "className",
+    "ngClass",
+    "class:list",
+    ".*Class",
+    ".*Classes"
+  ],
+  "tailwindCSS.classFunctions": [
+    "class",
+    "className",
+    ".*Class",
+    ".*Classes"
+  ],
+  "tailwindCSS.validate": true
+}
