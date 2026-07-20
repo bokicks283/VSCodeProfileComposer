@@ -93,7 +93,6 @@
   "todo-tree.general.showActivityBarBadge": true,
   "todo-tree.general.showIconsInsteadOfTagsInStatusBar": true,
   "todo-tree.general.statusBar": "tags",
-  "todo-tree.ripgrep.ripgrep": "rg",
   "todo-tree.tree.showCountsInTree": true,
 
   "workbench.editor.closeOnFileDelete": true,
