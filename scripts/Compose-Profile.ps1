@@ -27,6 +27,10 @@ param(
 
     [Parameter(ParameterSetName = 'One')]
     [Parameter(ParameterSetName = 'All')]
+    [switch]$ExportCodeProfile,
+
+    [Parameter(ParameterSetName = 'One')]
+    [Parameter(ParameterSetName = 'All')]
     [Parameter(ParameterSetName = 'Validate')]
     [switch]$Strict
 )
@@ -67,6 +71,7 @@ try {
             Profile = $profileId
             DryRun = $DryRun
             Strict = $Strict
+            ExportCodeProfile = $ExportCodeProfile
         }
         if ($Platform) { $parameters.Platform = $Platform }
         if ($MachineFile) { $parameters.MachineFile = $MachineFile }
@@ -74,12 +79,14 @@ try {
         if ($DryRun) {
             Write-Host "DRY RUN: $($result.profileId) ($($result.displayName))"
             Write-Host "  Planned output: $($result.outputDirectory)"
+            if ($result.codeProfileExportPath) { Write-Host "  Planned .code-profile: $($result.codeProfileExportPath)" }
             Write-Host "  Inputs:"
             foreach ($input in $result.inputFiles) { Write-Host "    $($input.type): $($input.path)" }
             Write-Host "  Counts: $($result.counts.settings) settings, $($result.counts.extensions) extensions, $($result.counts.keybindings) keybindings, $($result.counts.overrides) overrides, $($result.counts.warnings) warnings"
         }
         else {
             Write-Host "Composed '$($result.profileId)' at $($result.outputDirectory): $($result.counts.settings) settings, $($result.counts.extensions) extensions, $($result.counts.keybindings) keybindings, $($result.counts.overrides) overrides."
+            if ($result.codeProfileExportPath) { Write-Host "VS Code profile export: $($result.codeProfileExportPath)" }
         }
     }
 }

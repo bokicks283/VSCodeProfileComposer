@@ -1,9 +1,13 @@
 Set-StrictMode -Version Latest
 
-$script:ComposerVersion = '0.1.0'
+$script:ComposerVersion = '0.2.0'
 $script:ManifestVersion = 1
 $script:Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 $script:SensitivePattern = '(?i)(password|(?<!semantic)token|secret|credential|connectionstring|api[_-]?key|private[_-]?key)'
+$script:CodeProfileSchema = 'vscode-user-data-profile-template'
+$script:CodeProfileSchemaVersion = 'unversioned'
+$script:CodeProfileVerifiedVersion = '1.129.1'
+$script:CodeProfileVerifiedCommit = '8a7abeba6e03ea3af87bfbce9a1b7e48fed567b8'
 
 function New-OrderedMap {
     return [System.Collections.Specialized.OrderedDictionary]::new([System.StringComparer]::Ordinal)
@@ -393,6 +397,11 @@ function Test-ComposerRepository {
         }
         try {
             $recipe = Read-ProfileRecipe $profile.Path
+            try { Get-CodeProfileFileName -DisplayName $recipe.Name | Out-Null }
+            catch { Add-ValidationItem $result errors 'invalid-export-filename' $_.Exception.Message $source }
+            if ($recipe.Name -match '(?i)(ghp_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{16,}|sk-[A-Za-z0-9_-]{16,}|Bearer\s+[A-Za-z0-9._-]{12,}|(?:password|token|secret|api[_-]?key)\s*[:=]\s*\S+)') {
+                Add-ValidationItem $result errors 'sensitive-profile-metadata' "Profile '$($profile.Id)' has a likely secret in its display name." $source
+            }
             $seenComponents = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
             foreach ($component in $recipe.Components) {
                 if (-not $seenComponents.Add($component)) {
@@ -456,6 +465,14 @@ function Test-ComposerRepository {
                 }
             }
             catch { Add-ValidationItem $result errors 'invalid-jsonc' $_.Exception.Message $source }
+        }
+    }
+
+    foreach ($sourceRootName in @('components', 'profiles', 'platform', 'machine')) {
+        $sourceRoot = Join-Path $root $sourceRootName
+        if (-not (Test-Path -LiteralPath $sourceRoot -PathType Container)) { continue }
+        foreach ($uiFile in (Get-ChildItem -LiteralPath $sourceRoot -Recurse -File | Where-Object Name -match '(?i)^(global[-_.]?state|ui[-_.]?state)\.(jsonc?|ya?ml|txt)$')) {
+            Add-ValidationItem $result errors 'unsupported-ui-state-source' 'UI-state files are not composable; VS Code owns live profile UI state.' (Get-RelativeDisplayPath $root $uiFile.FullName)
         }
     }
 
@@ -622,6 +639,139 @@ function ConvertTo-PrettyJson {
     return ((ConvertTo-Json -InputObject $Value -Depth 100) + "`n")
 }
 
+function ConvertTo-CompactJson {
+    param([Parameter(Mandatory)][AllowNull()][AllowEmptyCollection()]$Value)
+    return (ConvertTo-Json -InputObject $Value -Depth 100 -Compress)
+}
+
+function Get-CodeProfileFileName {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$DisplayName)
+
+    $name = $DisplayName.Trim()
+    if ([string]::IsNullOrWhiteSpace($name)) { throw 'Profile display name cannot be empty.' }
+    if ($name.Contains('/') -or $name.Contains('\') -or $name.Contains('..')) {
+        throw "Profile display name '$DisplayName' could escape the export directory."
+    }
+    $safeName = [regex]::Replace($name, '\s+\+\s+', '-')
+    $safeName = [regex]::Replace($safeName, '[<>:"/\\|?*\x00-\x1F]', '-')
+    $safeName = [regex]::Replace($safeName, '\s+', '-')
+    $safeName = [regex]::Replace($safeName, '-{2,}', '-').Trim(' ', '.', '-')
+    if ([string]::IsNullOrWhiteSpace($safeName)) { throw "Profile display name '$DisplayName' does not produce a usable export filename." }
+    if ($safeName -match '(?i)^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$') {
+        throw "Profile display name '$DisplayName' is a reserved Windows filename."
+    }
+    return "$safeName.code-profile"
+}
+
+function Test-PathWithinDirectory {
+    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Directory)
+    $fullPath = [System.IO.Path]::GetFullPath($Path)
+    $fullDirectory = [System.IO.Path]::GetFullPath($Directory)
+    $prefix = $fullDirectory.TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+    return $fullPath.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)
+}
+
+function Get-CodeProfilePlatformValue {
+    param([string]$Platform)
+    if ($Platform) {
+        switch -Regex ($Platform.ToLowerInvariant()) {
+            '^windows$' { return 3 }
+            '^linux$' { return 2 }
+            '^(mac|macos|darwin)$' { return 1 }
+            '^web$' { return 0 }
+            default { throw "Platform '$Platform' cannot be represented in VS Code keybinding export metadata." }
+        }
+    }
+    if ($IsWindows) { return 3 }
+    if ($IsMacOS) { return 1 }
+    if ($IsLinux) { return 2 }
+    return 0
+}
+
+function New-CodeProfileTemplate {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$DisplayName,
+        [Parameter(Mandatory)][string]$SettingsJson,
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Extensions,
+        [Parameter(Mandatory)][string]$KeybindingsJson,
+        [string]$Platform
+    )
+
+    $extensionResources = @($Extensions | ForEach-Object {
+        [ordered]@{ identifier = [ordered]@{ id = $_ } }
+    })
+    return [ordered]@{
+        name = $DisplayName
+        settings = ConvertTo-CompactJson ([ordered]@{ settings = $SettingsJson })
+        keybindings = ConvertTo-CompactJson ([ordered]@{
+            keybindings = $KeybindingsJson
+            platform = Get-CodeProfilePlatformValue $Platform
+        })
+        extensions = ConvertTo-CompactJson ([object[]]$extensionResources)
+    }
+}
+
+function Test-CodeProfileTemplate {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path)
+
+    $template = Read-JsonCFile $Path
+    if (-not (Test-IsDictionary $template)) { throw "VS Code profile export '$Path' must have an object root." }
+    $allowedFields = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    foreach ($field in @('name', 'icon', 'settings', 'keybindings', 'tasks', 'snippets', 'extensions', 'globalState')) { $allowedFields.Add($field) | Out-Null }
+    foreach ($field in $template.Keys) {
+        if (-not $allowedFields.Contains([string]$field)) { throw "VS Code profile export '$Path' contains unsupported metadata field '$field'." }
+    }
+    if (-not $template.Contains('name') -or $template.name -isnot [string] -or [string]::IsNullOrWhiteSpace($template.name)) {
+        throw "VS Code profile export '$Path' requires a non-empty string 'name'."
+    }
+    if ($template.name -match '(?i)(ghp_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{16,}|sk-[A-Za-z0-9_-]{16,}|Bearer\s+[A-Za-z0-9._-]{12,}|(?:password|token|secret|api[_-]?key)\s*[:=]\s*\S+)') {
+        throw "VS Code profile export '$Path' contains a likely secret in profile metadata."
+    }
+    if ($template.Contains('icon') -and $template.icon -isnot [string]) { throw "VS Code profile export '$Path' icon metadata must be a string." }
+    if ($template.Contains('globalState')) { throw "VS Code profile export '$Path' must not contain UI state ('globalState')." }
+    foreach ($required in @('settings', 'extensions', 'keybindings')) {
+        if (-not $template.Contains($required) -or $template[$required] -isnot [string]) {
+            throw "VS Code profile export '$Path' requires string resource '$required'."
+        }
+    }
+
+    $settingsResource = ConvertFrom-JsonC $template.settings "$Path#settings"
+    if (-not (Test-IsDictionary $settingsResource) -or -not $settingsResource.Contains('settings') -or $settingsResource.settings -isnot [string]) {
+        throw "VS Code profile export '$Path' has an invalid settings resource."
+    }
+    $settingsValue = ConvertFrom-JsonC $settingsResource.settings "$Path#settings.settings"
+    if (-not (Test-IsDictionary $settingsValue)) { throw "VS Code profile export '$Path' settings payload must be an object." }
+
+    $extensionsResource = ConvertFrom-JsonC $template.extensions "$Path#extensions"
+    if ($extensionsResource -isnot [System.Array]) { throw "VS Code profile export '$Path' extensions resource must be an array." }
+    $extensionIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($extension in $extensionsResource) {
+        if (-not (Test-IsDictionary $extension) -or -not $extension.Contains('identifier') -or -not (Test-IsDictionary $extension.identifier) -or
+            -not $extension.identifier.Contains('id') -or $extension.identifier.id -isnot [string] -or
+            $extension.identifier.id -notmatch '^[A-Za-z0-9][A-Za-z0-9-]*\.[A-Za-z0-9][A-Za-z0-9._-]*$') {
+            throw "VS Code profile export '$Path' has an invalid extension resource entry."
+        }
+        if (-not $extensionIds.Add($extension.identifier.id)) { throw "VS Code profile export '$Path' contains duplicate extension '$($extension.identifier.id)'." }
+    }
+
+    $keybindingsResource = ConvertFrom-JsonC $template.keybindings "$Path#keybindings"
+    if (-not (Test-IsDictionary $keybindingsResource) -or -not $keybindingsResource.Contains('keybindings') -or
+        $keybindingsResource.keybindings -isnot [string] -or -not $keybindingsResource.Contains('platform')) {
+        throw "VS Code profile export '$Path' has an invalid keybindings resource."
+    }
+    $keybindingsValue = ConvertFrom-JsonC $keybindingsResource.keybindings "$Path#keybindings.keybindings"
+    if ($keybindingsValue -isnot [System.Array]) { throw "VS Code profile export '$Path' keybindings payload must be an array." }
+    if ($keybindingsResource.platform -isnot [long] -and $keybindingsResource.platform -isnot [int]) {
+        throw "VS Code profile export '$Path' keybindings platform must be an integer."
+    }
+    $platformNumber = [int]$keybindingsResource.platform
+    if ($platformNumber -lt 0 -or $platformNumber -gt 3) { throw "VS Code profile export '$Path' has an invalid keybindings platform value." }
+    return $true
+}
+
 function Get-FileHashValue {
     param([Parameter(Mandatory)][string]$Path)
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -669,6 +819,7 @@ function Invoke-ProfileComposition {
         [string]$Platform,
         [string]$MachineFile,
         [switch]$DryRun,
+        [switch]$ExportCodeProfile,
         [switch]$Strict
     )
 
@@ -744,12 +895,18 @@ function Invoke-ProfileComposition {
     $keybindings = @($keybindingsResult.Items)
     $mergeWarnings = @($keybindingsResult.Warnings)
     $targetDirectory = [System.IO.Path]::GetFullPath((Join-Path $root "build/profiles/$profileId"))
+    $codeProfileFileName = if ($ExportCodeProfile) { Get-CodeProfileFileName -DisplayName $recipe.Name } else { $null }
+    $codeProfileTargetPath = if ($codeProfileFileName) { [System.IO.Path]::GetFullPath((Join-Path $targetDirectory $codeProfileFileName)) } else { $null }
+    if ($codeProfileTargetPath -and -not (Test-PathWithinDirectory $codeProfileTargetPath $targetDirectory)) {
+        throw "VS Code profile export path '$codeProfileTargetPath' escapes its generated profile directory."
+    }
 
     if ($DryRun) {
         return [pscustomobject][ordered]@{
             profileId = $profileId
             displayName = $recipe.Name
             outputDirectory = Get-RelativeDisplayPath $root $targetDirectory
+            codeProfileExportPath = if ($codeProfileTargetPath) { Get-RelativeDisplayPath $root $codeProfileTargetPath } else { $null }
             inputFiles = [object[]]$inputFiles.ToArray()
             counts = [pscustomobject][ordered]@{
                 settings = $settings.Count
@@ -784,10 +941,29 @@ function Invoke-ProfileComposition {
         $generatedKeybindings = Read-JsonCFile (Join-Path $temporaryDirectory 'keybindings.json')
         if ($generatedKeybindings -isnot [System.Array]) { throw 'Generated keybindings did not validate as a JSON array.' }
 
+        $codeProfileTemporaryPath = $null
+        $codeProfileHash = $null
+        if ($ExportCodeProfile) {
+            $codeProfileTemporaryPath = Join-Path $temporaryDirectory $codeProfileFileName
+            if (-not (Test-PathWithinDirectory $codeProfileTemporaryPath $temporaryDirectory)) {
+                throw "VS Code profile export path '$codeProfileTemporaryPath' escapes the temporary profile directory."
+            }
+            $template = New-CodeProfileTemplate `
+                -DisplayName $recipe.Name `
+                -SettingsJson ([System.IO.File]::ReadAllText((Join-Path $temporaryDirectory 'settings.json'))) `
+                -Extensions ([string[]]$extensions) `
+                -KeybindingsJson ([System.IO.File]::ReadAllText((Join-Path $temporaryDirectory 'keybindings.json'))) `
+                -Platform $Platform
+            Write-Utf8File $codeProfileTemporaryPath (ConvertTo-PrettyJson -Value $template)
+            Test-CodeProfileTemplate $codeProfileTemporaryPath | Out-Null
+            $codeProfileHash = Get-FileHashValue $codeProfileTemporaryPath
+        }
+
         $hashes = New-OrderedMap
         foreach ($name in @('settings.json', 'extensions.txt', 'keybindings.json', 'overrides.json', 'validation.json')) {
             $hashes[$name] = Get-FileHashValue (Join-Path $temporaryDirectory $name)
         }
+        if ($ExportCodeProfile) { $hashes[$codeProfileFileName] = $codeProfileHash }
         $machineDisplay = if ($resolvedMachine) { Get-RelativeDisplayPath $root $resolvedMachine } else { $null }
         $manifest = [ordered]@{
             manifestVersion = $script:ManifestVersion
@@ -800,6 +976,24 @@ function Invoke-ProfileComposition {
             inputFiles = [object[]]$inputFiles.ToArray()
             platformOverlay = if ($Platform) { [ordered]@{ id = $Platform; path = Get-RelativeDisplayPath $root $platformPath } } else { $null }
             machineOverlayPath = $machineDisplay
+            codeProfileExportRequested = [bool]$ExportCodeProfile
+            codeProfileExport = if ($ExportCodeProfile) {
+                [ordered]@{
+                    fileName = $codeProfileFileName
+                    sha256 = $codeProfileHash
+                    schema = $script:CodeProfileSchema
+                    schemaVersion = $script:CodeProfileSchemaVersion
+                    verifiedAgainst = [ordered]@{
+                        version = $script:CodeProfileVerifiedVersion
+                        commit = $script:CodeProfileVerifiedCommit
+                    }
+                    machineOverlayIncluded = [bool]$resolvedMachine
+                    portability = if ($resolvedMachine) { 'machine-overlay-included' } else { 'portable' }
+                    uiStatePolicy = 'managed-by-vscode'
+                    importMethod = 'manual-vscode-profile-import'
+                }
+            }
+            else { $null }
             outputHashes = $hashes
             validation = [ordered]@{
                 result = 'passed'
@@ -828,9 +1022,10 @@ function Invoke-ProfileComposition {
         profileId = $profileId
         displayName = $recipe.Name
         outputDirectory = Get-RelativeDisplayPath $root $targetDirectory
+        codeProfileExportPath = if ($codeProfileTargetPath) { Get-RelativeDisplayPath $root $codeProfileTargetPath } else { $null }
         counts = $manifest.counts
         dryRun = $false
     }
 }
 
-Export-ModuleMember -Function ConvertFrom-JsonC, Read-ProfileRecipe, Get-ProfileDefinitions, Test-ComposerRepository, Merge-Settings, Merge-Extensions, Merge-Keybindings, Invoke-SafeDirectoryReplace, Invoke-ProfileComposition
+Export-ModuleMember -Function ConvertFrom-JsonC, Read-ProfileRecipe, Get-ProfileDefinitions, Test-ComposerRepository, Merge-Settings, Merge-Extensions, Merge-Keybindings, Get-CodeProfileFileName, New-CodeProfileTemplate, Test-CodeProfileTemplate, Invoke-SafeDirectoryReplace, Invoke-ProfileComposition

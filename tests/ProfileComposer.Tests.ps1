@@ -259,3 +259,175 @@ Describe 'Current profile acceptance compositions' {
         (ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $output 'keybindings.json')))) -is [System.Array] | Should -BeTrue
     }
 }
+
+Describe 'VS Code .code-profile export' {
+    It 'generates an export for Default' {
+        $fixture = New-ComposerFixture 'export-default'
+        $result = Invoke-ProfileComposition $fixture default -Platform windows -ExportCodeProfile
+        $result.codeProfileExportPath | Should -Be 'build/profiles/default/Default.code-profile'
+        Test-Path -LiteralPath (Join-Path $fixture $result.codeProfileExportPath) | Should -BeTrue
+    }
+
+    It 'generates an export for Unreal' {
+        $fixture = New-ComposerFixture 'export-unreal'
+        $result = Invoke-ProfileComposition $fixture unreal -Platform windows -ExportCodeProfile
+        $result.codeProfileExportPath | Should -Be 'build/profiles/unreal/Unreal-Engine.code-profile'
+        { Test-CodeProfileTemplate (Join-Path $fixture $result.codeProfileExportPath) } | Should -Not -Throw
+    }
+
+    It 'embeds the complete generated settings JSON' {
+        $fixture = New-ComposerFixture 'export-settings'
+        Invoke-ProfileComposition $fixture default -Platform windows -ExportCodeProfile | Out-Null
+        $output = Join-Path $fixture 'build/profiles/default'
+        $profile = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $output 'Default.code-profile')))
+        $resource = ConvertFrom-JsonC $profile.settings
+        $resource.settings | Should -BeExactly ([System.IO.File]::ReadAllText((Join-Path $output 'settings.json')))
+    }
+
+    It 'converts extension IDs to VS Code identifier resources' {
+        $fixture = New-ComposerFixture 'export-extensions'
+        Invoke-ProfileComposition $fixture default -Platform windows -ExportCodeProfile | Out-Null
+        $output = Join-Path $fixture 'build/profiles/default'
+        $profile = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $output 'Default.code-profile')))
+        $resources = ConvertFrom-JsonC $profile.extensions
+        $expected = [System.IO.File]::ReadAllLines((Join-Path $output 'extensions.txt'))[0]
+        $resources[0].identifier.id | Should -BeExactly $expected
+        $resources[0].identifier.Contains('uuid') | Should -BeFalse
+    }
+
+    It 'embeds generated keybindings and Windows platform metadata' {
+        $fixture = New-ComposerFixture 'export-keybindings'
+        Write-TestFile (Join-Path $fixture 'components/suggested-baseline/keybindings.jsonc') '[{ "key": "ctrl+alt+t", "command": "workbench.action.files.newUntitledFile" }]'
+        Invoke-ProfileComposition $fixture default -Platform windows -ExportCodeProfile | Out-Null
+        $output = Join-Path $fixture 'build/profiles/default'
+        $profile = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $output 'Default.code-profile')))
+        $resource = ConvertFrom-JsonC $profile.keybindings
+        $keys = ConvertFrom-JsonC $resource.keybindings
+        $keys[0].command | Should -Be 'workbench.action.files.newUntitledFile'
+        $resource.platform | Should -Be 3
+    }
+
+    It 'uses VS Code empty-array keybinding representation when no bindings exist' {
+        $fixture = New-ComposerFixture 'export-empty-keybindings'
+        Invoke-ProfileComposition $fixture default -Platform windows -ExportCodeProfile | Out-Null
+        $profile = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'build/profiles/default/Default.code-profile')))
+        $resource = ConvertFrom-JsonC $profile.keybindings
+        $keys = ConvertFrom-JsonC $resource.keybindings
+        $keys -is [System.Array] | Should -BeTrue
+        $keys.Count | Should -Be 0
+    }
+
+    It 'includes explicitly requested machine settings and classifies the export' {
+        $fixture = New-ComposerFixture 'export-machine'
+        $machine = Join-Path $fixture 'machine/local/test.jsonc'
+        Write-TestFile $machine '{ "terminal.integrated.defaultProfile.windows": "Machine Shell" }'
+        Invoke-ProfileComposition $fixture default -Platform windows -MachineFile $machine -ExportCodeProfile | Out-Null
+        $output = Join-Path $fixture 'build/profiles/default'
+        $profile = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $output 'Default.code-profile')))
+        $settingsResource = ConvertFrom-JsonC $profile.settings
+        $settings = ConvertFrom-JsonC $settingsResource.settings
+        $manifest = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $output 'manifest.json')))
+        $settings['terminal.integrated.defaultProfile.windows'] | Should -Be 'Machine Shell'
+        $manifest.codeProfileExport.machineOverlayIncluded | Should -BeTrue
+        $manifest.codeProfileExport.portability | Should -Be 'machine-overlay-included'
+    }
+
+    It 'classifies an export without a machine overlay as portable' {
+        $fixture = New-ComposerFixture 'export-portable'
+        Invoke-ProfileComposition $fixture default -Platform windows -ExportCodeProfile | Out-Null
+        $manifest = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'build/profiles/default/manifest.json')))
+        $manifest.codeProfileExport.machineOverlayIncluded | Should -BeFalse
+        $manifest.codeProfileExport.portability | Should -Be 'portable'
+    }
+
+    It 'creates deterministic safe filenames' {
+        Get-CodeProfileFileName 'Python Database' | Should -Be 'Python-Database.code-profile'
+        Get-CodeProfileFileName 'Python + Database' | Should -Be 'Python-Database.code-profile'
+        Get-CodeProfileFileName 'C++: Tools' | Should -Be 'C++-Tools.code-profile'
+    }
+
+    It 'rejects path traversal in an export filename source' {
+        { Get-CodeProfileFileName '../escape' } | Should -Throw '*escape the export directory*'
+        $fixture = New-ComposerFixture 'export-traversal'
+        Write-TestFile (Join-Path $fixture 'profiles/escape.yaml') "name: ../escape`ncomponents:`n  - default`n"
+        $validation = Test-ComposerRepository $fixture
+        $validation.errors.code | Should -Contain 'invalid-export-filename'
+    }
+
+    It 'reports the planned export but writes nothing during dry run' {
+        $fixture = New-ComposerFixture 'export-dry-run'
+        $result = Invoke-ProfileComposition $fixture default -Platform windows -ExportCodeProfile -DryRun
+        $result.codeProfileExportPath | Should -Be 'build/profiles/default/Default.code-profile'
+        Test-Path -LiteralPath (Join-Path $fixture 'build') | Should -BeFalse
+    }
+
+    It 'preserves the previous valid export when a later generation fails' {
+        $fixture = New-ComposerFixture 'export-failed-preserves'
+        Invoke-ProfileComposition $fixture default -Platform windows -ExportCodeProfile | Out-Null
+        $exportPath = Join-Path $fixture 'build/profiles/default/Default.code-profile'
+        $before = [System.IO.File]::ReadAllText($exportPath)
+        Write-TestFile (Join-Path $fixture 'components/default/settings.jsonc') '{ invalid jsonc'
+        { Invoke-ProfileComposition $fixture default -Platform windows -ExportCodeProfile } | Should -Throw
+        [System.IO.File]::ReadAllText($exportPath) | Should -BeExactly $before
+    }
+
+    It 'records the exact export hash and schema metadata in the manifest' {
+        $fixture = New-ComposerFixture 'export-hash'
+        Invoke-ProfileComposition $fixture default -Platform windows -ExportCodeProfile | Out-Null
+        $output = Join-Path $fixture 'build/profiles/default'
+        $manifest = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $output 'manifest.json')))
+        $actual = (Get-FileHash -LiteralPath (Join-Path $output 'Default.code-profile') -Algorithm SHA256).Hash.ToLowerInvariant()
+        $manifest.codeProfileExport.sha256 | Should -BeExactly $actual
+        $manifest.codeProfileExport.schema | Should -Be 'vscode-user-data-profile-template'
+        $manifest.codeProfileExport.schemaVersion | Should -Be 'unversioned'
+    }
+
+    It 'parses generated exports as valid JSON and validates nested resources' {
+        $fixture = New-ComposerFixture 'export-valid-json'
+        Invoke-ProfileComposition $fixture default -Platform windows -ExportCodeProfile | Out-Null
+        $path = Join-Path $fixture 'build/profiles/default/Default.code-profile'
+        { [System.Text.Json.JsonDocument]::Parse([System.IO.File]::ReadAllText($path)).Dispose() } | Should -Not -Throw
+        Test-CodeProfileTemplate $path | Should -BeTrue
+    }
+
+    It 'matches the verified VS Code 1.129.1 schema fixture' {
+        $fixturePath = Join-Path $script:RepositoryRoot 'tests/fixtures/vscode-1.129.1-minimal.code-profile'
+        Test-CodeProfileTemplate $fixturePath | Should -BeTrue
+        $fixture = ConvertFrom-JsonC ([System.IO.File]::ReadAllText($fixturePath))
+        $fixture.Keys | Should -Be @('name', 'settings', 'keybindings', 'extensions')
+        foreach ($resource in @('settings', 'keybindings', 'extensions')) { $fixture[$resource] | Should -BeOfType [string] }
+    }
+
+    It 'rejects duplicate extension resources and sensitive metadata' {
+        $path = Join-Path $TestDrive 'invalid-export.code-profile'
+        $template = New-CodeProfileTemplate -DisplayName 'Fixture' -SettingsJson '{}' -Extensions @('sample.extension') -KeybindingsJson '[]' -Platform windows
+        $template.extensions = '[{"identifier":{"id":"sample.extension"}},{"identifier":{"id":"SAMPLE.EXTENSION"}}]'
+        Write-TestFile $path (ConvertTo-Json -InputObject $template -Depth 20)
+        { Test-CodeProfileTemplate $path } | Should -Throw '*duplicate extension*'
+
+        $fixture = New-ComposerFixture 'export-sensitive-metadata'
+        Write-TestFile (Join-Path $fixture 'profiles/sensitive.yaml') "name: `"token=abcdefghijklmnop`"`ncomponents:`n  - default`n"
+        (Test-ComposerRepository $fixture).errors.code | Should -Contain 'sensitive-profile-metadata'
+    }
+
+    It 'omits UI state and rejects accidental UI-state source files' {
+        $fixture = New-ComposerFixture 'export-no-ui-state'
+        Invoke-ProfileComposition $fixture default -Platform windows -ExportCodeProfile | Out-Null
+        $profile = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'build/profiles/default/Default.code-profile')))
+        $profile.Contains('globalState') | Should -BeFalse
+        $manifest = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'build/profiles/default/manifest.json')))
+        $manifest.codeProfileExport.uiStatePolicy | Should -Be 'managed-by-vscode'
+        Write-TestFile (Join-Path $fixture 'components/default/ui-state.jsonc') '{}'
+        (Test-ComposerRepository $fixture).errors.code | Should -Contain 'unsupported-ui-state-source'
+    }
+
+    It 'keeps ordinary composition export-free and otherwise unchanged' {
+        $fixture = New-ComposerFixture 'non-export-unchanged'
+        Invoke-ProfileComposition $fixture default -Platform windows | Out-Null
+        $output = Join-Path $fixture 'build/profiles/default'
+        @(Get-ChildItem -LiteralPath $output -Filter '*.code-profile').Count | Should -Be 0
+        $manifest = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $output 'manifest.json')))
+        $manifest.codeProfileExportRequested | Should -BeFalse
+        $manifest.codeProfileExport | Should -BeNullOrEmpty
+    }
+}

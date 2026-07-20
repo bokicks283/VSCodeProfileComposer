@@ -1,0 +1,6 @@
+{
+  "name": "Sanitized Fixture",
+  "settings": "{\"settings\":\"{\\n  \\\"editor.wordWrap\\\": \\\"on\\\"\\n}\"}",
+  "keybindings": "{\"keybindings\":\"[\\n  {\\n    \\\"key\\\": \\\"ctrl+alt+shift+f12\\\",\\n    \\\"command\\\": \\\"workbench.action.files.newUntitledFile\\\"\\n  }\\n]\",\"platform\":3}",
+  "extensions": "[{\"identifier\":{\"id\":\"editorconfig.editorconfig\"}}]"
+}
