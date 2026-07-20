@@ -5,6 +5,9 @@ machine/local/*
 # VS Code profile exports may contain account or machine state.
 exports/*.code-profile
 
+# Generated composer output is reproducible and is not canonical source.
+build/
+
 # Common local/editor noise.
 .vscode/
 .DS_Store
