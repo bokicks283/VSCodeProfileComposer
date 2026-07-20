@@ -4,7 +4,7 @@
 
 A component is a focused reusable unit with portable `settings.jsonc`, an extension list, and ownership documentation. Every component can participate in a standalone profile when combined with `suggested-baseline`.
 
-A profile is an explicit YAML recipe. Profiles do not inherit other profiles and no parser is implemented.
+A profile is an explicit YAML recipe. Profiles do not inherit other profiles. The composer parses the narrow current recipe schema and rejects unsupported YAML structures.
 
 ## Layers
 
@@ -16,7 +16,7 @@ Portable component settings
 → workspace settings
 ```
 
-The order is conceptual. Manual VS Code profiles and Settings Sync remain the runtime mechanism.
+The composer materializes this order through the machine-local layer. Workspace settings stay separate. Manual VS Code profiles and Settings Sync remain the runtime delivery mechanism.
 
 ## Suggested Baseline
 
@@ -72,6 +72,6 @@ Ignored local files contain absolute executable paths, SDK roots, compiler paths
 
 Repositories own generated-folder exclusions, include paths, compile commands, team formatter policy, PSScriptAnalyzer/Pester rules, module paths, database schema/migration policy, and project-specific extension behavior.
 
-## Future composition
+## Generated artifacts
 
-A future tool may merge components, validate conflicts, materialize profiles, and create exports. It must not be built until the core manual profiles are stable.
+`scripts/Compose-Profile.ps1` materializes reviewable artifacts under ignored `build/profiles/`. It does not install them, create exports, control Settings Sync, or read live VS Code state. Source components and recipes remain canonical.

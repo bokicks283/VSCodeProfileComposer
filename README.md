@@ -1,109 +1,95 @@
 # VS Code Profile Composer
 
-A concise, human-readable design and backup repository for portable, composable Visual Studio Code profiles.
+This repository contains reusable VS Code settings and extension components plus a safe PowerShell 7 composer. One command validates the source model and materializes a complete profile without reading or changing the user's VS Code installation.
 
-This MVP intentionally does **not** contain a profile composer application, deployment scripts, generators, a test harness, or GitHub Actions. VS Code Settings Sync and manual profile management remain the runtime workflow until the core profiles are stable.
+## Quick start
 
-## Immediate MVP
+Requirements:
 
-The core manual-validation priorities are:
+- PowerShell 7.0 or newer (`pwsh`)
+- Git, optional, for recording the current commit in manifests
+- Pester 5.5 or newer, only for running the test suite
 
-- Default
-- C++
-- Unreal Engine
-- Web
-- Python
+The composer has no external runtime dependencies and never installs modules automatically.
 
-Additional opt-in profiles are available for advanced PowerShell and database work. They are not required for ordinary daily editing.
+```powershell
+# Validate every component and recipe.
+pwsh ./scripts/Compose-Profile.ps1 -Validate
 
-Each component owns the smallest reusable settings and extension set that explains why it exists. Profiles are explicit recipes; there is no inheritance.
+# Compose one profile.
+pwsh ./scripts/Compose-Profile.ps1 -Profile default -Platform windows
 
-```text
-Default                = Suggested Baseline + Default
-C++                    = Suggested Baseline + C++
-Unreal                 = Suggested Baseline + C++ + Unreal
-Web                    = Suggested Baseline + Web
-Python                 = Suggested Baseline + Python
-PowerShell Development = Suggested Baseline + PowerShell
-Database               = Suggested Baseline + Database
-Web + Database         = Suggested Baseline + Web + Database
-Python + Database      = Suggested Baseline + Python + Database
-SQL Server             = Suggested Baseline + Database + SQL Server
-MongoDB                = Suggested Baseline + Database + MongoDB
+# Compose with a private machine-local overlay.
+pwsh ./scripts/Compose-Profile.ps1 -Profile unreal -Platform windows -MachineFile ./machine/local/windows.jsonc
+
+# Compose every valid recipe.
+pwsh ./scripts/Compose-Profile.ps1 -All -Platform windows
+
+# Inspect inputs and planned output without writing build files.
+pwsh ./scripts/Compose-Profile.ps1 -Profile default -Platform windows -DryRun
 ```
 
-## Everyday shell support
-
-Suggested Baseline supports routine work with PowerShell, Bash/Zsh shell scripts, and Windows batch files. Default therefore handles normal editing, navigation, formatting commands, terminal use, and occasional PowerShell debugging without a profile switch.
-
-Recognized everyday shell files include:
-
-```text
-.ps1  .psm1  .psd1
-.sh   .bash  .zsh
-.bat  .cmd
-```
-
-The Microsoft PowerShell extension is currently baseline-owned because PowerShell is used frequently, the source audit treated it as cross-profile, and its recorded activation events are PowerShell language/debug/command triggers rather than eager startup activation. This is a provisional MVP placement, not a measured performance conclusion; revisit it if later Default measurements show a meaningful cost.
-
-## Opt-in database support
-
-Suggested Baseline and Default intentionally exclude database clients, language servers, connection explorers, saved connections, and vendor-specific database extensions.
-
-Database tooling is activated only through explicit composition because it may add background services, language servers, connection UI, authentication state, and machine- or employer-specific connection details that are unnecessary during ordinary daily editing.
-
-The generic `database` component owns vendor-neutral SQL tooling. SQL Server and MongoDB behavior remains in focused vendor components. Web and Python do not automatically imply database tooling.
-
-Connection strings, hosts, usernames, passwords, tokens, certificates, saved connection objects, account IDs, private database names, and employer resources never belong in portable components.
+Warnings are informational by default. Add `-Strict` to make warnings fail validation or composition.
 
 ## Repository model
 
 ```text
-Portable components
-→ profile recipe
-→ platform settings
-→ machine-local settings
-→ workspace settings
+Suggested Baseline
+→ recipe components in declared order
+→ optional profiles/<id>.settings.jsonc override
+→ platform/<platform>.jsonc
+→ optional machine-local settings file
 ```
 
-Later layers conceptually override earlier layers. No merger is implemented yet.
+Later layers win. Settings objects merge recursively, while scalar values, arrays, and null values replace earlier values. Extension IDs are validated and deduplicated case-insensitively in first-appearance order. Keybinding arrays are concatenated unchanged; identical objects produce warnings but remain in the output.
 
-- `components/` — portable, focused settings and extension ownership
-- `profiles/` — explicit YAML recipes
-- `platform/` — committed OS-specific preferences without personal paths
-- `machine/` — placeholder examples plus ignored local overrides
-- `workspace-examples/` — project-specific settings examples
-- `exports/` — private `.code-profile` backup guidance
-- `docs/` — architecture, portability, migration, and deferred plans
+Workspace settings are not materialized into personal profiles. `workspace-examples/` remains project guidance only.
 
-## Current deployment workflow
+## Output and safety
 
-For personal machines:
+Composition writes to `build/profiles/<id>/`:
 
 ```text
-Install VS Code
-→ sign in
-→ enable Settings Sync and profile synchronization
-→ select the required profile
-→ apply the short platform/machine checklist
+settings.json
+extensions.txt
+keybindings.json
+manifest.json
+overrides.json
+validation.json
 ```
 
-Settings Sync is currently the practical deployment mechanism. This repository is the reviewed design and backup source; manual VS Code profiles remain the runtime source of truth.
+Generated JSON is standard JSON. Each build is first written and validated in a temporary directory. The prior target is replaced only after the new package is complete; a failed composition preserves the previous valid output. Build output is ignored and is never canonical source.
 
-Stable profiles should eventually be exported as private `.code-profile` files. Do not commit exports containing credentials, tokens, account state, private connection details, or personal machine paths.
+`overrides.json` records replaced setting paths, values, and source layers. Values whose paths look sensitive are redacted in reports, while explicitly supplied machine-local values remain intact in the generated `settings.json`.
 
-## Important retained decisions
+Repository validation checks recipes, JSONC/YAML structure, extension IDs and duplicates, portable personal paths and likely secrets, requested overlays, ignored machine-local boundaries, profile IDs, and output containment.
 
-- The `trunk.io` VS Code extension is retired because it measured roughly 15 seconds to activate in the Unreal workspace.
-- Trunk CLI, CI use, and repository `.trunk` configuration remain supported.
-- `trunk.trunkPath` and `trunk.addToolsToPath` are not required shared settings.
-- General terminal behavior and basic shell-language support belong in Suggested Baseline.
-- Database tooling is opt-in and excluded from Suggested Baseline and Default.
-- Generic database behavior and vendor-specific database behavior remain separate components.
-- PowerShell 7 is preferred on Windows.
-- Bash remains the default terminal on Linux; PowerShell is optional there.
-- User settings are the normal focus. Workspace settings are reserved for genuine project or team policy.
-- The bundled `renderMermaidDiagram` contribution error is deferred and is not addressed here.
-- Automation remains deferred until the core manual profiles are stable.
+## Machine-local setup
 
-See [Architecture](docs/ARCHITECTURE.md), [Portability](docs/PORTABILITY.md), and [Migration](docs/MIGRATION.md).
+Copy the appropriate example and keep the result ignored:
+
+```powershell
+Copy-Item ./machine/windows.example.jsonc ./machine/local/windows.jsonc
+```
+
+Replace placeholders locally, then pass the file with `-MachineFile`. In particular, Todo Tree's confirmed working Windows ripgrep path is machine-specific; no portable `"rg"` override is present in Suggested Baseline.
+
+## Tests
+
+Install Pester only if needed:
+
+```powershell
+Install-Module Pester -MinimumVersion 5.5.0 -Scope CurrentUser
+```
+
+Run the isolated suite:
+
+```powershell
+pwsh -NoProfile -Command "Invoke-Pester -Path ./tests -Output Detailed"
+```
+
+## Installer status
+
+Direct installation into VS Code is intentionally deferred. The MVP never edits VS Code user data, profile storage, extensions, Settings Sync, or operating-system configuration. Settings Sync remains the primary cross-machine delivery mechanism for active profiles; generated artifacts are reviewable inputs for a future supported, backup-first installer.
+
+See [Composer details](docs/COMPOSER.md), [Architecture](docs/ARCHITECTURE.md), [Portability](docs/PORTABILITY.md), and [Migration](docs/MIGRATION.md).

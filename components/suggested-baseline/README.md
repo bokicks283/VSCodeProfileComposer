@@ -34,7 +34,7 @@ Every profile in `profiles/`.
 
 ## Portability classification
 
-All active settings are portable. Shell associations use VS Code language IDs, terminal behavior contains no OS-specific default selection, and `todo-tree.ripgrep.ripgrep` uses the executable name `rg`; a machine may override it with an absolute path.
+All active settings are portable. Shell associations use VS Code language IDs and terminal behavior contains no OS-specific default selection. The unreliable portable `todo-tree.ripgrep.ripgrep: "rg"` value was removed; machines that require it must provide a confirmed absolute executable path through an ignored machine-local overlay.
 
 ## Platform concerns
 

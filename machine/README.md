@@ -2,6 +2,12 @@
 
 Copy the matching example into `machine/local/` and replace placeholders locally. Files under `machine/local/` are ignored.
 
+Apply the local file explicitly during composition:
+
+```powershell
+pwsh ./scripts/Compose-Profile.ps1 -Profile unreal -Platform windows -MachineFile ./machine/local/windows.jsonc
+```
+
 Typical values:
 
 - absolute ripgrep path for Todo Tree

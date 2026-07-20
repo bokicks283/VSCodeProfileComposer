@@ -33,7 +33,7 @@ Settings and extension IDs are portable and contain no account state. Shell and 
 
 ## Platform concerns
 
-Apply `platform/windows.jsonc` or `platform/linux.jsonc` manually as appropriate. Windows prefers PowerShell 7; Linux defaults to Bash.
+Compose with `-Platform windows` or `-Platform linux` as appropriate. Windows prefers PowerShell 7; Linux defaults to Bash.
 
 ## Machine concerns
 

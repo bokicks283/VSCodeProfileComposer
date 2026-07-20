@@ -80,7 +80,7 @@ The old source settings contained live connection-profile metadata. No connectio
 - Personal spell-check dictionaries were excluded.
 - The source global extension set was reduced to a lighter Suggested Baseline.
 - Measurement-pending and known-bug extensions were documented rather than forced into the baseline.
-- Todo Tree uses portable `rg`; the confirmed personal Windows path became a private placeholder example.
+- The unreliable portable Todo Tree `"rg"` override was removed. The confirmed Windows path shape remains a placeholder example, while real values belong only in ignored machine-local overlays.
 - C++ memory and workspace-symbol tuning were classified as machine/performance decisions.
 - Web framework settings were kept together for MVP only where useful.
 - Unreal settings remain minimal because the current reviewed fragment is only a planning stub.
@@ -109,7 +109,7 @@ Trunk CLI, CI, and repository `.trunk` files remain valid external tooling.
 - framework-specific Web splits
 - Python formatter/linter ownership
 - advanced PowerShell/Pester/PSScriptAnalyzer/module-publishing/administration configuration
-- automated composition and deployment
+- automatic VS Code installation and deployment (artifact composition is implemented)
 
 ## Excluded for privacy or sensitivity
 
