@@ -6,26 +6,40 @@ This MVP intentionally does **not** contain a profile composer application, depl
 
 ## Immediate MVP
 
-The repository contains real configuration for:
+The core manual-validation priorities are:
 
-- Suggested Baseline
 - Default
 - C++
 - Unreal Engine
-- PowerShell
 - Web
 - Python
+
+An additional **PowerShell Development** profile remains available for module authoring, Pester, PSScriptAnalyzer, advanced debugging, administration tooling, and other specialized PowerShell work. It is not required for ordinary scripts.
 
 Each component owns the smallest reusable settings and extension set that explains why it exists. Profiles are explicit recipes; there is no inheritance.
 
 ```text
-Default     = Suggested Baseline + Default
-C++         = Suggested Baseline + C++
-Unreal      = Suggested Baseline + C++ + Unreal
-PowerShell  = Suggested Baseline + PowerShell
-Web         = Suggested Baseline + Web
-Python      = Suggested Baseline + Python
+Default                = Suggested Baseline + Default
+C++                    = Suggested Baseline + C++
+Unreal                 = Suggested Baseline + C++ + Unreal
+Web                    = Suggested Baseline + Web
+Python                 = Suggested Baseline + Python
+PowerShell Development = Suggested Baseline + PowerShell
 ```
+
+## Everyday shell support
+
+Suggested Baseline supports routine work with PowerShell, Bash/Zsh shell scripts, and Windows batch files. Default therefore handles normal editing, navigation, formatting commands, terminal use, and occasional PowerShell debugging without a profile switch.
+
+Recognized everyday shell files include:
+
+```text
+.ps1  .psm1  .psd1
+.sh   .bash  .zsh
+.bat  .cmd
+```
+
+The Microsoft PowerShell extension is currently baseline-owned because PowerShell is used frequently, the source audit treated it as cross-profile, and its recorded activation events are PowerShell language/debug/command triggers rather than eager startup activation. This is a provisional MVP placement, not a measured performance conclusion; revisit it if later Default measurements show a meaningful cost.
 
 ## Repository model
 
@@ -68,10 +82,11 @@ Stable profiles should eventually be exported as private `.code-profile` files. 
 - The `trunk.io` VS Code extension is retired because it measured roughly 15 seconds to activate in the Unreal workspace.
 - Trunk CLI, CI use, and repository `.trunk` configuration remain supported.
 - `trunk.trunkPath` and `trunk.addToolsToPath` are not required shared settings.
+- General terminal behavior and basic shell-language support belong in Suggested Baseline.
 - PowerShell 7 is preferred on Windows.
 - Bash remains the default terminal on Linux; PowerShell is optional there.
 - User settings are the normal focus. Workspace settings are reserved for genuine project or team policy.
 - The bundled `renderMermaidDiagram` contribution error is deferred and is not addressed here.
-- Automation remains deferred until the manual Default, C++, Unreal, PowerShell, Web, and Python profiles are stable.
+- Automation remains deferred until the core manual profiles are stable.
 
 See [Architecture](docs/ARCHITECTURE.md), [Portability](docs/PORTABILITY.md), and [Migration](docs/MIGRATION.md).

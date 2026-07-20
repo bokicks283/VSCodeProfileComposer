@@ -32,13 +32,27 @@ The source repository was reference-only and was not modified.
 - selected Default-only preferences and optional tools → Default
 - general `C_Cpp.*` and language blocks → C++
 - Unreal extension overlay and planning boundary → Unreal
-- PowerShell extension behavior → PowerShell
+- initial PowerShell extension behavior → PowerShell
 - reviewed Web settings → Web
 - reviewed Python/Pylance/environment settings → Python
 - PowerShell 7 preference → Windows platform
 - Bash default and optional PowerShell → Linux platform
 - Unreal and `.trunk` exclusions → Unreal workspace example
 - machine path classes → placeholder examples
+
+## Post-migration shell ownership refinement
+
+After the initial migration, shell-language ownership was refined without redoing the repository:
+
+- `ms-vscode.powershell` moved from `components/powershell/extensions.txt` to `components/suggested-baseline/extensions.txt`.
+- PowerShell file recognition expanded from `.ps1` to `.ps1`, `.psm1`, and `.psd1`.
+- Built-in shell-script associations were added for `.sh`, `.bash`, and `.zsh`.
+- Built-in Windows batch associations were added for `.bat` and `.cmd`.
+- `terminal.explorerKind`, persistent-session scrollback, and shell-integration environment reporting moved from Default to Suggested Baseline because they are portable cross-profile terminal behavior.
+- Command Explorer remained in the PowerShell component as an advanced development preference.
+- The PowerShell recipe display name changed to `PowerShell Development`; Default still composes only Suggested Baseline + Default.
+
+The Microsoft PowerShell extension placement is provisional. Available audit evidence showed prior cross-profile ownership and activation on PowerShell language/debug/commands rather than eager startup, but no reliable timing measurement. No item was left in the advanced component because of a proven performance cost.
 
 ## Transformed
 
@@ -70,16 +84,17 @@ Trunk CLI, CI, and repository `.trunk` files remain valid external tooling.
 - CMake/Make, CodeLLDB, Jupyter/data science
 - framework-specific Web splits
 - Python formatter/linter ownership
+- advanced PowerShell/Pester/PSScriptAnalyzer/module-publishing/administration configuration
 - automated composition and deployment
 
 ## Excluded for privacy or sensitivity
 
 - usernames and personal home paths
-- exact compiler, SDK, Unreal Engine, Kubernetes, and database executable paths
-- credentials, tokens, connection profiles, private hosts, and account state
+- exact compiler, SDK, Unreal Engine, Kubernetes, database, and PowerShell executable paths
+- credentials, tokens, connection profiles, remoting endpoints, private hosts, and account state
 - provider-specific AI account/model selections
 - raw configuration dumps and historical audit captures
 
 ## Generated infrastructure omitted
 
-No generated profile packages, rollout/apply scripts, fragment builders, synchronization scripts, reconciliation systems, performance harnesses, temporary workflows, or artifact trees were migrated.
+No generated profile packages, rollout/apply scripts, fragment builders, synchronization scripts, reconciliation systems, performance harnesses, temporary workflows, or artifact trees were migrated or added during the ownership refinement.

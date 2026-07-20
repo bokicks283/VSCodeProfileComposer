@@ -1,4 +1,4 @@
-name: "PowerShell"
+name: "PowerShell Development"
 components:
   - suggested-baseline
   - powershell

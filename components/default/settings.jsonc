@@ -40,9 +40,6 @@
   "search.searchView.keywordSuggestions": true,
 
   "task.problemMatchers.neverPrompt": false,
-  "terminal.explorerKind": "both",
-  "terminal.integrated.persistentSessionScrollback": 1000,
-  "terminal.integrated.shellIntegration.environmentReporting": true,
 
   "vsicons.dontShowNewVersionMessage": true,
   "workbench.colorTheme": "One Dark Pro Darker",

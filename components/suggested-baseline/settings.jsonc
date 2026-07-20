@@ -26,11 +26,18 @@
 
   "files.associations": {
     ".env": "dotenv",
+    "*.bash": "shellscript",
+    "*.bat": "bat",
     "*.cfg": "properties",
+    "*.cmd": "bat",
     "*.ini": "properties",
     "*.md": "markdown",
     "*.ps1": "powershell",
-    "*.toml": "toml"
+    "*.psd1": "powershell",
+    "*.psm1": "powershell",
+    "*.sh": "shellscript",
+    "*.toml": "toml",
+    "*.zsh": "shellscript"
   },
   "files.eol": "\n",
   "files.insertFinalNewline": true,
@@ -47,6 +54,7 @@
   "security.workspace.trust.enabled": true,
   "security.workspace.trust.untrustedFiles": "open",
 
+  "terminal.explorerKind": "both",
   "terminal.integrated.accessibleViewFocusOnCommandExecution": false,
   "terminal.integrated.allowedLinkSchemes": [
     "file",
@@ -64,7 +72,9 @@
   "terminal.integrated.enableMultiLinePasteWarning": "never",
   "terminal.integrated.enableVisualBell": true,
   "terminal.integrated.initialHint": false,
+  "terminal.integrated.persistentSessionScrollback": 1000,
   "terminal.integrated.scrollback": 10000,
+  "terminal.integrated.shellIntegration.environmentReporting": true,
 
   "todo-tree.filtering.excludeGlobs": [
     "**/vendor/**",

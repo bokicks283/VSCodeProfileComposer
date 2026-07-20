@@ -7,6 +7,7 @@ ibm.output-colorizer
 lacroixdavid1.vscode-format-context-menu
 mikestead.dotenv
 mkxml.vscode-filesize
+ms-vscode.powershell
 redhat.vscode-xml
 redhat.vscode-yaml
 streetsidesoftware.code-spell-checker
