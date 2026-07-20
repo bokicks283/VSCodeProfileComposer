@@ -1,0 +1,7 @@
+{
+  "mssql.enableQueryHistoryCapture": false,
+  "mssql.enableRichExperiences": true,
+  "mssql.objectExplorer.groupBySchema": true,
+  "mssql.persistQueryResultTabs": true,
+  "mssql.splitPaneSelection": "end"
+}

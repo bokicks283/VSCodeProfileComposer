@@ -10,7 +10,7 @@ Browser-development language behavior, frontend file support, Web formatter/lint
 
 ## Does not belong here
 
-Database tools, Python/Flask behavior, PHP language tooling, containers, deployment credentials, or repository-specific Node versions.
+Database tools, database connections, Python/Flask behavior, PHP language tooling, containers, deployment credentials, or repository-specific Node versions.
 
 ## Standalone profile recipe
 
@@ -25,9 +25,11 @@ components:
 
 Web and future Flask, React, Angular/Nx, Web Testing, React Native, and Web + Database profiles.
 
+Database-enabled Web work composes `database` and, when needed, a vendor component. The Web component remains independently usable.
+
 ## Portability classification
 
-Current settings are portable and contain no project paths or package-manager state.
+Current settings are portable and contain no project paths, package-manager state, database state, or account data.
 
 ## Platform concerns
 
@@ -35,15 +37,15 @@ Node and browser executable locations remain platform or machine concerns.
 
 ## Machine concerns
 
-Node installation paths, global package locations, certificates, and browser paths remain private.
+Node installation paths, global package locations, certificates, browser paths, and database connection details remain private.
 
 ## Workspace concerns
 
-Repositories should decide whether ESLint is enabled, which formatter owns each language, and whether Tailwind, Nx, Playwright, Vitest, or React Native applies.
+Repositories should decide whether ESLint is enabled, which formatter owns each language, whether Tailwind, Nx, Playwright, Vitest, or React Native applies, and which database stack is required.
 
 ## Performance concerns
 
-ESLint and Tailwind are included for the MVP but should be disabled or removed in workspaces that do not use them. Large framework extensions were deferred.
+ESLint and Tailwind are included for the MVP but should be disabled or removed in workspaces that do not use them. Database language servers and connection explorers are not loaded by the base Web profile.
 
 ## Deferred decisions
 

@@ -12,7 +12,7 @@ Cross-stack tools the user wants available in the normal Default profile but doe
 
 ## Does not belong here
 
-Advanced PowerShell development behavior, operating-system terminal defaults, heavy language servers, Unreal tooling, database clients, Kubernetes/container tooling, machine paths, or workspace exclusions.
+Advanced PowerShell development behavior, operating-system terminal defaults, heavy language servers, Unreal tooling, database clients, database language servers, connection explorers, vendor-specific database extensions, Kubernetes/container tooling, machine paths, or workspace exclusions.
 
 ## Standalone profile recipe
 
@@ -29,7 +29,7 @@ Only the explicit Default recipe. Focused profiles choose their own components r
 
 ## Portability classification
 
-Settings and extension IDs are portable and contain no account state. Shell and terminal fundamentals come from Suggested Baseline.
+Settings and extension IDs are portable and contain no account state. Shell and terminal fundamentals come from Suggested Baseline. Database support is added only through explicit database components.
 
 ## Platform concerns
 
@@ -37,16 +37,18 @@ Apply `platform/windows.jsonc` or `platform/linux.jsonc` manually as appropriate
 
 ## Machine concerns
 
-Profile-specific sign-ins, AI provider state, Git credentials, absolute executable paths, PowerShell module paths, and remoting endpoints remain local.
+Profile-specific sign-ins, AI provider state, Git credentials, absolute executable paths, database connections, PowerShell module paths, and remoting endpoints remain local.
 
 ## Workspace concerns
 
-Enable GitHub Actions, Thunder Client, or other optional tools only where useful if startup measurements justify further isolation. Project-owned shell analysis or formatting rules remain in the repository.
+Enable GitHub Actions, Thunder Client, or other optional tools only where useful if startup measurements justify further isolation. Project-owned shell analysis, formatting rules, and database connection policy remain in the repository or employer-managed tooling.
 
 ## Performance concerns
 
 GitLens and GitHub Actions were retained as optional tools, not baseline requirements. Measure them in large Unreal workspaces. Microsoft PowerShell remains a provisional baseline extension and should be revisited only if Default measurements show a meaningful cost.
 
+Default intentionally excludes database tooling because ordinary daily editing does not require database background services, language servers, or connection UI.
+
 ## Deferred decisions
 
-Containers, Kubernetes, database tools, advanced Markdown editors, SVG tooling, and project-management extensions remain deferred components.
+Containers, Kubernetes, advanced Markdown editors, SVG tooling, and project-management extensions remain deferred components.

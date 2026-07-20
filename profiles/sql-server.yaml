@@ -1,0 +1,5 @@
+name: "SQL Server"
+components:
+  - suggested-baseline
+  - database
+  - sql-server

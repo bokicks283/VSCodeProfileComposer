@@ -12,12 +12,14 @@ Reviewed from private `bokicks283/VSCodeOptimizationAudit`, primarily:
 - `config/settings/profiles/powershell.jsonc`
 - `config/settings/profiles/web.jsonc`
 - `config/settings/profiles/python.jsonc`
+- `config/settings/profiles/sql-server.jsonc`
 - `config/settings/machine/*.example.jsonc`
 - `config/settings/workspaces/american-cartel.example.jsonc`
 - `config/profile-components/all-profiles-baseline.txt`
 - `config/profile-components/default-global-optional.txt`
 - `config/profile-components/cpp-core.txt`
 - `config/profile-components/unreal.txt`
+- `config/profile-components/sql-server.txt`
 - `config/profile-definitions.json`
 - `docs/FINAL-EXTENSION-PLACEMENT-PLAN.md`
 - `docs/BASE-EXTENSION-STABILITY.md`
@@ -54,6 +56,24 @@ After the initial migration, shell-language ownership was refined without redoin
 
 The Microsoft PowerShell extension placement is provisional. Available audit evidence showed prior cross-profile ownership and activation on PowerShell language/debug/commands rather than eager startup, but no reliable timing measurement. No item was left in the advanced component because of a proven performance cost.
 
+## Post-migration database ownership refinement
+
+Database ownership was refined without redoing the migration:
+
+- Confirmed Suggested Baseline and Default already contained no database settings, clients, language servers, or connection explorers.
+- Confirmed Web and Python were already database-independent.
+- Moved the previously reviewed generic SQLTools extension into a new opt-in `database` component.
+- Preserved the five reviewed `mssql.*` behavior settings in a focused `sql-server` component.
+- Added the official `ms-mssql.mssql` extension to the SQL Server component.
+- Preserved `mongodbLanguageServer.maxNumberOfProblems` in a focused `mongodb` component.
+- Added `mongodb.mongodb-vscode` to the MongoDB component.
+- Added explicit Database, Web + Database, Python + Database, SQL Server, and MongoDB recipes.
+- Default remains Suggested Baseline + Default and does not compose Database.
+
+The old source settings contained live connection-profile metadata. No connection object, connection group, host, database name, username, password, token, certificate, account ID, private cloud resource, or authentication cache was copied or reproduced.
+
+`mdb.mcp.server` remains deferred because its desired ownership and cross-machine behavior are unclear. SQLTools vendor drivers, MySQL autocomplete, Azure Functions SQL bindings, and SQL database-project tooling also remain deferred or project-specific to avoid overlapping clients and speculative components.
+
 ## Transformed
 
 - Generated-file headers were removed because destination files are manually curated.
@@ -64,6 +84,7 @@ The Microsoft PowerShell extension placement is provisional. Available audit evi
 - C++ memory and workspace-symbol tuning were classified as machine/performance decisions.
 - Web framework settings were kept together for MVP only where useful.
 - Unreal settings remain minimal because the current reviewed fragment is only a planning stub.
+- Database settings were separated into generic, SQL Server, and MongoDB ownership without carrying connection data into the public repository.
 
 ## Intentionally retired
 
@@ -79,7 +100,10 @@ Trunk CLI, CI, and repository `.trunk` files remain valid external tooling.
 
 - Project Manager and CODEOWNERS pending repair
 - All Autocomplete, Shift That, and Path Intellisense pending measurement
-- containers, Kubernetes, databases, SQL Server, MongoDB
+- containers and Kubernetes
+- PostgreSQL, MySQL/MariaDB, and SQLite component selection
+- SQLTools vendor-driver ownership
+- `mdb.mcp.server` ownership
 - Flask, PHP, Java, C#, Unity, game/minecraft modding
 - CMake/Make, CodeLLDB, Jupyter/data science
 - framework-specific Web splits
@@ -91,10 +115,11 @@ Trunk CLI, CI, and repository `.trunk` files remain valid external tooling.
 
 - usernames and personal home paths
 - exact compiler, SDK, Unreal Engine, Kubernetes, database, and PowerShell executable paths
-- credentials, tokens, connection profiles, remoting endpoints, private hosts, and account state
+- credentials, tokens, connection profiles, connection groups, database hosts, private database names, remoting endpoints, and account state
+- certificates, account IDs, authentication caches, and employer-specific cloud resources
 - provider-specific AI account/model selections
 - raw configuration dumps and historical audit captures
 
 ## Generated infrastructure omitted
 
-No generated profile packages, rollout/apply scripts, fragment builders, synchronization scripts, reconciliation systems, performance harnesses, temporary workflows, or artifact trees were migrated or added during the ownership refinement.
+No generated profile packages, rollout/apply scripts, fragment builders, synchronization scripts, reconciliation systems, performance harnesses, temporary workflows, or artifact trees were migrated or added during the ownership refinements.

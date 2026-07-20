@@ -33,13 +33,32 @@ Default therefore supports everyday `.ps1`, `.psm1`, `.psd1`, `.sh`, `.bash`, `.
 
 The Microsoft PowerShell placement is provisional: available evidence shows PowerShell language/debug/command activation and prior cross-profile ownership, but no reliable activation-time measurement. Revisit it if later Default measurements show a meaningful cost.
 
+Suggested Baseline and Default deliberately exclude database clients, database language servers, connection explorers, and vendor-specific database extensions.
+
 ## Focused components
 
 - `default` adds optional cross-stack daily tools.
 - `cpp` owns general C/C++.
 - `unreal` owns only Unreal-specific concerns and reuses `cpp`.
-- `web` and `python` own their language/workflow behavior.
+- `web` and `python` own their language/workflow behavior without database tooling.
 - `powershell` owns only advanced PowerShell development concerns such as Command Explorer, module authoring, dedicated testing/analysis, advanced debugging, and administration tooling.
+- `database` owns vendor-neutral SQL tooling.
+- `sql-server` owns the official SQL Server extension and reviewed `mssql.*` behavior.
+- `mongodb` owns MongoDB-specific language-server and explorer behavior.
+
+## Database composition
+
+```text
+Database          = Suggested Baseline + Database
+Web + Database    = Suggested Baseline + Web + Database
+Python + Database = Suggested Baseline + Python + Database
+SQL Server        = Suggested Baseline + Database + SQL Server
+MongoDB           = Suggested Baseline + Database + MongoDB
+```
+
+Generic and vendor-specific concerns remain separate. PostgreSQL, MySQL/MariaDB, and SQLite are planned only; no empty components are created without reviewed content.
+
+Database tooling is opt-in because extensions may add background services, language servers, connection explorers, extra UI, or retained authentication state. This is an architectural isolation decision, not a claim that every database extension has a measured startup penalty.
 
 ## Platform overlays
 
@@ -47,11 +66,11 @@ Committed Windows and Linux files contain reusable OS preferences. Windows prefe
 
 ## Machine-local overlays
 
-Ignored local files contain absolute executable paths, SDK roots, compiler paths, credentials, module paths, remoting endpoints, and device tuning.
+Ignored local files contain absolute executable paths, SDK roots, compiler paths, credentials, database connections, module paths, remoting endpoints, and device tuning.
 
 ## Workspace settings
 
-Repositories own generated-folder exclusions, include paths, compile commands, team formatter policy, PSScriptAnalyzer/Pester rules, module paths, and project-specific extension behavior.
+Repositories own generated-folder exclusions, include paths, compile commands, team formatter policy, PSScriptAnalyzer/Pester rules, module paths, database schema/migration policy, and project-specific extension behavior.
 
 ## Future composition
 

@@ -1,0 +1,5 @@
+name: "MongoDB"
+components:
+  - suggested-baseline
+  - database
+  - mongodb

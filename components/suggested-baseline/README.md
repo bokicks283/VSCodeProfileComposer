@@ -18,7 +18,7 @@ Portable editor and terminal behavior, broadly useful low-overhead format/reposi
 
 ## Does not belong here
 
-PowerShell module publishing, Command Explorer, dedicated Pester/PSScriptAnalyzer workflow, Azure administration tooling, heavy language ecosystems, database clients, container tooling, SDK managers, framework scanners, compiler paths, credentials, or project exclusions.
+PowerShell module publishing, Command Explorer, dedicated Pester/PSScriptAnalyzer workflow, Azure administration tooling, heavy language ecosystems, database clients, database language servers, connection explorers, saved connections, vendor-specific database tooling, container tooling, SDK managers, framework scanners, compiler paths, credentials, or project exclusions.
 
 ## Standalone profile recipe
 
@@ -42,15 +42,17 @@ Windows terminal selection belongs in `platform/windows.jsonc`; Linux terminal s
 
 ## Machine concerns
 
-The current Windows machine requires a machine-local absolute Todo Tree ripgrep path. The real personal path is intentionally excluded from this public repository. PowerShell executable paths, module paths, and remoting endpoints also remain local when they cannot be resolved portably.
+The current Windows machine requires a machine-local absolute Todo Tree ripgrep path. The real personal path is intentionally excluded from this public repository. PowerShell executable paths, module paths, database connection state, and remoting endpoints also remain local when they cannot be resolved portably.
 
 ## Workspace concerns
 
-Generated folders, repository-specific excludes, PSScriptAnalyzer rules, module paths, test tasks, and team-owned shell formatting policy belong in workspace settings.
+Generated folders, repository-specific excludes, PSScriptAnalyzer rules, module paths, test tasks, team-owned shell formatting policy, and repository-owned database policy belong in workspace settings.
 
 ## Performance concerns
 
 The Microsoft PowerShell extension is baseline-owned provisionally because it is frequently used, the source audit classified it as cross-profile, and its recorded activation events are tied to PowerShell language/debug/commands rather than eager startup. No reliable activation-time measurement was found, so this placement must be revisited if later Default measurements show a meaningful cost.
+
+Database extensions remain outside the baseline because they are unnecessary for everyday editing and may add language servers, background services, connection explorers, or retained authentication state.
 
 Project Manager, CODEOWNERS, All Autocomplete, Shift That, and Path Intellisense remain outside this baseline because they still require repair or isolated measurement.
 

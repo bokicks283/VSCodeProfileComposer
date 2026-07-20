@@ -14,7 +14,7 @@ The core manual-validation priorities are:
 - Web
 - Python
 
-An additional **PowerShell Development** profile remains available for module authoring, Pester, PSScriptAnalyzer, advanced debugging, administration tooling, and other specialized PowerShell work. It is not required for ordinary scripts.
+Additional opt-in profiles are available for advanced PowerShell and database work. They are not required for ordinary daily editing.
 
 Each component owns the smallest reusable settings and extension set that explains why it exists. Profiles are explicit recipes; there is no inheritance.
 
@@ -25,6 +25,11 @@ Unreal                 = Suggested Baseline + C++ + Unreal
 Web                    = Suggested Baseline + Web
 Python                 = Suggested Baseline + Python
 PowerShell Development = Suggested Baseline + PowerShell
+Database               = Suggested Baseline + Database
+Web + Database         = Suggested Baseline + Web + Database
+Python + Database      = Suggested Baseline + Python + Database
+SQL Server             = Suggested Baseline + Database + SQL Server
+MongoDB                = Suggested Baseline + Database + MongoDB
 ```
 
 ## Everyday shell support
@@ -40,6 +45,16 @@ Recognized everyday shell files include:
 ```
 
 The Microsoft PowerShell extension is currently baseline-owned because PowerShell is used frequently, the source audit treated it as cross-profile, and its recorded activation events are PowerShell language/debug/command triggers rather than eager startup activation. This is a provisional MVP placement, not a measured performance conclusion; revisit it if later Default measurements show a meaningful cost.
+
+## Opt-in database support
+
+Suggested Baseline and Default intentionally exclude database clients, language servers, connection explorers, saved connections, and vendor-specific database extensions.
+
+Database tooling is activated only through explicit composition because it may add background services, language servers, connection UI, authentication state, and machine- or employer-specific connection details that are unnecessary during ordinary daily editing.
+
+The generic `database` component owns vendor-neutral SQL tooling. SQL Server and MongoDB behavior remains in focused vendor components. Web and Python do not automatically imply database tooling.
+
+Connection strings, hosts, usernames, passwords, tokens, certificates, saved connection objects, account IDs, private database names, and employer resources never belong in portable components.
 
 ## Repository model
 
@@ -83,6 +98,8 @@ Stable profiles should eventually be exported as private `.code-profile` files. 
 - Trunk CLI, CI use, and repository `.trunk` configuration remain supported.
 - `trunk.trunkPath` and `trunk.addToolsToPath` are not required shared settings.
 - General terminal behavior and basic shell-language support belong in Suggested Baseline.
+- Database tooling is opt-in and excluded from Suggested Baseline and Default.
+- Generic database behavior and vendor-specific database behavior remain separate components.
 - PowerShell 7 is preferred on Windows.
 - Bash remains the default terminal on Linux; PowerShell is optional there.
 - User settings are the normal focus. Workspace settings are reserved for genuine project or team policy.
