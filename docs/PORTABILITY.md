@@ -53,13 +53,18 @@ Never commit:
 ## Settings Sync workflow
 
 ```text
-Install VS Code
-→ sign in
-→ enable Settings Sync
-→ enable profile synchronization
-→ select the required profile
-→ apply platform and machine-local values
+Compose a portable .code-profile without a machine overlay
+→ import it into a new named VS Code profile
+→ review and validate the imported resources locally
+→ customize live UI placement in VS Code
+→ review Settings Sync resource selection
+→ enable Sync only when the profile is ready to travel
+→ recreate machine-only values locally
 ```
+
+Settings Sync can synchronize settings, keyboard shortcuts, snippets, tasks, UI state, extensions, and profiles. The generated export intentionally omits UI state, but UI changes made in the imported live profile remain owned by VS Code and may sync afterward.
+
+When adding a second machine, review **Settings Sync: Configure** before enabling synchronization. If unexpected changes occur, pause further synchronization, identify the affected resource, inspect **Settings Sync: Show Synced Data**, and back up both machines before restoring or resetting anything. The composer never controls Settings Sync.
 
 Default already includes everyday PowerShell, Bash/Zsh shell-script, and Windows batch support through Suggested Baseline. A user moving between Windows, Linux, family machines, and mixed repositories should not need a separate profile merely to edit normal scripts.
 
@@ -67,8 +72,9 @@ Database tooling is selected only when the active profile composes `database` or
 
 ## New-machine checklist
 
+- Generate or select an export composed with the matching platform overlay.
+- Import it into a new named profile and review the selected resources.
 - Confirm the expected profile is selected.
-- Apply the matching platform settings.
 - Confirm Windows opens PowerShell 7 or Linux opens Bash.
 - Recreate machine-local executable and module paths.
 - Sign into only the required extensions.
@@ -77,7 +83,9 @@ Database tooling is selected only when the active profile composes `database` or
 
 ## Profile export backups
 
-Export stable profiles as `.code-profile`, inspect them, and store them privately. Treat database-enabled exports as sensitive until verified because extensions may include account or connection state.
+Generate portable `.code-profile` artifacts under ignored `build/profiles/` with `-ExportCodeProfile`. Inspect them before import or private storage. A composer-generated database profile contains only repository-owned settings and extension identifiers, but still review it before use.
+
+Separately, a profile exported from live VS Code can contain additional runtime-owned resources or machine/account state. Treat live exports as sensitive until inspected and store them privately rather than using them as canonical repository source.
 
 ## Temporary family or friend machines
 

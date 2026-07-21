@@ -2,6 +2,8 @@
 
 This repository contains reusable VS Code settings and extension components plus a safe PowerShell 7 composer. One command validates the source model and materializes a complete profile without reading or changing the user's VS Code installation.
 
+For a complete first-run walkthrough, profile-selection guide, import procedure, Settings Sync precautions, maintenance workflow, and troubleshooting reference, start with [Complete usage guide](docs/USAGE.md).
+
 ## Quick start
 
 Requirements:
@@ -78,8 +80,9 @@ For a portable export, omit `-MachineFile`. Supplying a machine overlay includes
 Import manually:
 
 ```text
-Open Profiles
-→ Import Profile
+File → Preferences → Profiles
+→ New Profile dropdown
+→ Import Profile...
 → Select the generated .code-profile
 → Review contents
 → Create Profile
@@ -117,4 +120,4 @@ pwsh -NoProfile -Command "Invoke-Pester -Path ./tests -Output Detailed"
 
 Direct installation into VS Code is intentionally deferred. `.code-profile` generation is an export only and never invokes import. The composer never edits VS Code user data, profile storage, extensions, Settings Sync, or operating-system configuration. Settings Sync remains the primary cross-machine delivery mechanism for imported active profiles.
 
-See [Composer details](docs/COMPOSER.md), [Architecture](docs/ARCHITECTURE.md), [Portability](docs/PORTABILITY.md), and [Migration](docs/MIGRATION.md).
+See [Complete usage guide](docs/USAGE.md), [Composer details](docs/COMPOSER.md), [Architecture](docs/ARCHITECTURE.md), [Portability](docs/PORTABILITY.md), and [Migration](docs/MIGRATION.md).

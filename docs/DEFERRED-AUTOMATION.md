@@ -42,3 +42,5 @@ Validate Database, SQL Server, and MongoDB separately in disposable or non-sensi
 Validate PowerShell Development separately when advanced module, testing, analysis, debugging, publishing, or administration workflows become active.
 
 Do not add speculative installation scripts “for later.”
+
+Follow the [complete usage guide](USAGE.md) for the validation sequence, safe manual import, Settings Sync precautions, and routine maintenance workflow.

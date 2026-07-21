@@ -4,6 +4,8 @@
 
 `scripts/Compose-Profile.ps1` is the single supported entry point. It validates and composes repository-owned artifacts only. Runtime composition requires PowerShell 7 and built-in .NET APIs; YAML support is intentionally limited to the current recipe schema, so no YAML module is required.
 
+For a task-oriented walkthrough rather than this technical reference, see [Complete usage guide](USAGE.md).
+
 ## Commands
 
 ```powershell
@@ -95,17 +97,20 @@ pwsh ./scripts/Compose-Profile.ps1 -Profile unreal -Platform windows -MachineFil
 
 Machine values are included in the settings payload, but never copied into export metadata. The manifest records `portable` or `machine-overlay-included`, the export filename and SHA-256 hash, `managed-by-vscode` UI policy, and `manual-vscode-profile-import` import method.
 
-Import through VS Code:
+Import through VS Code's Profiles editor:
 
 ```text
-Open Profiles
-→ Import Profile
+File → Preferences → Profiles
+→ New Profile dropdown
+→ Import Profile...
 → Select the generated .code-profile
 → Review contents
 → Create Profile
 ```
 
 Review the import preview. Re-import behavior can create or replace profile resources depending on the selected VS Code workflow; the composer does not automate that choice.
+
+See the official [VS Code Profiles documentation](https://code.visualstudio.com/docs/configure/profiles) for the current UI workflow. The export schema was verified against the installed stable version named above; because the format has no version field, preview every import after a VS Code upgrade.
 
 ## Validation and security
 

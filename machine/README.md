@@ -8,6 +8,8 @@ Apply the local file explicitly during composition:
 pwsh ./scripts/Compose-Profile.ps1 -Profile unreal -Platform windows -MachineFile ./machine/local/windows.jsonc
 ```
 
+If `-ExportCodeProfile` is also supplied, these values are included in the export and the manifest classifies it as `machine-overlay-included`. Omit `-MachineFile` when generating a portable cross-machine export.
+
 Typical values:
 
 - absolute ripgrep path for Todo Tree
@@ -24,3 +26,5 @@ The source audit confirmed a working Todo Tree ripgrep path under the current Wi
 ```
 
 Never commit credentials, tokens, connection strings, private hosts, or personal absolute paths.
+
+See [Complete usage guide](../docs/USAGE.md) for setup, ignore verification, portability, and import guidance.

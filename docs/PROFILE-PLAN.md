@@ -89,6 +89,8 @@ No empty vendor component is created without real reviewed content.
 
 ## Manual validation order
 
+Import each generated `.code-profile` into a new, clearly named test profile and review the selected resources before creating it. Do not replace the active Default profile during initial validation.
+
 1. Suggested Baseline and Default in a small mixed repository, including common shell files.
 2. Default cold-start measurements.
 3. C++ in a normal native C++ repository.

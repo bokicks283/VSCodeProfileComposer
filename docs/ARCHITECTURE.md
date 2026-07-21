@@ -9,14 +9,13 @@ A profile is an explicit YAML recipe. Profiles do not inherit other profiles. Th
 ## Layers
 
 ```text
-Portable component settings
-→ explicit profile recipe
+Recipe components in declared order
+→ optional portable profile override
 → platform settings
 → machine-local settings
-→ workspace settings
 ```
 
-The composer materializes this order through the machine-local layer. Workspace settings stay separate. Manual VS Code profiles and Settings Sync remain the runtime delivery mechanism.
+The composer materializes exactly this order. Workspace settings stay separate and are never appended to a personal profile. Manual VS Code profile import and, when deliberately enabled, Settings Sync remain the runtime delivery mechanisms.
 
 ## Suggested Baseline
 
@@ -74,4 +73,4 @@ Repositories own generated-folder exclusions, include paths, compile commands, t
 
 ## Generated artifacts
 
-`scripts/Compose-Profile.ps1` materializes reviewable artifacts under ignored `build/profiles/`. It does not install them, create exports, control Settings Sync, or read live VS Code state. Source components and recipes remain canonical.
+`scripts/Compose-Profile.ps1` materializes reviewable artifacts under ignored `build/profiles/`. When explicitly requested with `-ExportCodeProfile`, it also creates a manual-import `.code-profile` containing composed settings, extension identifiers, and keybindings. It does not import profiles, install extensions, control Settings Sync, compose UI state, or read live VS Code state. Source components and recipes remain canonical.
