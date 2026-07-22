@@ -6,7 +6,7 @@ BeforeAll {
         param([Parameter(Mandatory)][string]$Name)
         $fixture = Join-Path $TestDrive $Name
         [System.IO.Directory]::CreateDirectory($fixture) | Out-Null
-        foreach ($directory in @('components', 'profiles', 'platform', 'machine')) {
+        foreach ($directory in @('components', 'profiles', 'platform', 'machine', 'global')) {
             Copy-Item -LiteralPath (Join-Path $script:RepositoryRoot $directory) -Destination $fixture -Recurse
         }
         return $fixture
@@ -16,6 +16,63 @@ BeforeAll {
         param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][AllowEmptyString()][string]$Content)
         [System.IO.Directory]::CreateDirectory((Split-Path -Parent $Path)) | Out-Null
         [System.IO.File]::WriteAllText($Path, $Content, [System.Text.UTF8Encoding]::new($false))
+    }
+}
+
+Describe 'Global settings ownership' {
+    It 'keeps every global value paired with one unique apply-to-all entry' {
+        $path = Join-Path $script:RepositoryRoot 'global/settings.jsonc'
+        $settings = ConvertFrom-JsonC ([System.IO.File]::ReadAllText($path))
+        $ids = @($settings['workbench.settings.applyToAllProfiles'])
+        $ids.Count | Should -BeGreaterThan 0
+        @($ids | Sort-Object -Unique).Count | Should -Be $ids.Count
+        foreach ($id in $ids) { $settings.Contains($id) | Should -BeTrue }
+        @($settings.Keys | Where-Object { $_ -ne 'workbench.settings.applyToAllProfiles' }).Count | Should -Be $ids.Count
+    }
+
+    It 'rejects globally owned settings in profile component sources' {
+        $fixture = New-ComposerFixture 'global-setting-in-component'
+        $path = Join-Path $fixture 'components/default/settings.jsonc'
+        Write-TestFile $path '{ "terminal.integrated.confirmOnKill": "always" }'
+        (Test-ComposerRepository $fixture).errors.code | Should -Contain 'global-setting-in-profile-source'
+    }
+
+    It 'rejects missing global values and unlisted global values' {
+        $fixture = New-ComposerFixture 'invalid-global-settings'
+        $path = Join-Path $fixture 'global/settings.jsonc'
+        Write-TestFile $path '{ "workbench.settings.applyToAllProfiles": ["one.setting"], "other.setting": true }'
+        $result = Test-ComposerRepository $fixture
+        $result.errors.code | Should -Contain 'missing-global-setting-value'
+        $result.errors.code | Should -Contain 'unlisted-global-setting'
+    }
+
+    It 'generates a separate built-in Default settings artifact' {
+        $fixture = New-ComposerFixture 'global-output'
+        $result = Invoke-GlobalSettingsComposition $fixture
+        $output = Join-Path $fixture 'build/global'
+        Test-Path -LiteralPath (Join-Path $output 'settings.json') | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $output 'manifest.json') | Should -BeTrue
+        $settings = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $output 'settings.json')))
+        $result.settingCount | Should -Be @($settings['workbench.settings.applyToAllProfiles']).Count
+        $settings['terminal.integrated.confirmOnKill'] | Should -Be 'never'
+    }
+
+    It 'omits globally applied settings from generated named profiles' {
+        $fixture = New-ComposerFixture 'global-not-in-profile'
+        Invoke-ProfileComposition $fixture default -Platform windows | Out-Null
+        $settings = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'build/profiles/default/settings.json')))
+        $settings.Contains('terminal.integrated.confirmOnKill') | Should -BeFalse
+        $settings.Contains('workbench.settings.applyToAllProfiles') | Should -BeFalse
+    }
+
+    It 'preserves previous global output when regeneration fails' {
+        $fixture = New-ComposerFixture 'global-failed-preserves'
+        Invoke-GlobalSettingsComposition $fixture | Out-Null
+        $settingsPath = Join-Path $fixture 'build/global/settings.json'
+        $before = [System.IO.File]::ReadAllText($settingsPath)
+        Write-TestFile (Join-Path $fixture 'global/settings.jsonc') '{ invalid jsonc'
+        { Invoke-GlobalSettingsComposition $fixture } | Should -Throw
+        [System.IO.File]::ReadAllText($settingsPath) | Should -BeExactly $before
     }
 }
 
@@ -206,6 +263,26 @@ Describe 'Layer ordering and safe output' {
         Invoke-ProfileComposition $fixture default -Platform windows -MachineFile $machine | Out-Null
         $settings = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'build/profiles/default/settings.json')))
         $settings['terminal.integrated.defaultProfile.windows'] | Should -Be 'Machine Shell'
+    }
+
+    It 'selects a named machine overlay and records its identity' {
+        $fixture = New-ComposerFixture 'named-machine'
+        Write-TestFile (Join-Path $fixture 'machine/local/gaming-server.jsonc') '{ "todo-tree.ripgrep.ripgrep": "D:\\Tools\\rg.exe" }'
+        $result = Invoke-ProfileComposition $fixture default -Platform windows -Machine gaming-server
+        $settings = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'build/profiles/default/settings.json')))
+        $manifest = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'build/profiles/default/manifest.json')))
+        $settings['todo-tree.ripgrep.ripgrep'] | Should -Be 'D:\Tools\rg.exe'
+        $result.machineId | Should -Be 'gaming-server'
+        $manifest.machineOverlay.id | Should -Be 'gaming-server'
+        $manifest.machineOverlay.selection | Should -Be 'named-machine'
+    }
+
+    It 'lists named machines and rejects missing or conflicting selections' {
+        $fixture = New-ComposerFixture 'machine-selection-validation'
+        Write-TestFile (Join-Path $fixture 'machine/local/main-windows.jsonc') '{}'
+        (Get-MachineDefinitions $fixture).Id | Should -Contain 'main-windows'
+        (Test-ComposerRepository $fixture -Machine missing).errors.code | Should -Contain 'missing-machine-overlay'
+        { Invoke-ProfileComposition $fixture default -Machine main-windows -MachineFile './machine/local/main-windows.jsonc' } | Should -Throw '*cannot be used together*'
     }
 
     It 'replaces only the generated target directory' {

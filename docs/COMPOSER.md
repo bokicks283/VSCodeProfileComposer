@@ -10,9 +10,11 @@ For a task-oriented walkthrough rather than this technical reference, see [Compl
 
 ```powershell
 pwsh ./scripts/Compose-Profile.ps1 -Validate
+pwsh ./scripts/Compose-Profile.ps1 -Global
+pwsh ./scripts/Compose-Profile.ps1 -ListMachines
 pwsh ./scripts/Compose-Profile.ps1 -Profile default
 pwsh ./scripts/Compose-Profile.ps1 -Profile unreal -Platform windows
-pwsh ./scripts/Compose-Profile.ps1 -Profile unreal -Platform windows -MachineFile ./machine/local/windows.jsonc
+pwsh ./scripts/Compose-Profile.ps1 -Profile unreal -Platform windows -Machine windows
 pwsh ./scripts/Compose-Profile.ps1 -All -Platform windows
 pwsh ./scripts/Compose-Profile.ps1 -Profile default -Platform windows -DryRun
 pwsh ./scripts/Compose-Profile.ps1 -Profile default -Platform windows -ExportCodeProfile
@@ -23,14 +25,30 @@ Use `-Strict` when warnings, including duplicate extension declarations, should 
 
 ## Inputs and order
 
-For each recipe, the composer reads composable files in this order:
+Global settings are owned separately by `global/settings.jsonc` and generated to `build/global/settings.json`. For each named-profile recipe, the composer reads composable files in this order:
 
 1. Component `settings.jsonc`, `extensions.txt`, and `keybindings.jsonc` files in declared recipe order.
 2. Optional portable `profiles/<profile-id>.settings.jsonc`.
 3. Optional `platform/<platform>.jsonc`.
-4. Optional explicitly supplied machine settings file.
+4. Optional explicitly selected named machine or machine settings file.
 
 Missing component input files are valid. Missing explicitly requested platform or machine overlays are errors. README files and workspace examples are never composed.
+
+## Global settings
+
+`global/settings.jsonc` contains `workbench.settings.applyToAllProfiles` and exactly one value for every listed setting. Repository validation rejects duplicates, missing values, unlisted values, and declarations of globally owned settings in components, profile overrides, or platform overlays.
+
+`pwsh ./scripts/Compose-Profile.ps1 -Global` safely generates:
+
+```text
+build/global/
+├─ settings.json
+└─ manifest.json
+```
+
+This artifact targets VS Code's built-in Default profile. It is not included in `.code-profile` exports because those create named profiles, where VS Code ignores these values. Apply it manually by merging it into **Preferences: Open Application Settings (JSON)**.
+
+Named machine overlays use `machine/local/<id>.jsonc`. `-ListMachines` discovers available IDs and `-Machine <id>` selects one. The manifest records the ID and selection mode. `-MachineFile` remains supported for an explicit path.
 
 The recipe parser accepts the repository's narrow schema:
 
@@ -100,7 +118,7 @@ pwsh ./scripts/Compose-Profile.ps1 -Profile unreal -Platform windows -ExportCode
 Same-machine or compatible-machine export with explicit local settings:
 
 ```powershell
-pwsh ./scripts/Compose-Profile.ps1 -Profile unreal -Platform windows -MachineFile ./machine/local/windows.jsonc -ExportCodeProfile
+pwsh ./scripts/Compose-Profile.ps1 -Profile unreal -Platform windows -Machine windows -ExportCodeProfile
 ```
 
 Machine values are included in the settings payload, but never copied into export metadata. The manifest records the export filename and SHA-256 hash, portability classification, UI-state policy, and `manual-vscode-profile-import` import method. A UI-seeded artifact is classified `ui-state-seed-included`, or `machine-overlay-and-ui-state-seed-included` when both private inputs are used.
@@ -122,13 +140,13 @@ See the official [VS Code Profiles documentation](https://code.visualstudio.com/
 
 ## Validation and security
 
-Repository validation detects missing or duplicate recipe components, invalid/unsupported YAML, invalid JSONC roots, invalid and duplicate extension IDs, missing requested overlays, tracked `machine/local/` data, common personal home paths in portable settings, likely portable secrets, duplicate or unsafe profile IDs, unsafe export filenames, unsupported UI-state sources, and output paths outside `build/profiles/`.
+Repository validation detects malformed global ownership, globally owned settings in profile sources, missing or duplicate recipe components, invalid/unsupported YAML, invalid JSONC roots, invalid and duplicate extension IDs, missing requested overlays, tracked `machine/local/` data, common personal home paths in portable settings, likely portable secrets, duplicate or unsafe profile IDs, unsafe export filenames, unsupported UI-state sources, and output paths outside `build/`.
 
 Machine example placeholders are parsed but are excluded from portable-component path violations. Real values belong only in ignored `machine/local/` files. Reports use repository-relative paths where possible and do not expose values from sensitive-looking setting paths.
 
 ## Safe replacement and recovery
 
-The composer writes the six core files and any requested export into a unique temporary directory under `build/profiles/`, reparses generated JSON (including nested export resources), hashes the completed artifacts, and only then swaps the target profile directory. If validation or generation fails, the previous target and export remain unchanged. If replacement itself fails after moving the old target aside, the composer attempts to restore it before surfacing the error.
+The composer writes global and profile artifacts into unique temporary directories under `build/`, reparses generated JSON (including nested export resources), hashes completed artifacts, and only then swaps each target directory. If validation or generation fails, the previous target remains unchanged. If replacement itself fails after moving the old target aside, the composer attempts to restore it before surfacing the error.
 
 Recomposition affects only the selected generated profile directory. `-DryRun` creates no build directory or files.
 
@@ -146,7 +164,8 @@ The suite covers recipe and JSONC parsing, validation, every merge mode, redacti
 
 - `invalid-jsonc`: fix the named source; comments and trailing commas are supported, malformed strings and delimiters are not.
 - `invalid-yaml`: keep the recipe to `name` plus an indented `components` list.
-- `missing-platform-overlay` or `missing-machine-overlay`: check the explicit argument. Relative machine paths resolve from the repository root.
+- `missing-platform-overlay` or `missing-machine-overlay`: check the explicit argument; use `-ListMachines` for named local overlays.
+- `global-setting-in-profile-source`: remove the setting from the component, profile override, or platform file and edit it in `global/settings.jsonc`.
 - `portable-absolute-path`: move the setting into `machine/local/` and pass it explicitly.
 - `invalid-export-filename`: keep the profile display name free of path separators, traversal sequences, and reserved Windows names.
 - `unsupported-ui-state-source`: remove the component-level file; starting UI state is accepted only through explicit `-UiStateFromProfile` pass-through.

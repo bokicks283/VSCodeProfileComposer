@@ -21,8 +21,12 @@ pwsh ./scripts/Compose-Profile.ps1 -Validate
 # Compose one profile.
 pwsh ./scripts/Compose-Profile.ps1 -Profile default -Platform windows
 
-# Compose with a private machine-local overlay.
-pwsh ./scripts/Compose-Profile.ps1 -Profile unreal -Platform windows -MachineFile ./machine/local/windows.jsonc
+# List and select private machine-local overlays by ID.
+pwsh ./scripts/Compose-Profile.ps1 -ListMachines
+pwsh ./scripts/Compose-Profile.ps1 -Profile unreal -Platform windows -Machine windows
+
+# Generate only the settings owned by VS Code's built-in Default profile.
+pwsh ./scripts/Compose-Profile.ps1 -Global
 
 # Compose every valid recipe.
 pwsh ./scripts/Compose-Profile.ps1 -All -Platform windows
@@ -45,7 +49,8 @@ Warnings are informational by default. Add `-Strict` to make warnings fail valid
 ## Repository model
 
 ```text
-Default shared base
+Global settings owned by VS Code's built-in Default profile
+→ Default shared base
 → additional recipe components in declared order
 → optional profiles/<id>.settings.jsonc override
 → platform/<platform>.jsonc
@@ -60,7 +65,7 @@ Default is the shared first component in every recipe, so its 32 extensions and 
 
 ## Output and safety
 
-Composition writes to `build/profiles/<id>/`:
+Composition writes global settings to `build/global/` and named profiles to `build/profiles/<id>/`:
 
 ```text
 settings.json
@@ -75,6 +80,8 @@ validation.json
 
 Generated JSON is standard JSON. Each build is first written and validated in a temporary directory. The prior target is replaced only after the new package is complete; a failed composition preserves the previous valid output. Build output is ignored and is never canonical source.
 
+Settings listed in `global/settings.jsonc` are deliberately absent from named-profile output. VS Code ignores copies of those settings and uses the built-in Default profile's value instead. Edit the repository global source, generate `build/global/settings.json`, and manually merge it into **Preferences: Open Application Settings (JSON)**.
+
 `overrides.json` records replaced setting paths, values, and source layers. Values whose paths look sensitive are redacted in reports, while explicitly supplied machine-local values remain intact in the generated `settings.json`.
 
 Repository validation checks recipes, JSONC/YAML structure, extension IDs and duplicates, portable personal paths and likely secrets, requested overlays, ignored machine-local boundaries, profile IDs, and output containment.
@@ -83,7 +90,7 @@ Repository validation checks recipes, JSONC/YAML structure, extension IDs and du
 
 Add `-ExportCodeProfile` to one-profile or `-All` composition. For example, Default writes `build/profiles/default/Default.code-profile`; Unreal writes `build/profiles/unreal/Unreal-Engine.code-profile`. The export contains the fully composed settings, recipe-owned extension identifiers, and generated keybindings. VS Code handles extension acquisition during its normal import workflow—composition never installs extensions.
 
-For a portable export, omit both `-MachineFile` and `-UiStateFromProfile`. Supplying a machine overlay includes those explicitly requested settings and classifies the export as `machine-overlay-included`, so it is intended for the same or a compatible machine.
+For a portable export, omit `-Machine`, `-MachineFile`, and `-UiStateFromProfile`. Supplying a machine overlay includes those explicitly requested settings and classifies the export as `machine-overlay-included`, so it is intended for the same or a compatible machine.
 
 `-UiStateFromProfile` requires `-ExportCodeProfile`. It reads a manually exported `.code-profile`, validates its `globalState` resource, and copies only that opaque resource into the new export. Source settings, extensions, keybindings, name, and source path are not copied. This is a one-time starting snapshot, not inheritance: VS Code owns each profile's UI after import, later layout changes do not propagate, and views introduced by other extensions use their normal defaults. A seeded export is private and must be reviewed because VS Code `globalState` can include extension or account-related state.
 
@@ -104,13 +111,15 @@ By default, UI placement is not included. When an explicit UI seed is supplied, 
 
 ## Machine-local setup
 
-Copy the appropriate example and keep the result ignored:
+Create one ignored file per computer. Its filename is the machine ID:
 
 ```powershell
-Copy-Item ./machine/windows.example.jsonc ./machine/local/windows.jsonc
+Copy-Item ./machine/windows.example.jsonc ./machine/local/main-windows.jsonc
+pwsh ./scripts/Compose-Profile.ps1 -ListMachines
+pwsh ./scripts/Compose-Profile.ps1 -Profile default -Platform windows -Machine main-windows
 ```
 
-Replace placeholders locally, then pass the file with `-MachineFile`. In particular, Todo Tree's confirmed working Windows ripgrep path is machine-specific; no portable `"rg"` override is present in Default.
+Replace placeholders locally, then select the filename without `.jsonc` using `-Machine`. `-MachineFile` remains available for an exceptional explicit path. In particular, Todo Tree's confirmed working Windows ripgrep path is machine-specific; no portable `"rg"` override is present in Default.
 
 ## Tests
 

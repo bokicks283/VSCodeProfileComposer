@@ -3,9 +3,10 @@
 ## Implemented now
 
 - The narrow artifact composer is implemented in `scripts/Compose-Profile.ps1`.
-- It validates repository inputs and composes settings, extensions, keybindings, manifests, override reports, and validation reports under ignored `build/profiles/`.
+- It validates repository inputs, generates built-in Default settings under ignored `build/global/`, and composes named-profile settings, extensions, keybindings, manifests, override reports, and validation reports under ignored `build/profiles/`.
 - Composition is temporary-directory-first, validated before replacement, idempotent, and isolated from live VS Code user data.
 - Platform and explicitly supplied ignored machine overlays are supported.
+- Named machine IDs under `machine/local/` can be listed and selected explicitly; private overlays remain outside Git and Settings Sync.
 - Reviewed `.code-profile` artifacts can be generated explicitly for manual import through VS Code.
 - Exported resources are limited to composed settings, extensions, keybindings, profile identity, and an optional explicitly supplied opaque UI-state seed; VS Code owns live UI state after import.
 - Pester tests cover merge behavior, validation, safe replacement, and current core profiles.

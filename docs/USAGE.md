@@ -4,7 +4,7 @@ This guide is the practical, start-to-finish workflow for using and maintaining 
 
 ## What the composer does
 
-The composer validates portable repository sources and generates complete profile artifacts under `build/profiles/`. With `-ExportCodeProfile`, it also creates a `.code-profile` file that VS Code can import through its Profiles editor. An explicitly supplied private export may seed a one-time starting UI layout.
+The composer validates portable repository sources, generates built-in Default settings under `build/global/`, and generates complete named-profile artifacts under `build/profiles/`. With `-ExportCodeProfile`, it also creates a `.code-profile` file that VS Code can import through its Profiles editor. An explicitly supplied private export may seed a one-time starting UI layout.
 
 The composer never:
 
@@ -66,27 +66,35 @@ Run all commands from the repository root.
    pwsh ./scripts/Compose-Profile.ps1 -Validate
    ```
 
-2. Preview the Default build for Windows:
+2. Generate the settings owned by VS Code's built-in Default profile:
+
+   ```powershell
+   pwsh ./scripts/Compose-Profile.ps1 -Global
+   ```
+
+   Review `build/global/settings.json`. In VS Code, run **Preferences: Open Application Settings (JSON)** and merge these values into that file. Do not replace unrelated existing settings.
+
+3. Preview the named Default build for Windows:
 
    ```powershell
    pwsh ./scripts/Compose-Profile.ps1 -Profile default -Platform windows -DryRun
    ```
 
-3. Compose Default:
+4. Compose Default:
 
    ```powershell
    pwsh ./scripts/Compose-Profile.ps1 -Profile default -Platform windows
    ```
 
-4. Inspect `build/profiles/default/`. This step does not affect VS Code.
+5. Inspect `build/profiles/default/`. This step does not affect VS Code.
 
-5. When you want a manually importable file, compose again with export enabled:
+6. When you want a manually importable file, compose again with export enabled:
 
    ```powershell
    pwsh ./scripts/Compose-Profile.ps1 -Profile default -Platform windows -ExportCodeProfile
    ```
 
-6. Import `build/profiles/default/Default.code-profile` into a new, clearly named VS Code profile. Review the import form before selecting **Create**.
+7. Import `build/profiles/default/Default.code-profile` into a new, clearly named VS Code profile. Review the import form before selecting **Create**.
 
 ## Command reference
 
@@ -102,7 +110,27 @@ Validate an explicitly selected overlay as well:
 
 ```powershell
 pwsh ./scripts/Compose-Profile.ps1 -Validate -Platform windows
-pwsh ./scripts/Compose-Profile.ps1 -Validate -Platform windows -MachineFile ./machine/local/windows.jsonc
+pwsh ./scripts/Compose-Profile.ps1 -Validate -Platform windows -Machine windows
+```
+
+### Generate built-in Default settings
+
+```powershell
+pwsh ./scripts/Compose-Profile.ps1 -Global
+```
+
+This writes `build/global/settings.json` and `manifest.json`. The source is `global/settings.jsonc`. These settings are excluded from named profiles because VS Code applies the built-in Default profile's value everywhere and ignores duplicates.
+
+To change a gray “applied in all profiles” setting, edit `global/settings.jsonc`, regenerate, then merge the changed value into **Preferences: Open Application Settings (JSON)**. You can also change it directly through VS Code's **Apply Setting to all Profiles** action; bring the final value back into the repository source afterward.
+
+This follows VS Code's documented [Apply a setting to all profiles](https://code.visualstudio.com/docs/configure/profiles#_apply-a-setting-to-all-profiles) behavior. **Open User Settings (JSON)** opens the active named profile; **Open Application Settings (JSON)** opens the built-in Default profile that owns these values.
+
+Profiles imported before this split can still contain ignored copies. Re-import a newly generated profile, or open that profile's **User Settings (JSON)** and remove the keys listed in `global/settings.jsonc`. The composer does not edit an existing live profile automatically.
+
+Preview without writing:
+
+```powershell
+pwsh ./scripts/Compose-Profile.ps1 -Global -DryRun
 ```
 
 ### Compose one profile
@@ -160,32 +188,38 @@ pwsh ./scripts/Compose-Profile.ps1 -Profile unreal -Platform windows -ExportCode
 
 Use this form when the export should work on multiple compatible Windows machines.
 
-A machine-specific build explicitly adds a private overlay last:
+A machine-specific build explicitly selects a private overlay last. Create one file per computer; the filename without `.jsonc` is its ID:
 
 ```powershell
-Copy-Item ./machine/windows.example.jsonc ./machine/local/windows.jsonc
-pwsh ./scripts/Compose-Profile.ps1 -Profile unreal -Platform windows -MachineFile ./machine/local/windows.jsonc -ExportCodeProfile
+Copy-Item ./machine/windows.example.jsonc ./machine/local/main-windows.jsonc
+Copy-Item ./machine/windows.example.jsonc ./machine/local/gaming-server.jsonc
+pwsh ./scripts/Compose-Profile.ps1 -ListMachines
+pwsh ./scripts/Compose-Profile.ps1 -Profile unreal -Platform windows -Machine main-windows -ExportCodeProfile
 ```
 
 Edit the copied file locally and replace placeholders. Confirm Git ignores it:
 
 ```powershell
-git check-ignore ./machine/local/windows.jsonc
+git check-ignore ./machine/local/main-windows.jsonc
 ```
 
 The machine overlay may contain explicitly requested values such as executable or SDK paths. Those values appear in generated settings and in the `.code-profile` settings payload, but sensitive-looking values are redacted from reports and are not copied into export metadata.
 
-An export generated with `-MachineFile` is classified as `machine-overlay-included`. Use it only on the same machine or a compatible machine. Never commit the local overlay or generated export.
+An export generated with `-Machine` or `-MachineFile` is classified as `machine-overlay-included`. The manifest records the machine ID and whether it was selected by name or explicit path. Use it only on the same machine or a compatible machine. Never commit the local overlay or generated export.
+
+`-MachineFile` remains available for backward compatibility and exceptional paths. Do not combine it with `-Machine`.
+
+Machine files are deliberately not synchronized by Git or Settings Sync. Recreate them from the committed examples on each computer or store them in a separate secure private backup. You can build for another computer only if its local overlay is present on the current computer.
 
 ## Composition and merge order
 
-The composer applies sources in this order:
+Global and profile settings have separate ownership. `global/settings.jsonc` generates the built-in Default artifact. Named profiles then apply sources in this order:
 
 ```text
 recipe components in declared order
 → optional profiles/<profile-id>.settings.jsonc
 → optional platform/<platform>.jsonc
-→ optional explicitly supplied machine file
+→ optional explicitly selected named machine or machine file
 ```
 
 Later layers win.
@@ -216,6 +250,14 @@ build/profiles/default/
 ```
 
 The six core files are always generated. The `.code-profile` file is present only when `-ExportCodeProfile` is requested.
+
+Global output is separate:
+
+```text
+build/global/
+├─ settings.json
+└─ manifest.json
+```
 
 - `settings.json` is the merged standard JSON settings object.
 - `extensions.txt` contains one deterministic extension ID per line.
@@ -284,7 +326,7 @@ Settings Sync can synchronize settings, keyboard shortcuts, snippets, tasks, UI 
 
 Use this conservative sequence on a new machine:
 
-1. Compose a portable `.code-profile` without `-MachineFile`.
+1. Compose a portable `.code-profile` without `-Machine`, `-MachineFile`, or a UI-state seed.
 2. Import it into a new named profile and validate it locally.
 3. Customize the live profile's UI.
 4. Review the resources enabled in **Settings Sync: Configure** before signing another machine into the same account.
@@ -299,12 +341,13 @@ The composer never reads, writes, pauses, enables, disables, or resets Settings 
 
 ### Change an existing profile
 
-1. Find the owning component using `docs/COMPONENT-GUIDELINES.md`.
-2. Edit its `settings.jsonc`, `extensions.txt`, or `keybindings.jsonc`.
-3. Put a portable one-profile exception in `profiles/<profile-id>.settings.jsonc` only when component ownership would be misleading.
-4. Put reusable OS behavior in `platform/windows.jsonc` or `platform/linux.jsonc`.
-5. Put private absolute paths and device values in an ignored machine overlay.
-6. Validate, dry-run, compose, inspect overrides, and run tests.
+1. If the setting should use one value in every profile, edit `global/settings.jsonc` and keep it in `workbench.settings.applyToAllProfiles`.
+2. Otherwise, find the owning component using `docs/COMPONENT-GUIDELINES.md`.
+3. Edit its `settings.jsonc`, `extensions.txt`, or `keybindings.jsonc`.
+4. Put a portable one-profile exception in `profiles/<profile-id>.settings.jsonc` only when component ownership would be misleading.
+5. Put reusable OS behavior in `platform/windows.jsonc` or `platform/linux.jsonc`.
+6. Put private absolute paths and device values in an ignored named machine overlay.
+7. Validate, dry-run, compose, inspect overrides, and run tests.
 
 ### Add an extension
 
@@ -381,7 +424,9 @@ Do not force-add `build/`, `machine/local/`, or unreviewed `.code-profile` backu
 | `invalid-jsonc` | Fix the named file. Comments and trailing commas are allowed; malformed strings and delimiters are not. |
 | `missing-component` | Correct the recipe ID or add the missing component directory. |
 | `missing-platform-overlay` | Use `windows` or `linux`, or add the explicitly requested committed overlay. |
-| `missing-machine-overlay` | Check the path. Relative machine paths resolve from the repository root. |
+| `missing-machine-overlay` | Run `-ListMachines`; confirm `machine/local/<id>.jsonc` exists, or check the explicit `-MachineFile` path. |
+| Setting is gray and says it applies to all profiles | Change it in `global/settings.jsonc`, regenerate with `-Global`, then merge into **Preferences: Open Application Settings (JSON)**. Do not add it to a component. |
+| Machine setting missing from generated profile | Build with `-Machine <id>` or `-MachineFile <path>`; machine overlays are never selected implicitly. |
 | `portable-absolute-path` | Move the value into `machine/local/` and supply it explicitly. |
 | Secret warning | Remove the value from portable sources. Do not rely on report redaction as permission to commit it. |
 | Strict mode fails on warnings | Inspect the reported source, resolve it, or rerun without `-Strict` for an informational local build. |

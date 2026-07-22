@@ -1,6 +1,6 @@
 Set-StrictMode -Version Latest
 
-$script:ComposerVersion = '0.3.0'
+$script:ComposerVersion = '0.4.0'
 $script:ManifestVersion = 1
 $script:Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 $script:SensitivePattern = '(?i)(password|(?<!semantic)token|secret|credential|connectionstring|api[_-]?key|private[_-]?key)'
@@ -297,8 +297,28 @@ function Get-ProfileDefinitions {
     })
 }
 
+function Get-MachineDefinitions {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$RepositoryRoot)
+
+    $localRoot = Join-Path $RepositoryRoot 'machine/local'
+    if (-not (Test-Path -LiteralPath $localRoot -PathType Container)) { return @() }
+    return @(Get-ChildItem -LiteralPath $localRoot -Filter '*.jsonc' -File | Sort-Object Name | ForEach-Object {
+        [pscustomobject]@{ Id = $_.BaseName; Path = $_.FullName }
+    })
+}
+
 function Resolve-MachinePath {
-    param([Parameter(Mandatory)][string]$RepositoryRoot, [string]$MachineFile)
+    param(
+        [Parameter(Mandatory)][string]$RepositoryRoot,
+        [string]$Machine,
+        [string]$MachineFile
+    )
+    if ($Machine -and $MachineFile) { throw '-Machine and -MachineFile cannot be used together.' }
+    if ($Machine) {
+        if ($Machine -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$') { throw "Invalid machine ID '$Machine'." }
+        return [System.IO.Path]::GetFullPath((Join-Path $RepositoryRoot "machine/local/$Machine.jsonc"))
+    }
     if (-not $MachineFile) { return $null }
     if ([System.IO.Path]::IsPathRooted($MachineFile)) { return [System.IO.Path]::GetFullPath($MachineFile) }
     return [System.IO.Path]::GetFullPath((Join-Path $RepositoryRoot $MachineFile))
@@ -316,6 +336,7 @@ function Test-ComposerRepository {
     param(
         [Parameter(Mandatory)][string]$RepositoryRoot,
         [string]$Platform,
+        [string]$Machine,
         [string]$MachineFile
     )
 
@@ -324,6 +345,46 @@ function Test-ComposerRepository {
     $componentRoot = Join-Path $root 'components'
     $profileRoot = Join-Path $root 'profiles'
     $buildRoot = [System.IO.Path]::GetFullPath((Join-Path $root 'build/profiles'))
+    $globalSettingsPath = Join-Path $root 'global/settings.jsonc'
+    $globalSettingIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+
+    if (-not (Test-Path -LiteralPath $globalSettingsPath -PathType Leaf)) {
+        Add-ValidationItem $result errors 'missing-global-settings' "Required global settings source 'global/settings.jsonc' is missing."
+    }
+    else {
+        $globalSource = Get-RelativeDisplayPath $root $globalSettingsPath
+        try {
+            $globalSettings = Read-JsonCFile $globalSettingsPath
+            if (-not (Test-IsDictionary $globalSettings)) {
+                Add-ValidationItem $result errors 'global-settings-root' 'Global settings root must be an object.' $globalSource
+            }
+            elseif (-not $globalSettings.Contains('workbench.settings.applyToAllProfiles') -or
+                $globalSettings['workbench.settings.applyToAllProfiles'] -isnot [System.Array]) {
+                Add-ValidationItem $result errors 'global-settings-list' "Global settings must contain an array 'workbench.settings.applyToAllProfiles'." $globalSource
+            }
+            else {
+                foreach ($settingId in $globalSettings['workbench.settings.applyToAllProfiles']) {
+                    if ($settingId -isnot [string] -or [string]::IsNullOrWhiteSpace($settingId)) {
+                        Add-ValidationItem $result errors 'invalid-global-setting-id' 'Global settings list entries must be non-empty strings.' $globalSource
+                        continue
+                    }
+                    if (-not $globalSettingIds.Add($settingId)) {
+                        Add-ValidationItem $result errors 'duplicate-global-setting-id' "Global setting '$settingId' is listed more than once." $globalSource
+                    }
+                    if (-not $globalSettings.Contains($settingId)) {
+                        Add-ValidationItem $result errors 'missing-global-setting-value' "Global setting '$settingId' is listed but has no value." $globalSource
+                    }
+                }
+                foreach ($key in $globalSettings.Keys) {
+                    if ($key -ne 'workbench.settings.applyToAllProfiles' -and -not $globalSettingIds.Contains([string]$key)) {
+                        Add-ValidationItem $result errors 'unlisted-global-setting' "Global setting '$key' has a value but is not listed in workbench.settings.applyToAllProfiles." $globalSource
+                    }
+                }
+                Test-PortableSettings $globalSettings $result $globalSource
+            }
+        }
+        catch { Add-ValidationItem $result errors 'invalid-jsonc' $_.Exception.Message $globalSource }
+    }
 
     if (-not (Test-Path -LiteralPath $componentRoot -PathType Container)) {
         Add-ValidationItem $result errors 'missing-components-directory' "Required directory 'components' is missing."
@@ -347,7 +408,14 @@ function Test-ComposerRepository {
                     if (-not (Test-IsDictionary $settings)) {
                         Add-ValidationItem $result errors 'component-settings-root' 'Component settings root must be an object.' $source
                     }
-                    else { Test-PortableSettings $settings $result $source }
+                    else {
+                        Test-PortableSettings $settings $result $source
+                        foreach ($key in $settings.Keys) {
+                            if ($globalSettingIds.Contains([string]$key)) {
+                                Add-ValidationItem $result errors 'global-setting-in-profile-source' "Setting '$key' is globally owned and must not be declared in a component." $source "/$key"
+                            }
+                        }
+                    }
                 }
                 catch { Add-ValidationItem $result errors 'invalid-jsonc' $_.Exception.Message $source }
             }
@@ -426,7 +494,14 @@ function Test-ComposerRepository {
             try {
                 $override = Read-JsonCFile $overridePath
                 if (-not (Test-IsDictionary $override)) { Add-ValidationItem $result errors 'profile-settings-root' 'Profile-local settings root must be an object.' (Get-RelativeDisplayPath $root $overridePath) }
-                else { Test-PortableSettings $override $result (Get-RelativeDisplayPath $root $overridePath) }
+                else {
+                    Test-PortableSettings $override $result (Get-RelativeDisplayPath $root $overridePath)
+                    foreach ($key in $override.Keys) {
+                        if ($globalSettingIds.Contains([string]$key)) {
+                            Add-ValidationItem $result errors 'global-setting-in-profile-source' "Setting '$key' is globally owned and must not be declared in a profile override." (Get-RelativeDisplayPath $root $overridePath) "/$key"
+                        }
+                    }
+                }
             }
             catch { Add-ValidationItem $result errors 'invalid-jsonc' $_.Exception.Message (Get-RelativeDisplayPath $root $overridePath) }
         }
@@ -448,6 +523,13 @@ function Test-ComposerRepository {
         try {
             $value = Read-JsonCFile $path
             if (-not (Test-IsDictionary $value)) { Add-ValidationItem $result errors 'overlay-root' 'Platform and machine settings roots must be objects.' $source }
+            elseif ($source.StartsWith('platform/', [System.StringComparison]::OrdinalIgnoreCase)) {
+                foreach ($key in $value.Keys) {
+                    if ($globalSettingIds.Contains([string]$key)) {
+                        Add-ValidationItem $result errors 'global-setting-in-profile-source' "Setting '$key' is globally owned and must not be declared in a platform overlay." $source "/$key"
+                    }
+                }
+            }
         }
         catch { Add-ValidationItem $result errors 'invalid-jsonc' $_.Exception.Message $source }
     }
@@ -458,10 +540,14 @@ function Test-ComposerRepository {
             Add-ValidationItem $result errors 'missing-platform-overlay' "Requested platform overlay '$Platform' does not exist." "platform/$Platform.jsonc"
         }
     }
-    if ($MachineFile) {
-        $resolvedMachine = Resolve-MachinePath $root $MachineFile
+    if ($Machine -and $MachineFile) {
+        Add-ValidationItem $result errors 'conflicting-machine-selection' '-Machine and -MachineFile cannot be used together.'
+    }
+    elseif ($Machine -or $MachineFile) {
+        $resolvedMachine = Resolve-MachinePath -RepositoryRoot $root -Machine $Machine -MachineFile $MachineFile
         if (-not (Test-Path -LiteralPath $resolvedMachine -PathType Leaf)) {
-            Add-ValidationItem $result errors 'missing-machine-overlay' "Requested machine overlay does not exist." (Get-RelativeDisplayPath $root $resolvedMachine)
+            $requested = if ($Machine) { "machine '$Machine'" } else { 'machine overlay' }
+            Add-ValidationItem $result errors 'missing-machine-overlay' "Requested $requested does not exist." (Get-RelativeDisplayPath $root $resolvedMachine)
         }
         elseif ($jsoncCandidates -notcontains $resolvedMachine) {
             $source = Get-RelativeDisplayPath $root $resolvedMachine
@@ -854,12 +940,84 @@ function Invoke-SafeDirectoryReplace {
     }
 }
 
+function Invoke-GlobalSettingsComposition {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RepositoryRoot,
+        [switch]$DryRun,
+        [switch]$Strict
+    )
+
+    $root = [System.IO.Path]::GetFullPath($RepositoryRoot)
+    $validation = Test-ComposerRepository -RepositoryRoot $root
+    if ($validation.errors.Count -gt 0 -or ($Strict -and $validation.warnings.Count -gt 0)) {
+        $reason = if ($validation.errors.Count -gt 0) { "$($validation.errors.Count) validation error(s)" } else { "$($validation.warnings.Count) warning(s) in strict mode" }
+        throw "Global settings composition stopped because repository validation found $reason."
+    }
+
+    $sourcePath = Join-Path $root 'global/settings.jsonc'
+    $settings = Read-JsonCFile $sourcePath
+    $targetDirectory = [System.IO.Path]::GetFullPath((Join-Path $root 'build/global'))
+    if ($DryRun) {
+        return [pscustomobject][ordered]@{
+            outputDirectory = Get-RelativeDisplayPath $root $targetDirectory
+            sourcePath = Get-RelativeDisplayPath $root $sourcePath
+            settingCount = $settings.Count - 1
+            dryRun = $true
+        }
+    }
+
+    $buildRoot = Join-Path $root 'build'
+    [System.IO.Directory]::CreateDirectory($buildRoot) | Out-Null
+    $temporaryDirectory = Join-Path $buildRoot ".global.$([guid]::NewGuid().ToString('N')).tmp"
+    [System.IO.Directory]::CreateDirectory($temporaryDirectory) | Out-Null
+    try {
+        $settingsPath = Join-Path $temporaryDirectory 'settings.json'
+        Write-Utf8File $settingsPath (ConvertTo-PrettyJson -Value $settings)
+        $generated = Read-JsonCFile $settingsPath
+        if (-not (Test-IsDictionary $generated)) { throw 'Generated global settings did not validate as a JSON object.' }
+        $manifest = [ordered]@{
+            manifestVersion = $script:ManifestVersion
+            artifact = 'vscode-built-in-default-settings'
+            generatedAtUtc = [DateTimeOffset]::UtcNow.ToString('o')
+            composerVersion = $script:ComposerVersion
+            gitCommit = Get-GitCommit $root
+            source = 'global/settings.jsonc'
+            applicationTarget = 'vscode-built-in-default-profile'
+            applicationMethod = 'manual-application-settings-json-merge'
+            settingCount = $settings.Count - 1
+            outputHashes = [ordered]@{ 'settings.json' = Get-FileHashValue $settingsPath }
+            validation = [ordered]@{
+                result = 'passed'
+                errors = $validation.errors.Count
+                warnings = $validation.warnings.Count
+                information = $validation.information.Count
+            }
+        }
+        Write-Utf8File (Join-Path $temporaryDirectory 'manifest.json') (ConvertTo-PrettyJson -Value $manifest)
+        Read-JsonCFile (Join-Path $temporaryDirectory 'manifest.json') | Out-Null
+        Invoke-SafeDirectoryReplace $temporaryDirectory $targetDirectory
+    }
+    catch {
+        if (Test-Path -LiteralPath $temporaryDirectory) { Remove-Item -LiteralPath $temporaryDirectory -Recurse -Force }
+        throw
+    }
+
+    return [pscustomobject][ordered]@{
+        outputDirectory = Get-RelativeDisplayPath $root $targetDirectory
+        sourcePath = Get-RelativeDisplayPath $root $sourcePath
+        settingCount = $settings.Count - 1
+        dryRun = $false
+    }
+}
+
 function Invoke-ProfileComposition {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$RepositoryRoot,
         [Parameter(Mandatory)][string]$Profile,
         [string]$Platform,
+        [string]$Machine,
         [string]$MachineFile,
         [switch]$DryRun,
         [switch]$ExportCodeProfile,
@@ -869,7 +1027,8 @@ function Invoke-ProfileComposition {
 
     $root = [System.IO.Path]::GetFullPath($RepositoryRoot)
     if ($UiStateFromProfile -and -not $ExportCodeProfile) { throw '-UiStateFromProfile requires -ExportCodeProfile.' }
-    $validation = Test-ComposerRepository $root $Platform $MachineFile
+    if ($Machine -and $MachineFile) { throw '-Machine and -MachineFile cannot be used together.' }
+    $validation = Test-ComposerRepository -RepositoryRoot $root -Platform $Platform -Machine $Machine -MachineFile $MachineFile
     if ($validation.errors.Count -gt 0 -or ($Strict -and $validation.warnings.Count -gt 0)) {
         $reason = if ($validation.errors.Count -gt 0) { "$($validation.errors.Count) validation error(s)" } else { "$($validation.warnings.Count) warning(s) in strict mode" }
         throw "Composition stopped because repository validation found $reason."
@@ -923,7 +1082,8 @@ function Invoke-ProfileComposition {
         $settingsLayers.Add([pscustomobject]@{ Path = $platformPath; Source = $source })
         $inputFiles.Add([pscustomobject]@{ type = 'platform-settings'; path = $source })
     }
-    $resolvedMachine = Resolve-MachinePath $root $MachineFile
+    $resolvedMachine = Resolve-MachinePath -RepositoryRoot $root -Machine $Machine -MachineFile $MachineFile
+    $machineId = if ($Machine) { $Machine } elseif ($resolvedMachine) { [System.IO.Path]::GetFileNameWithoutExtension($resolvedMachine) } else { $null }
     if ($resolvedMachine) {
         $source = Get-RelativeDisplayPath $root $resolvedMachine
         $settingsLayers.Add([pscustomobject]@{ Path = $resolvedMachine; Source = $source })
@@ -956,6 +1116,7 @@ function Invoke-ProfileComposition {
             outputDirectory = Get-RelativeDisplayPath $root $targetDirectory
             codeProfileExportPath = if ($codeProfileTargetPath) { Get-RelativeDisplayPath $root $codeProfileTargetPath } else { $null }
             uiStateSeeded = ($null -ne $uiState)
+            machineId = $machineId
             inputFiles = [object[]]$inputFiles.ToArray()
             counts = [pscustomobject][ordered]@{
                 settings = $settings.Count
@@ -1028,6 +1189,14 @@ function Invoke-ProfileComposition {
             inputFiles = [object[]]$inputFiles.ToArray()
             platformOverlay = if ($Platform) { [ordered]@{ id = $Platform; path = Get-RelativeDisplayPath $root $platformPath } } else { $null }
             machineOverlayPath = $machineDisplay
+            machineOverlay = if ($resolvedMachine) {
+                [ordered]@{
+                    id = $machineId
+                    path = $machineDisplay
+                    selection = if ($Machine) { 'named-machine' } else { 'explicit-file' }
+                }
+            }
+            else { $null }
             codeProfileExportRequested = [bool]$ExportCodeProfile
             codeProfileExport = if ($ExportCodeProfile) {
                 [ordered]@{
@@ -1081,9 +1250,10 @@ function Invoke-ProfileComposition {
         outputDirectory = Get-RelativeDisplayPath $root $targetDirectory
         codeProfileExportPath = if ($codeProfileTargetPath) { Get-RelativeDisplayPath $root $codeProfileTargetPath } else { $null }
         uiStateSeeded = ($null -ne $uiState)
+        machineId = $machineId
         counts = $manifest.counts
         dryRun = $false
     }
 }
 
-Export-ModuleMember -Function ConvertFrom-JsonC, Read-ProfileRecipe, Get-ProfileDefinitions, Test-ComposerRepository, Merge-Settings, Merge-Extensions, Merge-Keybindings, Get-CodeProfileFileName, New-CodeProfileTemplate, Read-CodeProfileGlobalState, Test-CodeProfileTemplate, Invoke-SafeDirectoryReplace, Invoke-ProfileComposition
+Export-ModuleMember -Function ConvertFrom-JsonC, Read-ProfileRecipe, Get-ProfileDefinitions, Get-MachineDefinitions, Test-ComposerRepository, Merge-Settings, Merge-Extensions, Merge-Keybindings, Get-CodeProfileFileName, New-CodeProfileTemplate, Read-CodeProfileGlobalState, Test-CodeProfileTemplate, Invoke-SafeDirectoryReplace, Invoke-GlobalSettingsComposition, Invoke-ProfileComposition

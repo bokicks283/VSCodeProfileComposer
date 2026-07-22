@@ -10,6 +10,10 @@ Database components may contain safe behavior settings and extension IDs, but ne
 
 Portable files must not contain usernames, home paths, drive-specific SDK paths, credentials, tokens, database secrets, PowerShell remoting endpoints, module paths, or unsafe device tuning.
 
+## Global settings
+
+Portable settings intentionally applied to every profile live in `global/settings.jsonc`. They are generated separately because VS Code takes their values from the built-in Default profile and ignores duplicate values stored in named profiles. Apply `build/global/settings.json` manually through **Preferences: Open Application Settings (JSON)**; merge it with any other intentional application settings instead of replacing the entire live file.
+
 ## Platform settings
 
 `platform/windows.jsonc` and `platform/linux.jsonc` hold reusable OS-specific preferences.
@@ -23,7 +27,7 @@ Database command-line clients, native drivers, and certificate behavior may vary
 
 ## Machine-local settings
 
-Real machine values live under ignored `machine/local/`. Committed examples use placeholders only.
+Real machine values live under ignored `machine/local/<machine-id>.jsonc`. Committed examples use placeholders only. Use `-ListMachines` to see available local IDs and `-Machine <machine-id>` to choose the computer being targeted.
 
 PowerShell executable overrides, module locations, signing certificates, remoting endpoints, database client paths, SSH tunnels, and shell-specific environment adjustments are machine-local when they cannot be expressed portably.
 

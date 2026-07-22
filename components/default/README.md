@@ -32,7 +32,7 @@ Every recipe begins with `default`. Focused components add to this shared base r
 
 ## Portability classification
 
-Settings and extension IDs are portable and contain no account state. The unreliable portable `todo-tree.ripgrep.ripgrep: "rg"` value is intentionally absent; machines that require it must provide a confirmed absolute path through an ignored machine-local overlay.
+Settings and extension IDs are portable and contain no account state. Settings intentionally applied to every profile are owned by `global/settings.jsonc`, not duplicated here. The unreliable portable `todo-tree.ripgrep.ripgrep: "rg"` value is intentionally absent; machines that require it must provide a confirmed absolute path through an ignored named machine overlay.
 
 ## Platform concerns
 

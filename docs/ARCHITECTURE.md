@@ -9,13 +9,20 @@ A profile is an explicit YAML recipe. Profiles do not inherit other profiles. Th
 ## Layers
 
 ```text
-Recipe components in declared order
+Global settings owned by VS Code's built-in Default profile
+→ recipe components in declared order
 → optional portable profile override
 → platform settings
 → machine-local settings
 ```
 
-The composer materializes exactly this order. Workspace settings stay separate and are never appended to a personal profile. Manual VS Code profile import and, when deliberately enabled, Settings Sync remain the runtime delivery mechanisms.
+The global layer is generated separately under `build/global/`; it is not merged into named profiles. The composer materializes the remaining profile layers exactly in order. Workspace settings stay separate and are never appended to a personal profile. Manual VS Code profile import and, when deliberately enabled, Settings Sync remain the runtime delivery mechanisms.
+
+## Global settings
+
+`global/settings.jsonc` owns settings intentionally configured through `workbench.settings.applyToAllProfiles`. VS Code stores their effective values in its built-in Default profile and ignores duplicate values in named profile settings. Repository validation requires each global value to appear exactly once in the apply-to-all list and rejects those settings from components, profile overrides, and platform overlays.
+
+`build/global/settings.json` is a reviewable manual-merge artifact. The composer does not write the live Application Settings file.
 
 ## Default shared base
 
@@ -65,7 +72,7 @@ Committed Windows and Linux files contain reusable OS preferences. Windows prefe
 
 ## Machine-local overlays
 
-Ignored local files contain absolute executable paths, SDK roots, compiler paths, credentials, database connections, module paths, remoting endpoints, and device tuning.
+Ignored `machine/local/<machine-id>.jsonc` files contain absolute executable paths, SDK roots, compiler paths, credentials, database connections, module paths, remoting endpoints, and device tuning. `-Machine <machine-id>` makes the target explicit; `-ListMachines` shows locally available IDs.
 
 ## Workspace settings
 
@@ -73,4 +80,4 @@ Repositories own generated-folder exclusions, include paths, compile commands, t
 
 ## Generated artifacts
 
-`scripts/Compose-Profile.ps1` materializes reviewable artifacts under ignored `build/profiles/`. When explicitly requested with `-ExportCodeProfile`, it also creates a manual-import `.code-profile` containing composed settings, extension identifiers, and keybindings. `-UiStateFromProfile` may pass through one opaque `globalState` snapshot from a manually exported private profile; the composer never reads live VS Code state, interprets or merges that payload, or maintains UI inheritance. It does not import profiles, install extensions, or control Settings Sync. Source components and recipes remain canonical.
+`scripts/Compose-Profile.ps1` materializes reviewable artifacts under ignored `build/global/` and `build/profiles/`. When explicitly requested with `-ExportCodeProfile`, it also creates a manual-import `.code-profile` containing composed settings, extension identifiers, and keybindings. `-UiStateFromProfile` may pass through one opaque `globalState` snapshot from a manually exported private profile; the composer never reads live VS Code state, interprets or merges that payload, or maintains UI inheritance. It does not import profiles, install extensions, or control Settings Sync. Source components, global settings, and recipes remain canonical.

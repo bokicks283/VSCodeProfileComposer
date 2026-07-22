@@ -10,6 +10,12 @@ param(
     [Parameter(Mandatory, ParameterSetName = 'Validate')]
     [switch]$Validate,
 
+    [Parameter(Mandatory, ParameterSetName = 'Global')]
+    [switch]$Global,
+
+    [Parameter(Mandatory, ParameterSetName = 'ListMachines')]
+    [switch]$ListMachines,
+
     [Parameter(ParameterSetName = 'One')]
     [Parameter(ParameterSetName = 'All')]
     [Parameter(ParameterSetName = 'Validate')]
@@ -19,10 +25,17 @@ param(
     [Parameter(ParameterSetName = 'One')]
     [Parameter(ParameterSetName = 'All')]
     [Parameter(ParameterSetName = 'Validate')]
+    [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9._-]*$')]
+    [string]$Machine,
+
+    [Parameter(ParameterSetName = 'One')]
+    [Parameter(ParameterSetName = 'All')]
+    [Parameter(ParameterSetName = 'Validate')]
     [string]$MachineFile,
 
     [Parameter(ParameterSetName = 'One')]
     [Parameter(ParameterSetName = 'All')]
+    [Parameter(ParameterSetName = 'Global')]
     [switch]$DryRun,
 
     [Parameter(ParameterSetName = 'One')]
@@ -36,6 +49,7 @@ param(
     [Parameter(ParameterSetName = 'One')]
     [Parameter(ParameterSetName = 'All')]
     [Parameter(ParameterSetName = 'Validate')]
+    [Parameter(ParameterSetName = 'Global')]
     [switch]$Strict
 )
 
@@ -60,13 +74,44 @@ try {
     if ($UiStateFromProfile -and -not $ExportCodeProfile) {
         throw '-UiStateFromProfile requires -ExportCodeProfile.'
     }
+    if ($Machine -and $MachineFile) { throw '-Machine and -MachineFile cannot be used together.' }
+
+    if ($ListMachines) {
+        $machines = @(Get-MachineDefinitions -RepositoryRoot $repositoryRoot)
+        if ($machines.Count -eq 0) {
+            Write-Host 'No named machine overlays found under machine/local/.'
+        }
+        else {
+            Write-Host 'Named machine overlays:'
+            foreach ($item in $machines) {
+                Write-Host "  $($item.Id): machine/local/$($item.Id).jsonc"
+            }
+        }
+        exit 0
+    }
 
     if ($Validate) {
-        $result = Test-ComposerRepository -RepositoryRoot $repositoryRoot -Platform $Platform -MachineFile $MachineFile
+        $result = Test-ComposerRepository -RepositoryRoot $repositoryRoot -Platform $Platform -Machine $Machine -MachineFile $MachineFile
         Write-ValidationSummary $result
         if ($result.errors.Count -gt 0 -or ($Strict -and $result.warnings.Count -gt 0)) { exit 1 }
         exit 0
     }
+
+    if ($Global) {
+        $globalResult = Invoke-GlobalSettingsComposition -RepositoryRoot $repositoryRoot -DryRun:$DryRun -Strict:$Strict
+        $prefix = if ($DryRun) { 'DRY RUN: planned' } else { 'Generated' }
+        Write-Host "$prefix built-in Default settings at $($globalResult.outputDirectory): $($globalResult.settingCount) globally applied settings."
+        exit 0
+    }
+
+    $preflight = Test-ComposerRepository -RepositoryRoot $repositoryRoot -Platform $Platform -Machine $Machine -MachineFile $MachineFile
+    if ($preflight.errors.Count -gt 0 -or ($Strict -and $preflight.warnings.Count -gt 0)) {
+        Write-ValidationSummary $preflight
+        throw 'Composition stopped because repository preflight validation failed.'
+    }
+    $globalResult = Invoke-GlobalSettingsComposition -RepositoryRoot $repositoryRoot -DryRun:$DryRun -Strict:$Strict
+    $globalPrefix = if ($DryRun) { 'DRY RUN: planned' } else { 'Generated' }
+    Write-Host "$globalPrefix built-in Default settings at $($globalResult.outputDirectory): $($globalResult.settingCount) globally applied settings."
 
     $profiles = if ($All) {
         @(Get-ProfileDefinitions -RepositoryRoot $repositoryRoot | ForEach-Object Id)
@@ -82,6 +127,7 @@ try {
             ExportCodeProfile = $ExportCodeProfile
         }
         if ($Platform) { $parameters.Platform = $Platform }
+        if ($Machine) { $parameters.Machine = $Machine }
         if ($MachineFile) { $parameters.MachineFile = $MachineFile }
         if ($UiStateFromProfile) { $parameters.UiStateFromProfile = $UiStateFromProfile }
         $result = Invoke-ProfileComposition @parameters
@@ -90,6 +136,7 @@ try {
             Write-Host "  Planned output: $($result.outputDirectory)"
             if ($result.codeProfileExportPath) { Write-Host "  Planned .code-profile: $($result.codeProfileExportPath)" }
             if ($result.uiStateSeeded) { Write-Host '  UI state seed: copied from the explicitly supplied profile export' }
+            if ($result.machineId) { Write-Host "  Machine: $($result.machineId)" }
             Write-Host "  Inputs:"
             foreach ($input in $result.inputFiles) { Write-Host "    $($input.type): $($input.path)" }
             Write-Host "  Counts: $($result.counts.settings) settings, $($result.counts.extensions) extensions, $($result.counts.keybindings) keybindings, $($result.counts.overrides) overrides, $($result.counts.warnings) warnings"
