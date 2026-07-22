@@ -73,4 +73,4 @@ Repositories own generated-folder exclusions, include paths, compile commands, t
 
 ## Generated artifacts
 
-`scripts/Compose-Profile.ps1` materializes reviewable artifacts under ignored `build/profiles/`. When explicitly requested with `-ExportCodeProfile`, it also creates a manual-import `.code-profile` containing composed settings, extension identifiers, and keybindings. It does not import profiles, install extensions, control Settings Sync, compose UI state, or read live VS Code state. Source components and recipes remain canonical.
+`scripts/Compose-Profile.ps1` materializes reviewable artifacts under ignored `build/profiles/`. When explicitly requested with `-ExportCodeProfile`, it also creates a manual-import `.code-profile` containing composed settings, extension identifiers, and keybindings. `-UiStateFromProfile` may pass through one opaque `globalState` snapshot from a manually exported private profile; the composer never reads live VS Code state, interprets or merges that payload, or maintains UI inheritance. It does not import profiles, install extensions, or control Settings Sync. Source components and recipes remain canonical.

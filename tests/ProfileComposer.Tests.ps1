@@ -269,6 +269,23 @@ Describe 'Current profile acceptance compositions' {
 }
 
 Describe 'VS Code .code-profile export' {
+    BeforeAll {
+        function New-UiStateSeedExport {
+            param(
+                [Parameter(Mandatory)][string]$Path,
+                [string]$GlobalState = '{"storage":{"workbench.activity.pinnedViewlets2":"[]"}}'
+            )
+            $seed = [ordered]@{
+                name = 'Private Layout Seed'
+                settings = '{"settings":"{\"seed.setting.mustBeIgnored\":true}"}'
+                extensions = '[{"identifier":{"id":"seed.extension-must-be-ignored"}}]'
+                globalState = $GlobalState
+            }
+            Write-TestFile $Path (ConvertTo-Json -InputObject $seed -Depth 20)
+            return $GlobalState
+        }
+    }
+
     It 'generates an export for Default' {
         $fixture = New-ComposerFixture 'export-default'
         $result = Invoke-ProfileComposition $fixture default -Platform windows -ExportCodeProfile
@@ -427,6 +444,80 @@ Describe 'VS Code .code-profile export' {
         $manifest.codeProfileExport.uiStatePolicy | Should -Be 'managed-by-vscode'
         Write-TestFile (Join-Path $fixture 'components/default/ui-state.jsonc') '{}'
         (Test-ComposerRepository $fixture).errors.code | Should -Contain 'unsupported-ui-state-source'
+    }
+
+    It 'copies an explicitly supplied UI-state seed without copying other resources' {
+        $fixture = New-ComposerFixture 'export-ui-seed'
+        $seedPath = Join-Path $TestDrive 'layout-seed.code-profile'
+        $expectedGlobalState = New-UiStateSeedExport $seedPath
+        Invoke-ProfileComposition $fixture default -Platform windows -ExportCodeProfile -UiStateFromProfile $seedPath | Out-Null
+
+        $output = Join-Path $fixture 'build/profiles/default'
+        $profile = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $output 'Default.code-profile')))
+        $settings = ConvertFrom-JsonC (ConvertFrom-JsonC $profile.settings).settings
+        $extensionIds = @((ConvertFrom-JsonC $profile.extensions) | ForEach-Object { $_.identifier.id })
+        $profile.globalState | Should -BeExactly $expectedGlobalState
+        $settings.Contains('seed.setting.mustBeIgnored') | Should -BeFalse
+        $extensionIds | Should -Not -Contain 'seed.extension-must-be-ignored'
+        Test-CodeProfileTemplate (Join-Path $output 'Default.code-profile') | Should -BeTrue
+    }
+
+    It 'records only UI-state seed policy and content hash, never its source path' {
+        $fixture = New-ComposerFixture 'export-ui-seed-manifest'
+        $privateDirectory = Join-Path $TestDrive 'personal-private-location'
+        $seedPath = Join-Path $privateDirectory 'signed-in-layout.code-profile'
+        $globalState = New-UiStateSeedExport $seedPath
+        Invoke-ProfileComposition $fixture default -Platform windows -ExportCodeProfile -UiStateFromProfile $seedPath | Out-Null
+
+        $output = Join-Path $fixture 'build/profiles/default'
+        $manifestText = [System.IO.File]::ReadAllText((Join-Path $output 'manifest.json'))
+        $manifest = ConvertFrom-JsonC $manifestText
+        $expectedHash = [Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData([System.Text.UTF8Encoding]::new($false).GetBytes($globalState))).ToLowerInvariant()
+        $manifest.codeProfileExport.uiStateSeeded | Should -BeTrue
+        $manifest.codeProfileExport.uiStatePolicy | Should -Be 'seed-on-import-then-managed-by-vscode'
+        $manifest.codeProfileExport.portability | Should -Be 'ui-state-seed-included'
+        $manifest.codeProfileExport.uiStateSeed.sha256 | Should -BeExactly $expectedHash
+        $manifest.codeProfileExport.uiStateSeed.sourcePathRecorded | Should -BeFalse
+        $manifestText | Should -Not -Match ([regex]::Escape($seedPath))
+        $manifestText | Should -Not -Match 'personal-private-location'
+    }
+
+    It 'requires export mode and a valid profile export containing globalState' {
+        $fixture = New-ComposerFixture 'export-ui-seed-validation'
+        $missing = Join-Path $TestDrive 'missing.code-profile'
+        { Invoke-ProfileComposition $fixture default -UiStateFromProfile $missing } | Should -Throw '*requires -ExportCodeProfile*'
+        { Invoke-ProfileComposition $fixture default -ExportCodeProfile -UiStateFromProfile $missing } | Should -Throw '*does not exist*'
+
+        $noState = Join-Path $TestDrive 'no-state.code-profile'
+        Write-TestFile $noState '{"name":"No State"}'
+        { Invoke-ProfileComposition $fixture default -ExportCodeProfile -UiStateFromProfile $noState } | Should -Throw '*does not contain*globalState*'
+
+        $malformedState = Join-Path $TestDrive 'malformed-state.code-profile'
+        New-UiStateSeedExport $malformedState -GlobalState '{bad json' | Out-Null
+        { Invoke-ProfileComposition $fixture default -ExportCodeProfile -UiStateFromProfile $malformedState } | Should -Throw '*Invalid JSONC*globalState*'
+    }
+
+    It 'validates a UI-state seed during dry run without writing output' {
+        $fixture = New-ComposerFixture 'export-ui-seed-dry-run'
+        $seedPath = Join-Path $TestDrive 'dry-layout.code-profile'
+        New-UiStateSeedExport $seedPath | Out-Null
+        $result = Invoke-ProfileComposition $fixture default -Platform windows -ExportCodeProfile -UiStateFromProfile $seedPath -DryRun
+        $result.uiStateSeeded | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $fixture 'build') | Should -BeFalse
+    }
+
+    It 'preserves the previous valid seeded export when a later UI seed is invalid' {
+        $fixture = New-ComposerFixture 'export-ui-seed-failed-preserves'
+        $seedPath = Join-Path $TestDrive 'valid-layout.code-profile'
+        New-UiStateSeedExport $seedPath | Out-Null
+        Invoke-ProfileComposition $fixture default -Platform windows -ExportCodeProfile -UiStateFromProfile $seedPath | Out-Null
+        $exportPath = Join-Path $fixture 'build/profiles/default/Default.code-profile'
+        $before = [System.IO.File]::ReadAllText($exportPath)
+
+        $badSeedPath = Join-Path $TestDrive 'bad-layout.code-profile'
+        New-UiStateSeedExport $badSeedPath -GlobalState '[]' | Out-Null
+        { Invoke-ProfileComposition $fixture default -Platform windows -ExportCodeProfile -UiStateFromProfile $badSeedPath } | Should -Throw '*must be an object*'
+        [System.IO.File]::ReadAllText($exportPath) | Should -BeExactly $before
     }
 
     It 'keeps ordinary composition export-free and otherwise unchanged' {

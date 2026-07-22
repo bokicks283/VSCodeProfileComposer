@@ -1,6 +1,6 @@
 Set-StrictMode -Version Latest
 
-$script:ComposerVersion = '0.2.0'
+$script:ComposerVersion = '0.3.0'
 $script:ManifestVersion = 1
 $script:Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 $script:SensitivePattern = '(?i)(password|(?<!semantic)token|secret|credential|connectionstring|api[_-]?key|private[_-]?key)'
@@ -302,6 +302,13 @@ function Resolve-MachinePath {
     if (-not $MachineFile) { return $null }
     if ([System.IO.Path]::IsPathRooted($MachineFile)) { return [System.IO.Path]::GetFullPath($MachineFile) }
     return [System.IO.Path]::GetFullPath((Join-Path $RepositoryRoot $MachineFile))
+}
+
+function Resolve-UiStateSeedPath {
+    param([Parameter(Mandatory)][string]$RepositoryRoot, [string]$UiStateFromProfile)
+    if (-not $UiStateFromProfile) { return $null }
+    if ([System.IO.Path]::IsPathRooted($UiStateFromProfile)) { return [System.IO.Path]::GetFullPath($UiStateFromProfile) }
+    return [System.IO.Path]::GetFullPath((Join-Path $RepositoryRoot $UiStateFromProfile))
 }
 
 function Test-ComposerRepository {
@@ -696,13 +703,14 @@ function New-CodeProfileTemplate {
         [Parameter(Mandatory)][string]$SettingsJson,
         [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Extensions,
         [Parameter(Mandatory)][string]$KeybindingsJson,
-        [string]$Platform
+        [string]$Platform,
+        [string]$GlobalState
     )
 
     $extensionResources = @($Extensions | ForEach-Object {
         [ordered]@{ identifier = [ordered]@{ id = $_ } }
     })
-    return [ordered]@{
+    $template = [ordered]@{
         name = $DisplayName
         settings = ConvertTo-CompactJson ([ordered]@{ settings = $SettingsJson })
         keybindings = ConvertTo-CompactJson ([ordered]@{
@@ -711,6 +719,25 @@ function New-CodeProfileTemplate {
         })
         extensions = ConvertTo-CompactJson ([object[]]$extensionResources)
     }
+    if ($PSBoundParameters.ContainsKey('GlobalState')) { $template.globalState = $GlobalState }
+    return $template
+}
+
+function Read-CodeProfileGlobalState {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "UI-state seed profile '$Path' does not exist."
+    }
+    $template = Read-JsonCFile $Path
+    if (-not (Test-IsDictionary $template)) { throw "UI-state seed profile '$Path' must have an object root." }
+    if (-not $template.Contains('globalState') -or $template.globalState -isnot [string] -or [string]::IsNullOrWhiteSpace($template.globalState)) {
+        throw "UI-state seed profile '$Path' does not contain a non-empty string 'globalState' resource."
+    }
+    $payload = ConvertFrom-JsonC $template.globalState "$Path#globalState"
+    if (-not (Test-IsDictionary $payload)) { throw "UI-state seed profile '$Path' globalState payload must be an object." }
+    return [string]$template.globalState
 }
 
 function Test-CodeProfileTemplate {
@@ -731,7 +758,13 @@ function Test-CodeProfileTemplate {
         throw "VS Code profile export '$Path' contains a likely secret in profile metadata."
     }
     if ($template.Contains('icon') -and $template.icon -isnot [string]) { throw "VS Code profile export '$Path' icon metadata must be a string." }
-    if ($template.Contains('globalState')) { throw "VS Code profile export '$Path' must not contain UI state ('globalState')." }
+    if ($template.Contains('globalState')) {
+        if ($template.globalState -isnot [string] -or [string]::IsNullOrWhiteSpace($template.globalState)) {
+            throw "VS Code profile export '$Path' globalState resource must be a non-empty string."
+        }
+        $globalStateValue = ConvertFrom-JsonC $template.globalState "$Path#globalState"
+        if (-not (Test-IsDictionary $globalStateValue)) { throw "VS Code profile export '$Path' globalState payload must be an object." }
+    }
     foreach ($required in @('settings', 'extensions', 'keybindings')) {
         if (-not $template.Contains($required) -or $template[$required] -isnot [string]) {
             throw "VS Code profile export '$Path' requires string resource '$required'."
@@ -777,6 +810,16 @@ function Get-FileHashValue {
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
 }
 
+function Get-StringHashValue {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Value)
+    $algorithm = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = $script:Utf8NoBom.GetBytes($Value)
+        return [Convert]::ToHexString($algorithm.ComputeHash($bytes)).ToLowerInvariant()
+    }
+    finally { $algorithm.Dispose() }
+}
+
 function Get-GitCommit {
     param([Parameter(Mandatory)][string]$RepositoryRoot)
     if (-not (Test-Path -LiteralPath (Join-Path $RepositoryRoot '.git'))) { return $null }
@@ -820,10 +863,12 @@ function Invoke-ProfileComposition {
         [string]$MachineFile,
         [switch]$DryRun,
         [switch]$ExportCodeProfile,
+        [string]$UiStateFromProfile,
         [switch]$Strict
     )
 
     $root = [System.IO.Path]::GetFullPath($RepositoryRoot)
+    if ($UiStateFromProfile -and -not $ExportCodeProfile) { throw '-UiStateFromProfile requires -ExportCodeProfile.' }
     $validation = Test-ComposerRepository $root $Platform $MachineFile
     if ($validation.errors.Count -gt 0 -or ($Strict -and $validation.warnings.Count -gt 0)) {
         $reason = if ($validation.errors.Count -gt 0) { "$($validation.errors.Count) validation error(s)" } else { "$($validation.warnings.Count) warning(s) in strict mode" }
@@ -833,6 +878,9 @@ function Invoke-ProfileComposition {
     $definition = @(Get-ProfileDefinitions $root | Where-Object { $_.Id -ieq $Profile })
     if ($definition.Count -eq 0) { throw "Unknown profile '$Profile'." }
     if ($definition.Count -gt 1) { throw "Profile ID '$Profile' is ambiguous." }
+    $resolvedUiStateSeed = Resolve-UiStateSeedPath -RepositoryRoot $root -UiStateFromProfile $UiStateFromProfile
+    $uiState = if ($resolvedUiStateSeed) { Read-CodeProfileGlobalState -Path $resolvedUiStateSeed } else { $null }
+    $uiStateHash = if ($null -ne $uiState) { Get-StringHashValue $uiState } else { $null }
     $profileId = $definition[0].Id
     $recipe = Read-ProfileRecipe $definition[0].Path
     $inputFiles = [System.Collections.Generic.List[object]]::new()
@@ -907,6 +955,7 @@ function Invoke-ProfileComposition {
             displayName = $recipe.Name
             outputDirectory = Get-RelativeDisplayPath $root $targetDirectory
             codeProfileExportPath = if ($codeProfileTargetPath) { Get-RelativeDisplayPath $root $codeProfileTargetPath } else { $null }
+            uiStateSeeded = ($null -ne $uiState)
             inputFiles = [object[]]$inputFiles.ToArray()
             counts = [pscustomobject][ordered]@{
                 settings = $settings.Count
@@ -948,12 +997,15 @@ function Invoke-ProfileComposition {
             if (-not (Test-PathWithinDirectory $codeProfileTemporaryPath $temporaryDirectory)) {
                 throw "VS Code profile export path '$codeProfileTemporaryPath' escapes the temporary profile directory."
             }
-            $template = New-CodeProfileTemplate `
-                -DisplayName $recipe.Name `
-                -SettingsJson ([System.IO.File]::ReadAllText((Join-Path $temporaryDirectory 'settings.json'))) `
-                -Extensions ([string[]]$extensions) `
-                -KeybindingsJson ([System.IO.File]::ReadAllText((Join-Path $temporaryDirectory 'keybindings.json'))) `
-                -Platform $Platform
+            $templateParameters = @{
+                DisplayName = $recipe.Name
+                SettingsJson = [System.IO.File]::ReadAllText((Join-Path $temporaryDirectory 'settings.json'))
+                Extensions = [string[]]$extensions
+                KeybindingsJson = [System.IO.File]::ReadAllText((Join-Path $temporaryDirectory 'keybindings.json'))
+                Platform = $Platform
+            }
+            if ($null -ne $uiState) { $templateParameters.GlobalState = $uiState }
+            $template = New-CodeProfileTemplate @templateParameters
             Write-Utf8File $codeProfileTemporaryPath (ConvertTo-PrettyJson -Value $template)
             Test-CodeProfileTemplate $codeProfileTemporaryPath | Out-Null
             $codeProfileHash = Get-FileHashValue $codeProfileTemporaryPath
@@ -988,8 +1040,13 @@ function Invoke-ProfileComposition {
                         commit = $script:CodeProfileVerifiedCommit
                     }
                     machineOverlayIncluded = [bool]$resolvedMachine
-                    portability = if ($resolvedMachine) { 'machine-overlay-included' } else { 'portable' }
-                    uiStatePolicy = 'managed-by-vscode'
+                    portability = if ($resolvedMachine -and $null -ne $uiState) { 'machine-overlay-and-ui-state-seed-included' }
+                        elseif ($resolvedMachine) { 'machine-overlay-included' }
+                        elseif ($null -ne $uiState) { 'ui-state-seed-included' }
+                        else { 'portable' }
+                    uiStatePolicy = if ($null -ne $uiState) { 'seed-on-import-then-managed-by-vscode' } else { 'managed-by-vscode' }
+                    uiStateSeeded = ($null -ne $uiState)
+                    uiStateSeed = if ($null -ne $uiState) { [ordered]@{ sha256 = $uiStateHash; sourcePathRecorded = $false } } else { $null }
                     importMethod = 'manual-vscode-profile-import'
                 }
             }
@@ -1023,9 +1080,10 @@ function Invoke-ProfileComposition {
         displayName = $recipe.Name
         outputDirectory = Get-RelativeDisplayPath $root $targetDirectory
         codeProfileExportPath = if ($codeProfileTargetPath) { Get-RelativeDisplayPath $root $codeProfileTargetPath } else { $null }
+        uiStateSeeded = ($null -ne $uiState)
         counts = $manifest.counts
         dryRun = $false
     }
 }
 
-Export-ModuleMember -Function ConvertFrom-JsonC, Read-ProfileRecipe, Get-ProfileDefinitions, Test-ComposerRepository, Merge-Settings, Merge-Extensions, Merge-Keybindings, Get-CodeProfileFileName, New-CodeProfileTemplate, Test-CodeProfileTemplate, Invoke-SafeDirectoryReplace, Invoke-ProfileComposition
+Export-ModuleMember -Function ConvertFrom-JsonC, Read-ProfileRecipe, Get-ProfileDefinitions, Test-ComposerRepository, Merge-Settings, Merge-Extensions, Merge-Keybindings, Get-CodeProfileFileName, New-CodeProfileTemplate, Read-CodeProfileGlobalState, Test-CodeProfileTemplate, Invoke-SafeDirectoryReplace, Invoke-ProfileComposition

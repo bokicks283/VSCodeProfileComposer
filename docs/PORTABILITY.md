@@ -62,7 +62,7 @@ Compose a portable .code-profile without a machine overlay
 → recreate machine-only values locally
 ```
 
-Settings Sync can synchronize settings, keyboard shortcuts, snippets, tasks, UI state, extensions, and profiles. The generated export intentionally omits UI state, but UI changes made in the imported live profile remain owned by VS Code and may sync afterward.
+Settings Sync can synchronize settings, keyboard shortcuts, snippets, tasks, UI state, extensions, and profiles. Generated exports omit UI state by default. An explicit `-UiStateFromProfile` snapshot makes the artifact private and non-portable even though VS Code owns the live UI after import.
 
 When adding a second machine, review **Settings Sync: Configure** before enabling synchronization. If unexpected changes occur, pause further synchronization, identify the affected resource, inspect **Settings Sync: Show Synced Data**, and back up both machines before restoring or resetting anything. The composer never controls Settings Sync.
 
@@ -85,7 +85,7 @@ Database tooling is selected only when the active profile composes `database` or
 
 Generate portable `.code-profile` artifacts under ignored `build/profiles/` with `-ExportCodeProfile`. Inspect them before import or private storage. A composer-generated database profile contains only repository-owned settings and extension identifiers, but still review it before use.
 
-Separately, a profile exported from live VS Code can contain additional runtime-owned resources or machine/account state. Treat live exports as sensitive until inspected and store them privately rather than using them as canonical repository source.
+Separately, a profile exported from live VS Code can contain additional runtime-owned resources or machine/account state. Treat live exports as sensitive until inspected and store them privately rather than using them as canonical repository source. When one is passed through `-UiStateFromProfile`, only its opaque `globalState` resource is copied, but that resource can itself contain extension or account-related state. It is a one-time layout seed, not a portable or canonical source.
 
 ## Temporary family or friend machines
 

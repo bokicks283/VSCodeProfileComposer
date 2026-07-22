@@ -4,17 +4,17 @@ This guide is the practical, start-to-finish workflow for using and maintaining 
 
 ## What the composer does
 
-The composer validates portable repository sources and generates complete profile artifacts under `build/profiles/`. With `-ExportCodeProfile`, it also creates a `.code-profile` file that VS Code can import through its Profiles editor.
+The composer validates portable repository sources and generates complete profile artifacts under `build/profiles/`. With `-ExportCodeProfile`, it also creates a `.code-profile` file that VS Code can import through its Profiles editor. An explicitly supplied private export may seed a one-time starting UI layout.
 
 The composer never:
 
-- reads or changes live VS Code settings, profiles, extensions, UI state, or Settings Sync;
+- reads or changes live VS Code settings, profiles, extensions, or Settings Sync;
 - imports a profile into VS Code;
 - installs or removes extensions;
 - copies workspace settings into a personal profile;
 - silently reads machine-specific values.
 
-The repository is the source of truth for composed settings, extension identifiers, and reviewed keybindings. VS Code remains the source of truth for live UI placement and other live profile state.
+The repository is the source of truth for composed settings, extension identifiers, and reviewed keybindings. VS Code remains the source of truth for live UI placement and other live profile state. The optional UI seed is an opaque import-time snapshot, not canonical or continuously managed state.
 
 ## Requirements
 
@@ -133,6 +133,14 @@ Generate a `.code-profile` for every recipe:
 pwsh ./scripts/Compose-Profile.ps1 -All -Platform windows -ExportCodeProfile
 ```
 
+Seed every generated export from a layout you already arranged and manually exported from VS Code:
+
+```powershell
+pwsh ./scripts/Compose-Profile.ps1 -All -Platform windows -ExportCodeProfile -UiStateFromProfile "C:\private\Composer Default Layout.code-profile"
+```
+
+`-UiStateFromProfile` requires `-ExportCodeProfile`. It never exports from or modifies the running VS Code instance.
+
 ### Treat warnings as failures
 
 ```powershell
@@ -228,7 +236,13 @@ Generated output is ignored and disposable. Never edit it as source; make change
 
 ## Import into VS Code safely
 
-The generated `.code-profile` contains composed settings, extension identifiers, and keybindings. It intentionally omits `globalState`, so it does not compose Activity Bar order, moved or hidden views, side bar placement, panel placement, or similar UI state.
+The generated `.code-profile` contains composed settings, extension identifiers, and keybindings. It omits `globalState` by default.
+
+When `-UiStateFromProfile` is supplied, the composer validates and copies only the source export's opaque `globalState` string. It ignores the source export's settings, extensions, keybindings, display name, and every other resource. It does not inspect individual UI entries, merge layouts, read the running VS Code profile, or record the private source path in the manifest.
+
+The result is copy-on-create behavior: all generated profiles begin with the same captured layout, then diverge normally. Later changes to the source layout do not update existing profiles, and UI contributed by extensions that were not present in the seed uses VS Code's defaults.
+
+Treat both the source and seeded exports as private. `globalState` can contain profile-scoped extension or account-related state. The composer preserves it as supplied and does not attempt unsafe partial redaction. Keep the source outside Git or under an ignored private location, inspect the import preview, and delete generated seeded exports when they are no longer needed.
 
 Use VS Code's supported Profiles editor:
 
@@ -239,7 +253,7 @@ Use VS Code's supported Profiles editor:
 5. Give the profile a new, recognizable name during testing.
 6. Select **Create** only when the preview is correct.
 7. Open a representative workspace and verify its terminal, languages, extensions, and keybindings.
-8. Customize UI placement normally. VS Code owns that live UI state after import.
+8. Customize UI placement normally. Seeded or not, VS Code owns that live UI state after import.
 
 Do not silently replace the active Default profile. Start with a new profile so returning to the previous configuration remains easy.
 
@@ -331,7 +345,7 @@ The filename is the profile ID. Use only letters, numbers, periods, underscores,
 - absolute compiler, SDK, engine, database, or executable paths;
 - employer-specific resources or account state;
 - workspace-owned formatter, linter, build, schema, or generated-folder policy;
-- VS Code `globalState` or composed UI layout.
+- committed component-level VS Code `globalState` or composed UI layout declarations; use only the explicit private `-UiStateFromProfile` pass-through when a starting snapshot is wanted.
 
 ## Testing changes
 

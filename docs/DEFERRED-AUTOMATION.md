@@ -7,7 +7,7 @@
 - Composition is temporary-directory-first, validated before replacement, idempotent, and isolated from live VS Code user data.
 - Platform and explicitly supplied ignored machine overlays are supported.
 - Reviewed `.code-profile` artifacts can be generated explicitly for manual import through VS Code.
-- Exported resources are limited to composed settings, extensions, keybindings, and profile identity; VS Code owns live UI state.
+- Exported resources are limited to composed settings, extensions, keybindings, profile identity, and an optional explicitly supplied opaque UI-state seed; VS Code owns live UI state after import.
 - Pester tests cover merge behavior, validation, safe replacement, and current core profiles.
 
 ## Current delivery state
@@ -16,6 +16,7 @@
 - Settings Sync remains the primary cross-machine delivery mechanism after a profile is imported.
 - This repository is the canonical human-readable configuration and composition source.
 - Live VS Code profiles remain the runtime source of truth for UI placement and other VS Code-owned state.
+- A private manually exported profile can provide a copy-on-create UI starting point through `-UiStateFromProfile`; automatic capture, layout merging, and continuing inheritance remain deferred.
 - Stable profiles may be exported and stored privately.
 - Default is the shared base and already provides everyday shell-language support to every profile.
 - PowerShell Development is an optional advanced profile, not a sixth required daily profile.

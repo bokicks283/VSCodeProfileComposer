@@ -31,6 +31,10 @@ param(
 
     [Parameter(ParameterSetName = 'One')]
     [Parameter(ParameterSetName = 'All')]
+    [string]$UiStateFromProfile,
+
+    [Parameter(ParameterSetName = 'One')]
+    [Parameter(ParameterSetName = 'All')]
     [Parameter(ParameterSetName = 'Validate')]
     [switch]$Strict
 )
@@ -53,6 +57,10 @@ function Write-ValidationSummary {
 }
 
 try {
+    if ($UiStateFromProfile -and -not $ExportCodeProfile) {
+        throw '-UiStateFromProfile requires -ExportCodeProfile.'
+    }
+
     if ($Validate) {
         $result = Test-ComposerRepository -RepositoryRoot $repositoryRoot -Platform $Platform -MachineFile $MachineFile
         Write-ValidationSummary $result
@@ -75,11 +83,13 @@ try {
         }
         if ($Platform) { $parameters.Platform = $Platform }
         if ($MachineFile) { $parameters.MachineFile = $MachineFile }
+        if ($UiStateFromProfile) { $parameters.UiStateFromProfile = $UiStateFromProfile }
         $result = Invoke-ProfileComposition @parameters
         if ($DryRun) {
             Write-Host "DRY RUN: $($result.profileId) ($($result.displayName))"
             Write-Host "  Planned output: $($result.outputDirectory)"
             if ($result.codeProfileExportPath) { Write-Host "  Planned .code-profile: $($result.codeProfileExportPath)" }
+            if ($result.uiStateSeeded) { Write-Host '  UI state seed: copied from the explicitly supplied profile export' }
             Write-Host "  Inputs:"
             foreach ($input in $result.inputFiles) { Write-Host "    $($input.type): $($input.path)" }
             Write-Host "  Counts: $($result.counts.settings) settings, $($result.counts.extensions) extensions, $($result.counts.keybindings) keybindings, $($result.counts.overrides) overrides, $($result.counts.warnings) warnings"

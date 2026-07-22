@@ -34,6 +34,12 @@ pwsh ./scripts/Compose-Profile.ps1 -Profile default -Platform windows -ExportCod
 pwsh ./scripts/Compose-Profile.ps1 -Profile default -Platform windows -ExportCodeProfile -DryRun
 ```
 
+After arranging a disposable source profile in VS Code and exporting it manually, seed that same starting layout into one or every generated import:
+
+```powershell
+pwsh ./scripts/Compose-Profile.ps1 -All -Platform windows -ExportCodeProfile -UiStateFromProfile "C:\private\Composer Default Layout.code-profile"
+```
+
 Warnings are informational by default. Add `-Strict` to make warnings fail validation or composition.
 
 ## Repository model
@@ -77,7 +83,9 @@ Repository validation checks recipes, JSONC/YAML structure, extension IDs and du
 
 Add `-ExportCodeProfile` to one-profile or `-All` composition. For example, Default writes `build/profiles/default/Default.code-profile`; Unreal writes `build/profiles/unreal/Unreal-Engine.code-profile`. The export contains the fully composed settings, recipe-owned extension identifiers, and generated keybindings. VS Code handles extension acquisition during its normal import workflow—composition never installs extensions.
 
-For a portable export, omit `-MachineFile`. Supplying a machine overlay includes those explicitly requested settings and classifies the export as `machine-overlay-included`, so it is intended for the same or a compatible machine.
+For a portable export, omit both `-MachineFile` and `-UiStateFromProfile`. Supplying a machine overlay includes those explicitly requested settings and classifies the export as `machine-overlay-included`, so it is intended for the same or a compatible machine.
+
+`-UiStateFromProfile` requires `-ExportCodeProfile`. It reads a manually exported `.code-profile`, validates its `globalState` resource, and copies only that opaque resource into the new export. Source settings, extensions, keybindings, name, and source path are not copied. This is a one-time starting snapshot, not inheritance: VS Code owns each profile's UI after import, later layout changes do not propagate, and views introduced by other extensions use their normal defaults. A seeded export is private and must be reviewed because VS Code `globalState` can include extension or account-related state.
 
 Import manually:
 
@@ -90,7 +98,7 @@ File → Preferences → Profiles
 → Create Profile
 ```
 
-UI placement is not composed. After import, customize the profile UI in VS Code. VS Code owns and syncs the resulting live UI state. Review every import preview: re-importing may create a profile or replace selected profile resources according to VS Code's current import workflow.
+By default, UI placement is not included. When an explicit UI seed is supplied, the composer passes the snapshot through without interpreting or merging it. After import, VS Code owns and syncs the resulting live UI state. Review every import preview: re-importing may create a profile or replace selected profile resources according to VS Code's current import workflow.
 
 `components/default/keybindings.jsonc` is currently absent, so current exports correctly carry an empty custom-keybinding array. Add repository-owned bindings there when they are ready; the composer never reads live user keybindings.
 

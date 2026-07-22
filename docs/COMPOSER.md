@@ -81,7 +81,15 @@ The optional export follows VS Code's `IUserDataProfileTemplate` JSON representa
 
 The format has no identifiable schema version, so the manifest records `schemaVersion: "unversioned"` plus the VS Code version and commit used for verification. On import, VS Code reviews the resources and resolves/installs extension identifiers through its normal profile-import workflow.
 
-The export deliberately has no `globalState` resource. UI placement is not composed. After import, customize the profile UI in VS Code. VS Code owns and syncs the resulting live UI state. Accidental `globalState` or `ui-state` source files fail repository validation.
+The export has no `globalState` resource by default. Accidental component-level `globalState` or `ui-state` source files still fail repository validation.
+
+For an explicit one-time starting layout, pass a private VS Code export:
+
+```powershell
+pwsh ./scripts/Compose-Profile.ps1 -All -Platform windows -ExportCodeProfile -UiStateFromProfile "C:\private\Composer Default Layout.code-profile"
+```
+
+The composer validates the source wrapper and passes only its opaque `globalState` string through unchanged. It does not copy source settings, extensions, keybindings, name, or path, and it does not interpret or merge the UI payload. The manifest records the payload hash and `seed-on-import-then-managed-by-vscode`. Generated profiles receive the same starting snapshot, after which VS Code owns each live layout independently.
 
 Portable export:
 
@@ -95,7 +103,7 @@ Same-machine or compatible-machine export with explicit local settings:
 pwsh ./scripts/Compose-Profile.ps1 -Profile unreal -Platform windows -MachineFile ./machine/local/windows.jsonc -ExportCodeProfile
 ```
 
-Machine values are included in the settings payload, but never copied into export metadata. The manifest records `portable` or `machine-overlay-included`, the export filename and SHA-256 hash, `managed-by-vscode` UI policy, and `manual-vscode-profile-import` import method.
+Machine values are included in the settings payload, but never copied into export metadata. The manifest records the export filename and SHA-256 hash, portability classification, UI-state policy, and `manual-vscode-profile-import` import method. A UI-seeded artifact is classified `ui-state-seed-included`, or `machine-overlay-and-ui-state-seed-included` when both private inputs are used.
 
 Import through VS Code's Profiles editor:
 
@@ -141,7 +149,8 @@ The suite covers recipe and JSONC parsing, validation, every merge mode, redacti
 - `missing-platform-overlay` or `missing-machine-overlay`: check the explicit argument. Relative machine paths resolve from the repository root.
 - `portable-absolute-path`: move the setting into `machine/local/` and pass it explicitly.
 - `invalid-export-filename`: keep the profile display name free of path separators, traversal sequences, and reserved Windows names.
-- `unsupported-ui-state-source`: remove the file; UI state belongs to the imported live VS Code profile.
+- `unsupported-ui-state-source`: remove the component-level file; starting UI state is accepted only through explicit `-UiStateFromProfile` pass-through.
+- missing or invalid UI seed: manually export the arranged source profile again and confirm it contains a non-empty `globalState` resource.
 - strict-mode warning failure: rerun without `-Strict` to inspect an otherwise valid build, or resolve the warning at its source.
 
 ## Installer and rollback status
