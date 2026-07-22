@@ -1,9 +1,39 @@
 {
   // Shared portable and daily-driver behavior used by every profile.
+  "[jsonc]": {
+    "editor.defaultFormatter": "vscode.json-language-features"
+  },
+  "[markdown]": {
+    "editor.unicodeHighlight.ambiguousCharacters": false,
+    "editor.unicodeHighlight.invisibleCharacters": false,
+    "editor.wordWrap": "on",
+    "editor.quickSuggestions": {
+      "comments": "on",
+      "strings": "on",
+      "other": "on"
+    }
+  },
+  "[xml]": {
+    "editor.defaultFormatter": "redhat.vscode-xml"
+  },
+  "chat.sessionSync.enabled": true,
+  "debug.toolBarLocation": "docked",
   "editor.autoClosingBrackets": "always",
   "editor.autoClosingQuotes": "always",
+  "editor.colorDecoratorsActivatedOn": "click",
   "editor.insertSpaces": true,
-
+  "editor.minimap.scale": 2,
+  "editor.minimap.showSlider": "always",
+  "editor.parameterHints.cycle": false,
+  "editor.quickSuggestionsDelay": 5,
+  "editor.semanticTokenColorCustomizations": {
+    "enabled": true
+  },
+  "editor.showDeprecated": false,
+  "editor.suggest.localityBonus": true,
+  "editor.suggest.showReferences": false,
+  "editor.suggestSelection": "recentlyUsedByPrefix",
+  "editor.tabSize": 2,
   "files.associations": {
     ".env": "dotenv",
     "*.bash": "shellscript",
@@ -19,15 +49,25 @@
     "*.toml": "toml",
     "*.zsh": "shellscript"
   },
+  "files.autoSave": "afterDelay",
   "files.eol": "\n",
   "files.insertFinalNewline": true,
   "files.trimFinalNewlines": true,
-
+  "github.copilot.enable": {
+    "plaintext": true
+  },
+  "gitlens.ai.gitkraken.model": "gemini:gemini-2.5-flash",
+  "gitlens.ai.model": "gitkraken",
+  "gitlens.statusBar.enabled": false,
+  "rainbow_csv.comment_prefix": "#",
+  "search.quickOpen.includeSymbols": true,
+  "search.searchView.keywordSuggestions": true,
+  "task.problemMatchers.neverPrompt": false,
   "terminal.explorerKind": "both",
   "terminal.integrated.persistentSessionScrollback": 1000,
+
   "terminal.integrated.scrollback": 10000,
   "terminal.integrated.shellIntegration.environmentReporting": true,
-
   "todo-tree.filtering.excludeGlobs": [
     "**/vendor/**",
     "**/node_modules/**",
@@ -46,52 +86,18 @@
   "todo-tree.general.showIconsInsteadOfTagsInStatusBar": true,
   "todo-tree.general.statusBar": "tags",
   "todo-tree.tree.showCountsInTree": true,
-
-  // General daily-driver preferences shared by every profile.
-  "[markdown]": {
-    "editor.unicodeHighlight.ambiguousCharacters": false,
-    "editor.unicodeHighlight.invisibleCharacters": false,
-    "editor.wordWrap": "on",
-    "editor.quickSuggestions": {
-      "comments": "on",
-      "strings": "on",
-      "other": "on"
-    }
-  },
-  "[xml]": {
-    "editor.defaultFormatter": "redhat.vscode-xml"
-  },
-  "[jsonc]": {
-    "editor.defaultFormatter": "vscode.json-language-features"
-  },
-
-  "debug.toolBarLocation": "docked",
-  "editor.colorDecoratorsActivatedOn": "click",
-  "editor.minimap.scale": 2,
-  "editor.minimap.showSlider": "always",
-  "editor.parameterHints.cycle": false,
-  "editor.quickSuggestionsDelay": 5,
-  "editor.semanticTokenColorCustomizations": {
-    "enabled": true
-  },
-  "editor.showDeprecated": false,
-  "editor.suggest.localityBonus": true,
-  "editor.suggest.showReferences": false,
-  "editor.suggestSelection": "recentlyUsedByPrefix",
-  "editor.tabSize": 2,
-
-  "files.autoSave": "afterDelay",
-
-  "rainbow_csv.comment_prefix": "#",
-
-  "search.quickOpen.includeSymbols": true,
-  "search.searchView.keywordSuggestions": true,
-
-  "task.problemMatchers.neverPrompt": false,
-
   "vsicons.dontShowNewVersionMessage": true,
+  "window.zoomLevel": 2,
   "workbench.colorTheme": "One Dark Pro Darker",
   "workbench.editorLargeFileConfirmation": 4096,
   "workbench.iconTheme": "vscode-icons",
-  "workbench.settings.enableNaturalLanguageSearch": false
+  "workbench.settings.enableNaturalLanguageSearch": false,
+  "yaml.disableSchemaDetection": [
+    "**/.github/workflows/*.yml",
+    "**/.github/workflows/*.yaml",
+    "**/.gitea/workflows/*.yml",
+    "**/.gitea/workflows/*.yaml",
+    "**/.forgejo/workflows/*.yml",
+    "**/.forgejo/workflows/*.yaml"
+  ]
 }
