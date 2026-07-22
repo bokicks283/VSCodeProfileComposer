@@ -12,3 +12,5 @@ ms-vscode.hexeditor
 rangav.vscode-thunder-client
 tomoki1207.pdf
 wmaurer.change-case
+ibm.output-colorizer
+zhuangtongfa.one-dark-pro
