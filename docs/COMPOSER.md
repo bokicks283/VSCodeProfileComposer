@@ -2,23 +2,24 @@
 
 ## Overview
 
-`scripts/Compose-Profile.ps1` is the single supported entry point. It validates and composes repository-owned artifacts only. Runtime composition requires PowerShell 7 and built-in .NET APIs; YAML support is intentionally limited to the current recipe schema, so no YAML module is required.
+`scripts/ProfileComposer.ps1` is the unified supported entry point. It validates and composes repository-owned artifacts, lists definitions, captures explicitly supplied UI state, and performs safe repository renames/default-ownership changes. `Compose-Profile.ps1` and `Save-ProfileUiState.ps1` remain compatible wrappers. Runtime composition requires PowerShell 7 and built-in .NET APIs; YAML support is intentionally limited to the current recipe schema, so no YAML module is required.
 
 For a task-oriented walkthrough rather than this technical reference, see [Complete usage guide](USAGE.md).
 
 ## Commands
 
 ```powershell
-pwsh ./scripts/Compose-Profile.ps1 -Validate
-pwsh ./scripts/Compose-Profile.ps1 -Global
-pwsh ./scripts/Compose-Profile.ps1 -ListMachines
-pwsh ./scripts/Compose-Profile.ps1 -Profile default
-pwsh ./scripts/Compose-Profile.ps1 -Profile unreal -Platform windows
-pwsh ./scripts/Compose-Profile.ps1 -Profile unreal -Platform windows -Machine windows
-pwsh ./scripts/Compose-Profile.ps1 -All -Platform windows
-pwsh ./scripts/Compose-Profile.ps1 -Profile default -Platform windows -DryRun
-pwsh ./scripts/Compose-Profile.ps1 -Profile default -Platform windows -ExportCodeProfile
-pwsh ./scripts/Compose-Profile.ps1 -All -Platform windows -ExportCodeProfile
+pwsh ./scripts/ProfileComposer.ps1 help
+pwsh ./scripts/ProfileComposer.ps1 validate
+pwsh ./scripts/ProfileComposer.ps1 compose-global
+pwsh ./scripts/ProfileComposer.ps1 list-profiles
+pwsh ./scripts/ProfileComposer.ps1 list-machines
+pwsh ./scripts/ProfileComposer.ps1 compose default
+pwsh ./scripts/ProfileComposer.ps1 compose unreal -Platform windows -Machine windows
+pwsh ./scripts/ProfileComposer.ps1 compose-all -Platform windows -ExportCodeProfile
+pwsh ./scripts/ProfileComposer.ps1 rename-profile old new -DryRun
+pwsh ./scripts/ProfileComposer.ps1 rename-component old new -DryRun
+pwsh ./scripts/ProfileComposer.ps1 default show
 ```
 
 Use `-Strict` when warnings, including duplicate extension declarations, should fail the command. Ordinary composition fails only on errors.

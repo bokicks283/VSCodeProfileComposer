@@ -9,6 +9,7 @@ BeforeAll {
         foreach ($directory in @('components', 'profiles', 'platform', 'machine', 'global')) {
             Copy-Item -LiteralPath (Join-Path $script:RepositoryRoot $directory) -Destination $fixture -Recurse
         }
+        Copy-Item -LiteralPath (Join-Path $script:RepositoryRoot 'composer.jsonc') -Destination $fixture
         return $fixture
     }
 
@@ -122,10 +123,13 @@ Describe 'Recipe parsing and repository validation' {
         $recipe.Components | Should -Be @('default', 'cpp', 'unreal')
     }
 
-    It 'uses Default as the shared first component in every recipe' {
+    It 'uses the configured shared default as the first component in every recipe' {
+        $sharedDefault = Get-SharedDefaultComponent $script:RepositoryRoot
+        $sharedDefault | Should -BeExactly 'default'
         foreach ($definition in Get-ProfileDefinitions $script:RepositoryRoot) {
             $recipe = Read-ProfileRecipe $definition.Path
-            $recipe.Components[0] | Should -BeExactly 'default'
+            $recipe.Components[0] | Should -BeExactly $sharedDefault
+            @($recipe.Components | Where-Object { $_ -ieq $sharedDefault }).Count | Should -Be 1
         }
         Test-Path -LiteralPath (Join-Path $script:RepositoryRoot 'components/suggested-baseline') | Should -BeFalse
     }
@@ -192,6 +196,103 @@ Describe 'Repository keybinding ownership' {
         $sqlBindings.Count | Should -Be 23
         $sqlBindings.command | Should -Contain 'mssql.rebuildIntelliSenseCache'
         $pythonBindings.command | Should -Not -Contain 'mssql.rebuildIntelliSenseCache'
+    }
+}
+
+Describe 'Safe repository transformations' {
+    It 'dry-runs and applies a profile rename with its optional override and stored UI-state seed' {
+        $fixture = New-ComposerFixture 'rename-profile'
+        Write-TestFile (Join-Path $fixture 'profiles/python.settings.jsonc') '{ "python.analysis.typeCheckingMode": "strict" }'
+        Write-TestFile (Join-Path $fixture 'machine/local/ui-state/python/seed.code-profile') '{ "name": "seed", "globalState": "{\"layout\":true}" }'
+
+        $plan = Rename-ComposerProfile $fixture python python-work -DryRun
+        $plan.changes.source | Should -Contain 'profiles/python.yaml'
+        $plan.changes.source | Should -Contain 'profiles/python.settings.jsonc'
+        $plan.changes.source | Should -Contain 'machine/local/ui-state/python'
+        Test-Path -LiteralPath (Join-Path $fixture 'profiles/python.yaml') | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $fixture 'profiles/python-work.yaml') | Should -BeFalse
+
+        Rename-ComposerProfile $fixture python python-work | Out-Null
+        Test-Path -LiteralPath (Join-Path $fixture 'profiles/python.yaml') | Should -BeFalse
+        Test-Path -LiteralPath (Join-Path $fixture 'profiles/python-work.yaml') | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $fixture 'profiles/python-work.settings.jsonc') | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $fixture 'machine/local/ui-state/python-work/seed.code-profile') | Should -BeTrue
+        (Test-ComposerRepository $fixture).errors.Count | Should -Be 0
+    }
+
+    It 'renames a component, preserves recipe order, and updates configured-default ownership' {
+        $fixture = New-ComposerFixture 'rename-component'
+        $before = (Read-ProfileRecipe (Join-Path $fixture 'profiles/unreal.yaml')).Components
+        $plan = Rename-ComposerComponent $fixture default shared -DryRun
+        $plan.changes.target | Should -Contain 'components/shared'
+        Get-SharedDefaultComponent $fixture | Should -BeExactly 'default'
+
+        Rename-ComposerComponent $fixture default shared | Out-Null
+        Test-Path -LiteralPath (Join-Path $fixture 'components/default') | Should -BeFalse
+        Test-Path -LiteralPath (Join-Path $fixture 'components/shared') | Should -BeTrue
+        Get-SharedDefaultComponent $fixture | Should -BeExactly 'shared'
+        $after = (Read-ProfileRecipe (Join-Path $fixture 'profiles/unreal.yaml')).Components
+        $after | Should -Be @('shared', $before[1], $before[2])
+        (Test-ComposerRepository $fixture).errors.Count | Should -Be 0
+    }
+
+    It 'sets the shared default first without duplicates and preserves remaining order' {
+        $fixture = New-ComposerFixture 'set-default'
+        $before = (Read-ProfileRecipe (Join-Path $fixture 'profiles/python-database.yaml')).Components
+        $plan = Set-SharedDefaultComponent $fixture database -DryRun
+        $plan.changes.target | Should -Contain 'composer.jsonc'
+        Get-SharedDefaultComponent $fixture | Should -BeExactly 'default'
+
+        Set-SharedDefaultComponent $fixture database | Out-Null
+        Get-SharedDefaultComponent $fixture | Should -BeExactly 'database'
+        $after = (Read-ProfileRecipe (Join-Path $fixture 'profiles/python-database.yaml')).Components
+        $after | Should -Be @('database', $before[0], $before[1])
+        @($after | Where-Object { $_ -ieq 'database' }).Count | Should -Be 1
+        foreach ($definition in Get-ProfileDefinitions $fixture) {
+            (Read-ProfileRecipe $definition.Path).Components[0] | Should -BeExactly 'database'
+        }
+        (Test-ComposerRepository $fixture).errors.Count | Should -Be 0
+    }
+
+    It 'refuses ID collisions without changing source paths' {
+        $fixture = New-ComposerFixture 'rename-collision'
+        $before = [System.IO.File]::ReadAllText((Join-Path $fixture 'profiles/python.yaml'))
+        { Rename-ComposerProfile $fixture python default } | Should -Throw '*already exists*'
+        { Rename-ComposerComponent $fixture python default } | Should -Throw '*already exists*'
+        [System.IO.File]::ReadAllText((Join-Path $fixture 'profiles/python.yaml')) | Should -BeExactly $before
+        Test-Path -LiteralPath (Join-Path $fixture 'components/python') | Should -BeTrue
+    }
+
+    It 'rolls back every swapped source path when post-commit validation fails' {
+        $fixture = New-ComposerFixture 'rename-rollback'
+        $beforeRecipe = [System.IO.File]::ReadAllText((Join-Path $fixture 'profiles/unreal.yaml'))
+        InModuleScope ProfileComposer -Parameters @{ FixtureRoot = $fixture } {
+            param($FixtureRoot)
+            $script:ValidationCall = 0
+            Mock Test-ComposerRepository {
+                $script:ValidationCall++
+                $errors = [System.Collections.Generic.List[object]]::new()
+                if ($script:ValidationCall -eq 3) { $errors.Add([pscustomobject]@{ code = 'forced'; message = 'forced post-commit failure' }) }
+                [pscustomobject]@{
+                    errors = $errors
+                    warnings = [System.Collections.Generic.List[object]]::new()
+                    information = [System.Collections.Generic.List[object]]::new()
+                }
+            }
+            { Rename-ComposerComponent $FixtureRoot cpp native-cpp } | Should -Throw '*rolled back*'
+        }
+        Test-Path -LiteralPath (Join-Path $fixture 'components/cpp') | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $fixture 'components/native-cpp') | Should -BeFalse
+        [System.IO.File]::ReadAllText((Join-Path $fixture 'profiles/unreal.yaml')) | Should -BeExactly $beforeRecipe
+    }
+
+    It 'detects missing configured defaults and recipe/default inconsistencies' {
+        $fixture = New-ComposerFixture 'invalid-default-ownership'
+        Write-TestFile (Join-Path $fixture 'composer.jsonc') '{ "sharedDefaultComponent": "missing" }'
+        (Test-ComposerRepository $fixture).errors.code | Should -Contain 'missing-shared-default-component'
+        Write-TestFile (Join-Path $fixture 'composer.jsonc') '{ "sharedDefaultComponent": "default" }'
+        Write-TestFile (Join-Path $fixture 'profiles/python.yaml') "name: Python`ncomponents:`n  - python`n  - default`n"
+        (Test-ComposerRepository $fixture).errors.code | Should -Contain 'shared-default-not-first'
     }
 }
 
@@ -715,6 +816,59 @@ Describe 'VS Code .code-profile export' {
         $manifest = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $output 'manifest.json')))
         $manifest.codeProfileExportRequested | Should -BeFalse
         $manifest.codeProfileExport | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Unified CLI and compatibility wrappers' {
+    It 'shows general and command-specific help with examples' {
+        $cli = Join-Path $script:RepositoryRoot 'scripts/ProfileComposer.ps1'
+        $general = @(& pwsh -NoProfile -File $cli help 2>&1)
+        $LASTEXITCODE | Should -Be 0
+        $general -join "`n" | Should -Match 'rename-component'
+        $specific = @(& pwsh -NoProfile -File $cli help compose 2>&1)
+        $LASTEXITCODE | Should -Be 0
+        $specific -join "`n" | Should -Match 'Python-Database|python-database'
+    }
+
+    It 'dispatches list, validation, and dry-run rename commands against an isolated fixture' {
+        $fixture = New-ComposerFixture 'cli-dispatch'
+        $cli = Join-Path $script:RepositoryRoot 'scripts/ProfileComposer.ps1'
+        $list = @(& pwsh -NoProfile -File $cli list profiles -RepositoryRoot $fixture 2>&1)
+        $LASTEXITCODE | Should -Be 0
+        $list -join "`n" | Should -Match 'python-database'
+        $validation = @(& pwsh -NoProfile -File $cli validate -RepositoryRoot $fixture -Strict 2>&1)
+        $LASTEXITCODE | Should -Be 0
+        $validation -join "`n" | Should -Match '0 error'
+        $compose = @(& pwsh -NoProfile -File $cli compose default -RepositoryRoot $fixture -Platform windows -DryRun 2>&1)
+        $LASTEXITCODE | Should -Be 0
+        $compose -join "`n" | Should -Match "planned 'default'"
+        $rename = @(& pwsh -NoProfile -File $cli rename profile python python-work -RepositoryRoot $fixture -DryRun 2>&1)
+        $LASTEXITCODE | Should -Be 0
+        $rename -join "`n" | Should -Match 'MOVE profiles/python.yaml -> profiles/python-work.yaml'
+        Test-Path -LiteralPath (Join-Path $fixture 'profiles/python.yaml') | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $fixture 'profiles/python-work.yaml') | Should -BeFalse
+    }
+
+    It 'returns nonzero with an actionable error for invalid dispatch' {
+        $cli = Join-Path $script:RepositoryRoot 'scripts/ProfileComposer.ps1'
+        $output = @(& pwsh -NoProfile -File $cli definitely-not-a-command 2>&1)
+        $LASTEXITCODE | Should -Be 1
+        $output -join "`n" | Should -Match 'Unknown command'
+        $output -join "`n" | Should -Match 'help'
+    }
+
+    It 'keeps both legacy entry scripts usable as dry-run wrappers' {
+        $compose = Join-Path $script:RepositoryRoot 'scripts/Compose-Profile.ps1'
+        $composeOutput = @(& pwsh -NoProfile -File $compose -Profile default -Platform windows -DryRun 2>&1)
+        $LASTEXITCODE | Should -Be 0
+        $composeOutput -join "`n" | Should -Match 'DRY RUN'
+
+        $seed = Join-Path $TestDrive 'wrapper-seed.code-profile'
+        Write-TestFile $seed '{ "name": "seed", "globalState": "{\"layout\":true}" }'
+        $save = Join-Path $script:RepositoryRoot 'scripts/Save-ProfileUiState.ps1'
+        $saveOutput = @(& pwsh -NoProfile -File $save -Profile default -SourceProfileExport $seed -DryRun 2>&1)
+        $LASTEXITCODE | Should -Be 0
+        $saveOutput -join "`n" | Should -Match 'DRY RUN'
     }
 }
 

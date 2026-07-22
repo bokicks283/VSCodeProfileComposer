@@ -1,6 +1,6 @@
 Set-StrictMode -Version Latest
 
-$script:ComposerVersion = '0.6.0'
+$script:ComposerVersion = '0.7.0'
 $script:ManifestVersion = 1
 $script:Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 $script:SensitivePattern = '(?i)(password|(?<!semantic)token|secret|credential|connectionstring|api[_-]?key|private[_-]?key)'
@@ -297,6 +297,52 @@ function Get-ProfileDefinitions {
     })
 }
 
+function Test-ComposerId {
+    param([Parameter(Mandatory)][string]$Id)
+    return $Id -match '^[A-Za-z0-9][A-Za-z0-9._-]*$'
+}
+
+function Get-ComposerConfiguration {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$RepositoryRoot)
+
+    $path = Join-Path ([System.IO.Path]::GetFullPath($RepositoryRoot)) 'composer.jsonc'
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        throw "Required composer configuration 'composer.jsonc' is missing."
+    }
+    $configuration = Read-JsonCFile $path
+    if (-not (Test-IsDictionary $configuration)) { throw "Composer configuration root must be an object in 'composer.jsonc'." }
+    if (-not $configuration.Contains('sharedDefaultComponent') -or
+        $configuration['sharedDefaultComponent'] -isnot [string] -or
+        -not (Test-ComposerId ([string]$configuration['sharedDefaultComponent']))) {
+        throw "Composer configuration must declare a valid 'sharedDefaultComponent' ID."
+    }
+    return $configuration
+}
+
+function Get-SharedDefaultComponent {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$RepositoryRoot)
+    return [string](Get-ComposerConfiguration -RepositoryRoot $RepositoryRoot)['sharedDefaultComponent']
+}
+
+function ConvertTo-YamlDoubleQuotedScalar {
+    param([Parameter(Mandatory)][string]$Value)
+    return ($Value | ConvertTo-Json -Compress)
+}
+
+function ConvertTo-ProfileRecipeText {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string[]]$Components
+    )
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $lines.Add("name: $(ConvertTo-YamlDoubleQuotedScalar $Name)")
+    $lines.Add('components:')
+    foreach ($component in $Components) { $lines.Add("  - $component") }
+    return ($lines -join "`n") + "`n"
+}
+
 function Get-MachineDefinitions {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$RepositoryRoot)
@@ -368,6 +414,10 @@ function Test-ComposerRepository {
     $buildRoot = [System.IO.Path]::GetFullPath((Join-Path $root 'build/profiles'))
     $globalSettingsPath = Join-Path $root 'global/settings.jsonc'
     $globalSettingIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    $sharedDefaultComponent = $null
+
+    try { $sharedDefaultComponent = Get-SharedDefaultComponent -RepositoryRoot $root }
+    catch { Add-ValidationItem $result errors 'invalid-composer-configuration' $_.Exception.Message 'composer.jsonc' }
 
     if (-not (Test-Path -LiteralPath $globalSettingsPath -PathType Leaf)) {
         Add-ValidationItem $result errors 'missing-global-settings' "Required global settings source 'global/settings.jsonc' is missing."
@@ -474,6 +524,10 @@ function Test-ComposerRepository {
         }
     }
 
+    if ($sharedDefaultComponent -and -not $componentIds.Contains($sharedDefaultComponent)) {
+        Add-ValidationItem $result errors 'missing-shared-default-component' "Configured shared default component '$sharedDefaultComponent' does not exist." 'composer.jsonc' '/sharedDefaultComponent'
+    }
+
     foreach ($entry in $extensionOwners.GetEnumerator()) {
         $owners = @($entry.Value | Select-Object -Unique)
         if ($owners.Count -gt 1) {
@@ -509,6 +563,18 @@ function Test-ComposerRepository {
                 }
                 if (-not $componentIds.Contains($component)) {
                     Add-ValidationItem $result errors 'missing-recipe-component' "Profile '$($profile.Id)' references missing component '$component'." $source
+                }
+            }
+            if ($sharedDefaultComponent) {
+                $defaultCount = @($recipe.Components | Where-Object { $_ -ieq $sharedDefaultComponent }).Count
+                if ($defaultCount -eq 0) {
+                    Add-ValidationItem $result errors 'missing-recipe-shared-default' "Profile '$($profile.Id)' does not include configured shared default '$sharedDefaultComponent'." $source
+                }
+                elseif ($recipe.Components[0] -ine $sharedDefaultComponent) {
+                    Add-ValidationItem $result errors 'shared-default-not-first' "Profile '$($profile.Id)' must declare configured shared default '$sharedDefaultComponent' first." $source
+                }
+                if ($defaultCount -gt 1) {
+                    Add-ValidationItem $result errors 'duplicate-recipe-shared-default' "Profile '$($profile.Id)' declares configured shared default '$sharedDefaultComponent' more than once." $source
                 }
             }
         }
@@ -1031,6 +1097,275 @@ function Invoke-SafeDirectoryReplace {
     }
 }
 
+function New-ComposerStagingRepository {
+    param([Parameter(Mandatory)][string]$RepositoryRoot)
+
+    $root = [System.IO.Path]::GetFullPath($RepositoryRoot)
+    $stagingRoot = Join-Path ([System.IO.Path]::GetTempPath()) "VSCodeProfileComposer.$([guid]::NewGuid().ToString('N'))"
+    [System.IO.Directory]::CreateDirectory($stagingRoot) | Out-Null
+    try {
+        foreach ($directory in @('components', 'profiles', 'global', 'platform', 'machine')) {
+            $source = Join-Path $root $directory
+            if (Test-Path -LiteralPath $source -PathType Container) {
+                Copy-Item -LiteralPath $source -Destination (Join-Path $stagingRoot $directory) -Recurse -Force
+            }
+        }
+        $configuration = Join-Path $root 'composer.jsonc'
+        if (Test-Path -LiteralPath $configuration -PathType Leaf) {
+            Copy-Item -LiteralPath $configuration -Destination (Join-Path $stagingRoot 'composer.jsonc') -Force
+        }
+        return $stagingRoot
+    }
+    catch {
+        if (Test-Path -LiteralPath $stagingRoot) { Remove-Item -LiteralPath $stagingRoot -Recurse -Force }
+        throw
+    }
+}
+
+function Move-ComposerItemCaseSafe {
+    param([Parameter(Mandatory)][string]$Source, [Parameter(Mandatory)][string]$Destination)
+
+    if ($Source -ceq $Destination) { return }
+    if ($Source -ieq $Destination) {
+        $temporary = "$Source.rename.$([guid]::NewGuid().ToString('N'))"
+        Move-Item -LiteralPath $Source -Destination $temporary -ErrorAction Stop
+        Move-Item -LiteralPath $temporary -Destination $Destination -ErrorAction Stop
+        return
+    }
+    Move-Item -LiteralPath $Source -Destination $Destination -ErrorAction Stop
+}
+
+function Assert-StagedRepositoryValid {
+    param([Parameter(Mandatory)][string]$StagingRoot)
+    $validation = Test-ComposerRepository -RepositoryRoot $StagingRoot
+    if ($validation.errors.Count -gt 0) {
+        $details = @($validation.errors | ForEach-Object { "$($_.code): $($_.message)" }) -join '; '
+        throw "Planned repository change failed validation: $details"
+    }
+}
+
+function Invoke-StagedRepositoryCommit {
+    param(
+        [Parameter(Mandatory)][string]$RepositoryRoot,
+        [Parameter(Mandatory)][string]$StagingRoot,
+        [Parameter(Mandatory)][string[]]$RelativePaths
+    )
+
+    $root = [System.IO.Path]::GetFullPath($RepositoryRoot)
+    $backupRoot = Join-Path $root ".composer-rollback.$([guid]::NewGuid().ToString('N'))"
+    [System.IO.Directory]::CreateDirectory($backupRoot) | Out-Null
+    $applied = [System.Collections.Generic.List[object]]::new()
+    try {
+        foreach ($relativePath in $RelativePaths) {
+            $target = [System.IO.Path]::GetFullPath((Join-Path $root $relativePath))
+            $staged = [System.IO.Path]::GetFullPath((Join-Path $StagingRoot $relativePath))
+            $backup = [System.IO.Path]::GetFullPath((Join-Path $backupRoot $relativePath))
+            if (-not (Test-PathWithinDirectory $target $root)) { throw "Transaction target '$relativePath' escapes the repository." }
+            if (-not (Test-PathWithinDirectory $staged $StagingRoot)) { throw "Staged target '$relativePath' escapes the staging repository." }
+            if (-not (Test-Path -LiteralPath $staged)) { throw "Staged transaction source '$relativePath' is missing." }
+            [System.IO.Directory]::CreateDirectory((Split-Path -Parent $target)) | Out-Null
+            [System.IO.Directory]::CreateDirectory((Split-Path -Parent $backup)) | Out-Null
+            $hadTarget = Test-Path -LiteralPath $target
+            if ($hadTarget) { Move-Item -LiteralPath $target -Destination $backup -ErrorAction Stop }
+            $applied.Add([pscustomobject]@{ Target = $target; Backup = $backup; HadTarget = $hadTarget })
+            Move-Item -LiteralPath $staged -Destination $target -ErrorAction Stop
+        }
+
+        $validation = Test-ComposerRepository -RepositoryRoot $root
+        if ($validation.errors.Count -gt 0) {
+            $details = @($validation.errors | ForEach-Object { "$($_.code): $($_.message)" }) -join '; '
+            throw "Repository validation failed after applying the transaction: $details"
+        }
+        Remove-Item -LiteralPath $backupRoot -Recurse -Force
+    }
+    catch {
+        for ($index = $applied.Count - 1; $index -ge 0; $index--) {
+            $entry = $applied[$index]
+            if (Test-Path -LiteralPath $entry.Target) { Remove-Item -LiteralPath $entry.Target -Recurse -Force }
+            if ($entry.HadTarget -and (Test-Path -LiteralPath $entry.Backup)) {
+                [System.IO.Directory]::CreateDirectory((Split-Path -Parent $entry.Target)) | Out-Null
+                Move-Item -LiteralPath $entry.Backup -Destination $entry.Target -ErrorAction SilentlyContinue
+            }
+        }
+        if (Test-Path -LiteralPath $backupRoot) { Remove-Item -LiteralPath $backupRoot -Recurse -Force }
+        throw "Repository transaction rolled back: $($_.Exception.Message)"
+    }
+}
+
+function Rename-ComposerProfile {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RepositoryRoot,
+        [Parameter(Mandatory)][string]$OldId,
+        [Parameter(Mandatory)][string]$NewId,
+        [switch]$DryRun
+    )
+
+    $root = [System.IO.Path]::GetFullPath($RepositoryRoot)
+    if (-not (Test-ComposerId $OldId)) { throw "Invalid source profile ID '$OldId'." }
+    if (-not (Test-ComposerId $NewId)) { throw "Invalid target profile ID '$NewId'." }
+    if ($OldId -ceq $NewId) { throw 'Source and target profile IDs are identical.' }
+    $preflight = Test-ComposerRepository -RepositoryRoot $root
+    if ($preflight.errors.Count -gt 0) { throw "Profile rename requires a valid repository; found $($preflight.errors.Count) error(s)." }
+    $definitions = @(Get-ProfileDefinitions $root)
+    $source = @($definitions | Where-Object Id -ieq $OldId)
+    if ($source.Count -eq 0) { throw "Profile '$OldId' does not exist." }
+    if ($source.Count -gt 1) { throw "Profile ID '$OldId' is ambiguous." }
+    if (@($definitions | Where-Object { $_.Id -ieq $NewId -and $_.Path -cne $source[0].Path }).Count -gt 0) {
+        throw "Profile '$NewId' already exists."
+    }
+
+    $sourceId = $source[0].Id
+    $extension = [System.IO.Path]::GetExtension($source[0].Path)
+    $changes = [System.Collections.Generic.List[object]]::new()
+    $changes.Add([pscustomobject]@{ action = 'move'; source = "profiles/$sourceId$extension"; target = "profiles/$NewId$extension" })
+    $overrideSource = Join-Path $root "profiles/$sourceId.settings.jsonc"
+    $overrideTarget = Join-Path $root "profiles/$NewId.settings.jsonc"
+    if ((Test-Path -LiteralPath $overrideTarget) -and $overrideSource -ine $overrideTarget) { throw "Profile override for '$NewId' already exists." }
+    if (Test-Path -LiteralPath $overrideSource -PathType Leaf) {
+        $changes.Add([pscustomobject]@{ action = 'move'; source = "profiles/$sourceId.settings.jsonc"; target = "profiles/$NewId.settings.jsonc" })
+    }
+    $uiSource = Join-Path $root "machine/local/ui-state/$sourceId"
+    $uiTarget = Join-Path $root "machine/local/ui-state/$NewId"
+    if ((Test-Path -LiteralPath $uiTarget) -and $uiSource -ine $uiTarget) { throw "Stored UI-state seed for '$NewId' already exists." }
+    $hasUiState = Test-Path -LiteralPath $uiSource -PathType Container
+    if ($hasUiState) {
+        $changes.Add([pscustomobject]@{ action = 'move'; source = "machine/local/ui-state/$sourceId"; target = "machine/local/ui-state/$NewId" })
+    }
+
+    $stagingRoot = New-ComposerStagingRepository $root
+    try {
+        Move-ComposerItemCaseSafe (Join-Path $stagingRoot "profiles/$sourceId$extension") (Join-Path $stagingRoot "profiles/$NewId$extension")
+        $stageOverrideSource = Join-Path $stagingRoot "profiles/$sourceId.settings.jsonc"
+        if (Test-Path -LiteralPath $stageOverrideSource) {
+            Move-ComposerItemCaseSafe $stageOverrideSource (Join-Path $stagingRoot "profiles/$NewId.settings.jsonc")
+        }
+        if ($hasUiState) {
+            Move-ComposerItemCaseSafe (Join-Path $stagingRoot "machine/local/ui-state/$sourceId") (Join-Path $stagingRoot "machine/local/ui-state/$NewId")
+        }
+        Assert-StagedRepositoryValid $stagingRoot
+        if (-not $DryRun) {
+            $commitPaths = [System.Collections.Generic.List[string]]::new()
+            $commitPaths.Add('profiles')
+            if ($hasUiState) { $commitPaths.Add('machine/local/ui-state') }
+            Invoke-StagedRepositoryCommit $root $stagingRoot $commitPaths.ToArray()
+        }
+        return [pscustomobject]@{ operation = 'rename-profile'; oldId = $sourceId; newId = $NewId; changes = [object[]]$changes.ToArray(); dryRun = [bool]$DryRun }
+    }
+    finally {
+        if (Test-Path -LiteralPath $stagingRoot) { Remove-Item -LiteralPath $stagingRoot -Recurse -Force }
+    }
+}
+
+function Rename-ComposerComponent {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RepositoryRoot,
+        [Parameter(Mandatory)][string]$OldId,
+        [Parameter(Mandatory)][string]$NewId,
+        [switch]$DryRun
+    )
+
+    $root = [System.IO.Path]::GetFullPath($RepositoryRoot)
+    if (-not (Test-ComposerId $OldId)) { throw "Invalid source component ID '$OldId'." }
+    if (-not (Test-ComposerId $NewId)) { throw "Invalid target component ID '$NewId'." }
+    if ($OldId -ceq $NewId) { throw 'Source and target component IDs are identical.' }
+    $preflight = Test-ComposerRepository $root
+    if ($preflight.errors.Count -gt 0) { throw "Component rename requires a valid repository; found $($preflight.errors.Count) error(s)." }
+    $directories = @(Get-ChildItem -LiteralPath (Join-Path $root 'components') -Directory)
+    $source = @($directories | Where-Object Name -ieq $OldId)
+    if ($source.Count -eq 0) { throw "Component '$OldId' does not exist." }
+    if ($source.Count -gt 1) { throw "Component ID '$OldId' is ambiguous." }
+    if (@($directories | Where-Object { $_.Name -ieq $NewId -and $_.FullName -cne $source[0].FullName }).Count -gt 0) {
+        throw "Component '$NewId' already exists."
+    }
+
+    $sourceId = $source[0].Name
+    $changes = [System.Collections.Generic.List[object]]::new()
+    $changes.Add([pscustomobject]@{ action = 'move'; source = "components/$sourceId"; target = "components/$NewId" })
+    $stagingRoot = New-ComposerStagingRepository $root
+    try {
+        Move-ComposerItemCaseSafe (Join-Path $stagingRoot "components/$sourceId") (Join-Path $stagingRoot "components/$NewId")
+        foreach ($definition in Get-ProfileDefinitions $stagingRoot) {
+            $recipe = Read-ProfileRecipe $definition.Path
+            $updated = @($recipe.Components | ForEach-Object { if ($_ -ieq $sourceId) { $NewId } else { $_ } })
+            if (@($recipe.Components | Where-Object { $_ -ieq $sourceId }).Count -gt 0) {
+                Write-Utf8File $definition.Path (ConvertTo-ProfileRecipeText $recipe.Name $updated)
+                $changes.Add([pscustomobject]@{ action = 'update'; source = (Get-RelativeDisplayPath $stagingRoot $definition.Path); target = (Get-RelativeDisplayPath $stagingRoot $definition.Path) })
+            }
+        }
+        $configuration = Get-ComposerConfiguration $stagingRoot
+        $configurationChanged = [string]$configuration['sharedDefaultComponent'] -ieq $sourceId
+        if ($configurationChanged) {
+            $configuration['sharedDefaultComponent'] = $NewId
+            Write-Utf8File (Join-Path $stagingRoot 'composer.jsonc') (ConvertTo-PrettyJson $configuration)
+            $changes.Add([pscustomobject]@{ action = 'update'; source = 'composer.jsonc'; target = 'composer.jsonc' })
+        }
+        Assert-StagedRepositoryValid $stagingRoot
+        if (-not $DryRun) {
+            $paths = [System.Collections.Generic.List[string]]::new()
+            $paths.Add('components')
+            $paths.Add('profiles')
+            if ($configurationChanged) { $paths.Add('composer.jsonc') }
+            Invoke-StagedRepositoryCommit $root $stagingRoot $paths.ToArray()
+        }
+        return [pscustomobject]@{ operation = 'rename-component'; oldId = $sourceId; newId = $NewId; changes = [object[]]$changes.ToArray(); dryRun = [bool]$DryRun }
+    }
+    finally {
+        if (Test-Path -LiteralPath $stagingRoot) { Remove-Item -LiteralPath $stagingRoot -Recurse -Force }
+    }
+}
+
+function Set-SharedDefaultComponent {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RepositoryRoot,
+        [Parameter(Mandatory)][string]$Component,
+        [switch]$DryRun
+    )
+
+    $root = [System.IO.Path]::GetFullPath($RepositoryRoot)
+    if (-not (Test-ComposerId $Component)) { throw "Invalid component ID '$Component'." }
+    $preflight = Test-ComposerRepository $root
+    if ($preflight.errors.Count -gt 0) { throw "Changing the shared default requires a valid repository; found $($preflight.errors.Count) error(s)." }
+    $componentDirectory = @(Get-ChildItem -LiteralPath (Join-Path $root 'components') -Directory | Where-Object Name -ieq $Component)
+    if ($componentDirectory.Count -eq 0) { throw "Component '$Component' does not exist." }
+    if ($componentDirectory.Count -gt 1) { throw "Component ID '$Component' is ambiguous." }
+    $componentId = $componentDirectory[0].Name
+    $changes = [System.Collections.Generic.List[object]]::new()
+    $stagingRoot = New-ComposerStagingRepository $root
+    try {
+        $configuration = Get-ComposerConfiguration $stagingRoot
+        $configurationChanged = [string]$configuration['sharedDefaultComponent'] -cne $componentId
+        if ($configurationChanged) {
+            $configuration['sharedDefaultComponent'] = $componentId
+            Write-Utf8File (Join-Path $stagingRoot 'composer.jsonc') (ConvertTo-PrettyJson $configuration)
+            $changes.Add([pscustomobject]@{ action = 'update'; source = 'composer.jsonc'; target = 'composer.jsonc' })
+        }
+        foreach ($definition in Get-ProfileDefinitions $stagingRoot) {
+            $recipe = Read-ProfileRecipe $definition.Path
+            $updated = [System.Collections.Generic.List[string]]::new()
+            $updated.Add($componentId)
+            foreach ($id in $recipe.Components) {
+                if ($id -ine $componentId) { $updated.Add($id) }
+            }
+            if (($recipe.Components -join "`0") -cne ($updated.ToArray() -join "`0")) {
+                Write-Utf8File $definition.Path (ConvertTo-ProfileRecipeText $recipe.Name $updated.ToArray())
+                $path = Get-RelativeDisplayPath $stagingRoot $definition.Path
+                $changes.Add([pscustomobject]@{ action = 'update'; source = $path; target = $path })
+            }
+        }
+        Assert-StagedRepositoryValid $stagingRoot
+        if (-not $DryRun -and $changes.Count -gt 0) {
+            Invoke-StagedRepositoryCommit $root $stagingRoot @('profiles', 'composer.jsonc')
+        }
+        return [pscustomobject]@{ operation = 'set-shared-default'; component = $componentId; changes = [object[]]$changes.ToArray(); dryRun = [bool]$DryRun }
+    }
+    finally {
+        if (Test-Path -LiteralPath $stagingRoot) { Remove-Item -LiteralPath $stagingRoot -Recurse -Force }
+    }
+}
+
 function Invoke-GlobalSettingsComposition {
     [CmdletBinding()]
     param(
@@ -1445,4 +1780,4 @@ function Invoke-ProfileComposition {
     }
 }
 
-Export-ModuleMember -Function ConvertFrom-JsonC, Read-ProfileRecipe, Get-ProfileDefinitions, Get-MachineDefinitions, Test-ComposerRepository, Merge-Settings, Merge-Extensions, Merge-Keybindings, Get-CodeProfileFileName, New-CodeProfileTemplate, Read-CodeProfileGlobalState, Get-StoredUiStateSeedPath, Save-ProfileUiStateSeed, Test-CodeProfileTemplate, Invoke-SafeDirectoryReplace, Invoke-GlobalSettingsComposition, Invoke-ProfileComposition
+Export-ModuleMember -Function ConvertFrom-JsonC, Read-ProfileRecipe, Get-ProfileDefinitions, Get-MachineDefinitions, Get-SharedDefaultComponent, Test-ComposerRepository, Merge-Settings, Merge-Extensions, Merge-Keybindings, Get-CodeProfileFileName, New-CodeProfileTemplate, Read-CodeProfileGlobalState, Get-StoredUiStateSeedPath, Save-ProfileUiStateSeed, Test-CodeProfileTemplate, Invoke-SafeDirectoryReplace, Rename-ComposerProfile, Rename-ComposerComponent, Set-SharedDefaultComponent, Invoke-GlobalSettingsComposition, Invoke-ProfileComposition

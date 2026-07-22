@@ -17,6 +17,7 @@
     "editor.defaultFormatter": "redhat.vscode-xml"
   },
   "chat.sessionSync.enabled": true,
+  "cSpell.autocorrect": true,
   "debug.toolBarLocation": "docked",
   "editor.autoClosingBrackets": "always",
   "editor.autoClosingQuotes": "always",
