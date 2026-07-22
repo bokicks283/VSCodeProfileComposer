@@ -49,19 +49,20 @@ Warnings are informational by default. Add `-Strict` to make warnings fail valid
 ## Repository model
 
 ```text
-Global settings owned by VS Code's built-in Default profile
-→ Default shared base
+Named profile: Default shared base
 → additional recipe components in declared order
 → optional profiles/<id>.settings.jsonc override
 → platform/<platform>.jsonc
-→ optional machine-local settings file
+
+Built-in Default/application settings: global/settings.jsonc
+→ optional explicitly selected machine-local settings file
 ```
 
 Later layers win. Settings objects merge recursively, while scalar values, arrays, and null values replace earlier values. Extension IDs are validated and deduplicated case-insensitively in first-appearance order. Keybinding arrays are concatenated unchanged; identical objects produce warnings but remain in the output.
 
 Workspace settings are not materialized into personal profiles. `workspace-examples/` remains project guidance only.
 
-Default is the shared first component in every recipe, so its 32 extensions and portable settings are present in every generated profile. Focused components add only their specialized tools afterward.
+Default is the shared first component in every recipe, so its 34 extensions and portable settings are present in every generated profile. Focused components add only their specialized tools afterward.
 
 ## Output and safety
 
@@ -82,7 +83,7 @@ Generated JSON is standard JSON. Each build is first written and validated in a 
 
 Settings listed in `global/settings.jsonc` are deliberately absent from named-profile output. VS Code ignores copies of those settings and uses the built-in Default profile's value instead. Edit the repository global source, generate `build/global/settings.json`, and manually merge it into **Preferences: Open Application Settings (JSON)**.
 
-`overrides.json` records replaced setting paths, values, and source layers. Values whose paths look sensitive are redacted in reports, while explicitly supplied machine-local values remain intact in the generated `settings.json`.
+`overrides.json` records replaced setting paths, values, and source layers. Values whose paths look sensitive are redacted in reports. Explicitly selected machine-local values remain intact only in `build/global/settings.json`; they are never written to named-profile settings or exports.
 
 Repository validation checks recipes, JSONC/YAML structure, extension IDs and duplicates, portable personal paths and likely secrets, requested overlays, ignored machine-local boundaries, profile IDs, and output containment.
 
@@ -90,7 +91,7 @@ Repository validation checks recipes, JSONC/YAML structure, extension IDs and du
 
 Add `-ExportCodeProfile` to one-profile or `-All` composition. For example, Default writes `build/profiles/default/Default.code-profile`; Unreal writes `build/profiles/unreal/Unreal-Engine.code-profile`. The export contains the fully composed settings, recipe-owned extension identifiers, and generated keybindings. VS Code handles extension acquisition during its normal import workflow—composition never installs extensions.
 
-For a portable export, omit `-Machine`, `-MachineFile`, and `-UiStateFromProfile`. Supplying a machine overlay includes those explicitly requested settings and classifies the export as `machine-overlay-included`, so it is intended for the same or a compatible machine.
+Machine overlays are deliberately excluded from named-profile settings and `.code-profile` exports. Selecting `-Machine` or `-MachineFile` instead adds those keys to `build/global/settings.json`, `workbench.settings.applyToAllProfiles`, and `settingsSync.ignoredSettings`. This makes the values effective on the selected computer without sending its paths through Settings Sync. Exports remain portable unless `-UiStateFromProfile` adds a private UI snapshot.
 
 `-UiStateFromProfile` requires `-ExportCodeProfile`. It reads a manually exported `.code-profile`, validates its `globalState` resource, and copies only that opaque resource into the new export. Source settings, extensions, keybindings, name, and source path are not copied. This is a one-time starting snapshot, not inheritance: VS Code owns each profile's UI after import, later layout changes do not propagate, and views introduced by other extensions use their normal defaults. A seeded export is private and must be reviewed because VS Code `globalState` can include extension or account-related state.
 
@@ -119,7 +120,7 @@ pwsh ./scripts/Compose-Profile.ps1 -ListMachines
 pwsh ./scripts/Compose-Profile.ps1 -Profile default -Platform windows -Machine main-windows
 ```
 
-Replace placeholders locally, then select the filename without `.jsonc` using `-Machine`. `-MachineFile` remains available for an exceptional explicit path. In particular, Todo Tree's confirmed working Windows ripgrep path is machine-specific; no portable `"rg"` override is present in Default.
+Replace placeholders locally, then select the filename without `.jsonc` using `-Machine`. `-MachineFile` remains available for an exceptional explicit path. The same command generates the portable named profile and the selected computer's `build/global/settings.json`; manually merge the latter into **Preferences: Open Application Settings (JSON)**. In particular, Todo Tree's confirmed working Windows ripgrep path is machine-specific; no portable `"rg"` override is present in Default.
 
 ## Tests
 

@@ -30,7 +30,8 @@ Global settings are owned separately by `global/settings.jsonc` and generated to
 1. Component `settings.jsonc`, `extensions.txt`, and `keybindings.jsonc` files in declared recipe order.
 2. Optional portable `profiles/<profile-id>.settings.jsonc`.
 3. Optional `platform/<platform>.jsonc`.
-4. Optional explicitly selected named machine or machine settings file.
+
+An optional named machine or explicit machine file is composed separately into the built-in Default/application artifact, not as a fourth named-profile layer.
 
 Missing component input files are valid. Missing explicitly requested platform or machine overlays are errors. README files and workspace examples are never composed.
 
@@ -43,12 +44,13 @@ Missing component input files are valid. Missing explicitly requested platform o
 ```text
 build/global/
 ├─ settings.json
+├─ overrides.json
 └─ manifest.json
 ```
 
-This artifact targets VS Code's built-in Default profile. It is not included in `.code-profile` exports because those create named profiles, where VS Code ignores these values. Apply it manually by merging it into **Preferences: Open Application Settings (JSON)**.
+This artifact targets VS Code's built-in Default profile. It is not included in `.code-profile` exports because those create named profiles, where VS Code ignores these values. Apply it manually by merging it into **Preferences: Open Application Settings (JSON)**. `build/global/overrides.json` records any machine value that replaced a portable global default, using the same sensitive-value redaction as profile reports.
 
-Named machine overlays use `machine/local/<id>.jsonc`. `-ListMachines` discovers available IDs and `-Machine <id>` selects one. The manifest records the ID and selection mode. `-MachineFile` remains supported for an explicit path.
+Named machine overlays use `machine/local/<id>.jsonc`. `-ListMachines` discovers available IDs and `-Machine <id>` selects one. Each selected machine key is merged into `build/global/settings.json`, appended to `workbench.settings.applyToAllProfiles`, and appended to `settingsSync.ignoredSettings`; a conflicting `-setting.name` force-sync entry is removed. The same key is omitted from named-profile output and exports. The manifests record the ID, selection mode, delivery target, and count without recording machine values. `-MachineFile` remains supported for an explicit path.
 
 The recipe parser accepts the repository's narrow schema:
 
@@ -115,13 +117,13 @@ Portable export:
 pwsh ./scripts/Compose-Profile.ps1 -Profile unreal -Platform windows -ExportCodeProfile
 ```
 
-Same-machine or compatible-machine export with explicit local settings:
+Generate a portable profile plus application settings for one named machine:
 
 ```powershell
 pwsh ./scripts/Compose-Profile.ps1 -Profile unreal -Platform windows -Machine windows -ExportCodeProfile
 ```
 
-Machine values are included in the settings payload, but never copied into export metadata. The manifest records the export filename and SHA-256 hash, portability classification, UI-state policy, and `manual-vscode-profile-import` import method. A UI-seeded artifact is classified `ui-state-seed-included`, or `machine-overlay-and-ui-state-seed-included` when both private inputs are used.
+Machine values are written only to `build/global/settings.json`; the `.code-profile` remains portable and its manifest records `machineSettingsDelivery: built-in-default-application-settings`. The export manifest also records the filename and SHA-256 hash, UI-state policy, and `manual-vscode-profile-import` import method. Only a UI-seeded artifact is classified `ui-state-seed-included`.
 
 Import through VS Code's Profiles editor:
 
@@ -140,7 +142,7 @@ See the official [VS Code Profiles documentation](https://code.visualstudio.com/
 
 ## Validation and security
 
-Repository validation detects malformed global ownership, globally owned settings in profile sources, missing or duplicate recipe components, invalid/unsupported YAML, invalid JSONC roots, invalid and duplicate extension IDs, missing requested overlays, tracked `machine/local/` data, common personal home paths in portable settings, likely portable secrets, duplicate or unsafe profile IDs, unsafe export filenames, unsupported UI-state sources, and output paths outside `build/`.
+Repository validation detects malformed global ownership, machine attempts to replace composer-owned ownership lists, globally owned settings in profile sources, missing or duplicate recipe components, invalid/unsupported YAML, invalid JSONC roots, invalid and duplicate extension IDs, missing requested overlays, tracked `machine/local/` data, common personal home paths in portable settings, likely portable secrets, duplicate or unsafe profile IDs, unsafe export filenames, unsupported UI-state sources, and output paths outside `build/`.
 
 Machine example placeholders are parsed but are excluded from portable-component path violations. Real values belong only in ignored `machine/local/` files. Reports use repository-relative paths where possible and do not expose values from sensitive-looking setting paths.
 

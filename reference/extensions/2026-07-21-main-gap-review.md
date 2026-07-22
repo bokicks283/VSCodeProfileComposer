@@ -2,6 +2,8 @@
 
 This is a point-in-time review from 2026-07-21. The live VS Code profile named `Main` was queried read-only with `code --profile Main --list-extensions`; no extension or profile data was changed.
 
+Repository follow-up on 2026-07-22: Default now owns 34 extensions and all components own 50 unique extensions after `alefragnani.project-manager` and `JimmyArroyo.shiftthat` were deliberately added. Both were already present in the historical staging inventory. The live counts below remain the original point-in-time evidence and have not been silently rewritten.
+
 ## Counts
 
 - Live `Main`: 33 extensions

@@ -25,12 +25,14 @@ param(
     [Parameter(ParameterSetName = 'One')]
     [Parameter(ParameterSetName = 'All')]
     [Parameter(ParameterSetName = 'Validate')]
+    [Parameter(ParameterSetName = 'Global')]
     [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9._-]*$')]
     [string]$Machine,
 
     [Parameter(ParameterSetName = 'One')]
     [Parameter(ParameterSetName = 'All')]
     [Parameter(ParameterSetName = 'Validate')]
+    [Parameter(ParameterSetName = 'Global')]
     [string]$MachineFile,
 
     [Parameter(ParameterSetName = 'One')]
@@ -98,9 +100,13 @@ try {
     }
 
     if ($Global) {
-        $globalResult = Invoke-GlobalSettingsComposition -RepositoryRoot $repositoryRoot -DryRun:$DryRun -Strict:$Strict
+        $globalParameters = @{ RepositoryRoot = $repositoryRoot; DryRun = $DryRun; Strict = $Strict }
+        if ($Machine) { $globalParameters.Machine = $Machine }
+        if ($MachineFile) { $globalParameters.MachineFile = $MachineFile }
+        $globalResult = Invoke-GlobalSettingsComposition @globalParameters
         $prefix = if ($DryRun) { 'DRY RUN: planned' } else { 'Generated' }
         Write-Host "$prefix built-in Default settings at $($globalResult.outputDirectory): $($globalResult.settingCount) globally applied settings."
+        if ($globalResult.machineId) { Write-Host "  Machine '$($globalResult.machineId)': $($globalResult.machineSettingCount) local setting(s), ignored by Settings Sync." }
         exit 0
     }
 
@@ -109,9 +115,13 @@ try {
         Write-ValidationSummary $preflight
         throw 'Composition stopped because repository preflight validation failed.'
     }
-    $globalResult = Invoke-GlobalSettingsComposition -RepositoryRoot $repositoryRoot -DryRun:$DryRun -Strict:$Strict
+    $globalParameters = @{ RepositoryRoot = $repositoryRoot; DryRun = $DryRun; Strict = $Strict }
+    if ($Machine) { $globalParameters.Machine = $Machine }
+    if ($MachineFile) { $globalParameters.MachineFile = $MachineFile }
+    $globalResult = Invoke-GlobalSettingsComposition @globalParameters
     $globalPrefix = if ($DryRun) { 'DRY RUN: planned' } else { 'Generated' }
     Write-Host "$globalPrefix built-in Default settings at $($globalResult.outputDirectory): $($globalResult.settingCount) globally applied settings."
+    if ($globalResult.machineId) { Write-Host "  Machine '$($globalResult.machineId)': $($globalResult.machineSettingCount) local setting(s), ignored by Settings Sync." }
 
     $profiles = if ($All) {
         @(Get-ProfileDefinitions -RepositoryRoot $repositoryRoot | ForEach-Object Id)
@@ -136,7 +146,7 @@ try {
             Write-Host "  Planned output: $($result.outputDirectory)"
             if ($result.codeProfileExportPath) { Write-Host "  Planned .code-profile: $($result.codeProfileExportPath)" }
             if ($result.uiStateSeeded) { Write-Host '  UI state seed: copied from the explicitly supplied profile export' }
-            if ($result.machineId) { Write-Host "  Machine: $($result.machineId)" }
+            if ($result.machineId) { Write-Host "  Machine: $($result.machineId) (delivered through built-in Default settings, not this named profile)" }
             Write-Host "  Inputs:"
             foreach ($input in $result.inputFiles) { Write-Host "    $($input.type): $($input.path)" }
             Write-Host "  Counts: $($result.counts.settings) settings, $($result.counts.extensions) extensions, $($result.counts.keybindings) keybindings, $($result.counts.overrides) overrides, $($result.counts.warnings) warnings"

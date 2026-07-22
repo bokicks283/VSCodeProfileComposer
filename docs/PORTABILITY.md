@@ -14,7 +14,7 @@ Portable files must not contain usernames, home paths, drive-specific SDK paths,
 
 Portable settings intentionally applied to every profile live in `global/settings.jsonc`. They are generated separately because VS Code takes their values from the built-in Default profile and ignores duplicate values stored in named profiles. Apply `build/global/settings.json` manually through **Preferences: Open Application Settings (JSON)**; merge it with any other intentional application settings instead of replacing the entire live file.
 
-The global source includes `settingsSync.ignoredSettings` for `todo-tree.ripgrep.ripgrep`, preventing that selected machine's absolute executable path from being synchronized as an ordinary setting. The composer still never enables, disables, resets, or otherwise operates Settings Sync.
+The global source includes `settingsSync.ignoredSettings` for `todo-tree.ripgrep.ripgrep`. When a machine is selected, the composer also adds every machine-owned key to both the ignored-settings list and `workbench.settings.applyToAllProfiles`. A matching `-setting.name` force-sync entry is removed. Machine values therefore stay in that computer's built-in Default profile while remaining effective in every named profile. The composer still never enables, disables, resets, or otherwise operates Settings Sync.
 
 ## Platform settings
 
@@ -29,7 +29,7 @@ Database command-line clients, native drivers, and certificate behavior may vary
 
 ## Machine-local settings
 
-Real machine values live under ignored `machine/local/<machine-id>.jsonc`. Committed examples use placeholders only. Use `-ListMachines` to see available local IDs and `-Machine <machine-id>` to choose the computer being targeted.
+Real machine values live under ignored `machine/local/<machine-id>.jsonc`. Committed examples use placeholders only. Use `-ListMachines` to see available local IDs and `-Machine <machine-id>` to choose the computer being targeted. The selected values are written only to `build/global/settings.json`; named profiles and `.code-profile` exports remain portable.
 
 PowerShell executable overrides, module locations, signing certificates, remoting endpoints, database client paths, SSH tunnels, and shell-specific environment adjustments are machine-local when they cannot be expressed portably.
 
@@ -59,18 +59,19 @@ Never commit:
 ## Settings Sync workflow
 
 ```text
-Compose a portable .code-profile without a machine overlay
+Select this computer's machine overlay while composing a portable .code-profile
+→ merge build/global/settings.json into Application Settings
 → import it into a new named VS Code profile
 → review and validate the imported resources locally
 → customize live UI placement in VS Code
 → review Settings Sync resource selection
-→ enable Sync only when the profile is ready to travel
-→ recreate machine-only values locally
+→ leave Sync enabled for the resources you want VS Code to own
+→ repeat the local machine overlay and Application Settings merge on each computer
 ```
 
-Settings Sync can synchronize settings, keyboard shortcuts, snippets, tasks, UI state, extensions, and profiles. Generated exports omit UI state by default. An explicit `-UiStateFromProfile` snapshot makes the artifact private and non-portable even though VS Code owns the live UI after import.
+Settings Sync can synchronize settings, keyboard shortcuts, snippets, tasks, UI state, extensions, and profiles. Generated exports omit machine values and UI state by default. An explicit `-UiStateFromProfile` snapshot makes the artifact private and non-portable even though VS Code owns the live UI after import.
 
-When adding a second machine, review **Settings Sync: Configure** before enabling synchronization. If unexpected changes occur, pause further synchronization, identify the affected resource, inspect **Settings Sync: Show Synced Data**, and back up both machines before restoring or resetting anything. The composer never controls Settings Sync.
+When adding a second machine, review **Settings Sync: Configure** even if synchronization is already enabled. If unexpected changes occur, identify the affected resource, inspect **Settings Sync: Show Synced Data**, and back up both machines before restoring or resetting anything. The machine-ownership workflow above is designed to keep Sync on while excluding local paths. The composer never controls Settings Sync.
 
 Default already includes everyday PowerShell, Bash/Zsh shell-script, and Windows batch support, and every focused recipe begins with Default. A user moving between Windows, Linux, family machines, and mixed repositories should not need a separate profile merely to edit normal scripts.
 

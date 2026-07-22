@@ -40,7 +40,7 @@ Describe 'Global settings ownership' {
     It 'rejects missing global values and unlisted global values' {
         $fixture = New-ComposerFixture 'invalid-global-settings'
         $path = Join-Path $fixture 'global/settings.jsonc'
-        Write-TestFile $path '{ "workbench.settings.applyToAllProfiles": ["one.setting"], "other.setting": true }'
+        Write-TestFile $path '{ "workbench.settings.applyToAllProfiles": ["settingsSync.ignoredSettings", "one.setting"], "settingsSync.ignoredSettings": [], "other.setting": true }'
         $result = Test-ComposerRepository $fixture
         $result.errors.code | Should -Contain 'missing-global-setting-value'
         $result.errors.code | Should -Contain 'unlisted-global-setting'
@@ -52,9 +52,41 @@ Describe 'Global settings ownership' {
         $output = Join-Path $fixture 'build/global'
         Test-Path -LiteralPath (Join-Path $output 'settings.json') | Should -BeTrue
         Test-Path -LiteralPath (Join-Path $output 'manifest.json') | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $output 'overrides.json') | Should -BeTrue
         $settings = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $output 'settings.json')))
         $result.settingCount | Should -Be @($settings['workbench.settings.applyToAllProfiles']).Count
         $settings['terminal.integrated.confirmOnKill'] | Should -Be 'never'
+    }
+
+    It 'delivers machine settings through built-in Default and protects them from Settings Sync' {
+        $fixture = New-ComposerFixture 'global-machine-output'
+        $machine = Join-Path $fixture 'machine/local/test.jsonc'
+        Write-TestFile $machine '{ "machine.tool.path": "D:\\Tools\\tool.exe", "window.zoomLevel": 2, "terminal.integrated.confirmOnKill": "always" }'
+        $result = Invoke-GlobalSettingsComposition $fixture -MachineFile $machine
+        $settings = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'build/global/settings.json')))
+        $manifest = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'build/global/manifest.json')))
+        $overrideReport = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'build/global/overrides.json')))
+
+        $settings['machine.tool.path'] | Should -Be 'D:\Tools\tool.exe'
+        $settings['window.zoomLevel'] | Should -Be 2
+        $settings['terminal.integrated.confirmOnKill'] | Should -Be 'always'
+        $settings['workbench.settings.applyToAllProfiles'] | Should -Contain 'machine.tool.path'
+        $settings['workbench.settings.applyToAllProfiles'] | Should -Contain 'window.zoomLevel'
+        $settings['settingsSync.ignoredSettings'] | Should -Contain 'machine.tool.path'
+        $settings['settingsSync.ignoredSettings'] | Should -Contain 'window.zoomLevel'
+        $settings['settingsSync.ignoredSettings'] | Should -Not -Contain '-window.zoomLevel'
+        $result.machineSettingCount | Should -Be 3
+        $result.overrideCount | Should -Be 1
+        $overrideReport.overrides[0].path | Should -Be '/terminal.integrated.confirmOnKill'
+        $overrideReport.overrides[0].previousSource | Should -Be 'global/settings.jsonc'
+        $manifest.machineOverlay.valuesRecorded | Should -BeFalse
+        $manifest.settingsSyncPolicy | Should -Be 'machine-settings-ignored-and-applied-to-all-profiles'
+    }
+
+    It 'rejects machine overlays that try to manage composer-owned lists' {
+        $fixture = New-ComposerFixture 'machine-ownership-list'
+        Write-TestFile (Join-Path $fixture 'machine/local/test.jsonc') '{ "settingsSync.ignoredSettings": ["something"] }'
+        (Test-ComposerRepository $fixture -Machine test).errors.code | Should -Contain 'machine-ownership-setting'
     }
 
     It 'omits globally applied settings from generated named profiles' {
@@ -256,25 +288,27 @@ Describe 'Layer ordering and safe output' {
         $settings['terminal.integrated.defaultProfile.windows'] | Should -Be 'PowerShell 7'
     }
 
-    It 'applies the machine overlay after the platform overlay' {
+    It 'omits machine-owned settings from named profiles even when a platform declares them' {
         $fixture = New-ComposerFixture 'machine-order'
         $machine = Join-Path $fixture 'machine/local/test.jsonc'
         Write-TestFile $machine '{ "terminal.integrated.defaultProfile.windows": "Machine Shell" }'
         Invoke-ProfileComposition $fixture default -Platform windows -MachineFile $machine | Out-Null
         $settings = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'build/profiles/default/settings.json')))
-        $settings['terminal.integrated.defaultProfile.windows'] | Should -Be 'Machine Shell'
+        $settings.Contains('terminal.integrated.defaultProfile.windows') | Should -BeFalse
     }
 
-    It 'selects a named machine overlay and records its identity' {
+    It 'selects a named machine overlay and records application-level delivery' {
         $fixture = New-ComposerFixture 'named-machine'
         Write-TestFile (Join-Path $fixture 'machine/local/gaming-server.jsonc') '{ "todo-tree.ripgrep.ripgrep": "D:\\Tools\\rg.exe" }'
         $result = Invoke-ProfileComposition $fixture default -Platform windows -Machine gaming-server
         $settings = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'build/profiles/default/settings.json')))
         $manifest = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'build/profiles/default/manifest.json')))
-        $settings['todo-tree.ripgrep.ripgrep'] | Should -Be 'D:\Tools\rg.exe'
+        $settings.Contains('todo-tree.ripgrep.ripgrep') | Should -BeFalse
         $result.machineId | Should -Be 'gaming-server'
         $manifest.machineOverlay.id | Should -Be 'gaming-server'
         $manifest.machineOverlay.selection | Should -Be 'named-machine'
+        $manifest.machineOverlay.appliedTo | Should -Be 'build/global/settings.json'
+        $manifest.machineOverlay.includedInProfileSettings | Should -BeFalse
     }
 
     It 'lists named machines and rejects missing or conflicting selections' {
@@ -419,7 +453,7 @@ Describe 'VS Code .code-profile export' {
         $keys.Count | Should -Be 0
     }
 
-    It 'includes explicitly requested machine settings and classifies the export' {
+    It 'keeps explicitly requested machine settings out of portable exports' {
         $fixture = New-ComposerFixture 'export-machine'
         $machine = Join-Path $fixture 'machine/local/test.jsonc'
         Write-TestFile $machine '{ "terminal.integrated.defaultProfile.windows": "Machine Shell" }'
@@ -429,9 +463,10 @@ Describe 'VS Code .code-profile export' {
         $settingsResource = ConvertFrom-JsonC $profile.settings
         $settings = ConvertFrom-JsonC $settingsResource.settings
         $manifest = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $output 'manifest.json')))
-        $settings['terminal.integrated.defaultProfile.windows'] | Should -Be 'Machine Shell'
-        $manifest.codeProfileExport.machineOverlayIncluded | Should -BeTrue
-        $manifest.codeProfileExport.portability | Should -Be 'machine-overlay-included'
+        $settings.Contains('terminal.integrated.defaultProfile.windows') | Should -BeFalse
+        $manifest.codeProfileExport.machineOverlayIncluded | Should -BeFalse
+        $manifest.codeProfileExport.machineSettingsDelivery | Should -Be 'built-in-default-application-settings'
+        $manifest.codeProfileExport.portability | Should -Be 'portable'
     }
 
     It 'classifies an export without a machine overlay as portable' {

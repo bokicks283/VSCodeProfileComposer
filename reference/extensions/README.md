@@ -9,8 +9,8 @@ The source export contained settings, extensions, and `globalState`. Only the ex
 - 150 unique extension IDs
 - 150 valid Marketplace-style IDs
 - 0 duplicate IDs
-- 48 IDs currently owned by repository components
-- 102 historical-only candidates
+- 50 IDs currently owned by repository components
+- 100 historical-only candidates
 - 0 active repository IDs missing from the snapshot
 
 The inventory is [extension-library-staging.txt](extension-library-staging.txt).

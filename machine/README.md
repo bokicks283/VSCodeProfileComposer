@@ -13,7 +13,7 @@ pwsh ./scripts/Compose-Profile.ps1 -Profile unreal -Platform windows -Machine ma
 
 The filename without `.jsonc` is the `-Machine` ID. This makes the intended target explicit and records it in the manifest. `-MachineFile` remains a backward-compatible escape hatch; do not use both switches together.
 
-If `-ExportCodeProfile` is also supplied, these values are included in the export and the manifest classifies it as `machine-overlay-included`. Omit both machine switches when generating a portable cross-machine export.
+The selected values are generated only into `build/global/settings.json`. The composer adds their keys to both `workbench.settings.applyToAllProfiles` and `settingsSync.ignoredSettings`, so they apply in every profile on this computer without syncing to another computer. Named-profile settings and `.code-profile` exports remain portable.
 
 Typical values:
 
@@ -32,6 +32,6 @@ The source audit confirmed a working Todo Tree ripgrep path under the current Wi
 
 Never commit credentials, tokens, connection strings, private hosts, or personal absolute paths.
 
-Because these files are intentionally ignored, Git and Settings Sync do not distribute them. Recreate them from the committed examples on each computer or keep a separate secure private backup. A build for another machine is possible only when that machine's local file is present.
+Because these source files are intentionally ignored, Git does not distribute them. The generated ignored-settings list prevents their setting values from traveling through Settings Sync. Recreate the files from the committed examples on each computer or keep a separate secure private backup. A build for another machine is possible only when that machine's local file is present.
 
 See [Complete usage guide](../docs/USAGE.md) for setup, ignore verification, portability, and import guidance.

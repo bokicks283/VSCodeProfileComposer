@@ -9,14 +9,15 @@ A profile is an explicit YAML recipe. Profiles do not inherit other profiles. Th
 ## Layers
 
 ```text
-Global settings owned by VS Code's built-in Default profile
-→ recipe components in declared order
+Named profile: recipe components in declared order
 → optional portable profile override
 → platform settings
-→ machine-local settings
+
+Built-in Default/application settings: global settings
+→ explicitly selected machine-local settings
 ```
 
-The global layer is generated separately under `build/global/`; it is not merged into named profiles. The composer materializes the remaining profile layers exactly in order. Workspace settings stay separate and are never appended to a personal profile. Manual VS Code profile import and, when deliberately enabled, Settings Sync remain the runtime delivery mechanisms.
+The global and selected machine layers are generated separately under `build/global/`; they are not merged into named profiles. Every selected machine key is added to both `workbench.settings.applyToAllProfiles` and `settingsSync.ignoredSettings`. The composer removes those keys from named-profile output so VS Code has one unambiguous owner: the selected computer's built-in Default profile. Workspace settings stay separate and are never appended to a personal profile. Manual VS Code profile import and Settings Sync remain the runtime delivery mechanisms.
 
 ## Global settings
 
@@ -72,7 +73,7 @@ Committed Windows and Linux files contain reusable OS preferences. Windows prefe
 
 ## Machine-local overlays
 
-Ignored `machine/local/<machine-id>.jsonc` files contain absolute executable paths, SDK roots, compiler paths, credentials, database connections, module paths, remoting endpoints, and device tuning. `-Machine <machine-id>` makes the target explicit; `-ListMachines` shows locally available IDs.
+Ignored `machine/local/<machine-id>.jsonc` files contain absolute executable paths, SDK roots, compiler paths, credentials, database connections, module paths, remoting endpoints, and device tuning. `-Machine <machine-id>` makes the target explicit; `-ListMachines` shows locally available IDs. Machine settings are composed into `build/global/settings.json`, automatically applied to all profiles, and automatically excluded from Settings Sync. They never enter a named profile or `.code-profile` export.
 
 ## Workspace settings
 

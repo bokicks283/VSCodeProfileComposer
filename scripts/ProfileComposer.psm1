@@ -1,6 +1,6 @@
 Set-StrictMode -Version Latest
 
-$script:ComposerVersion = '0.4.0'
+$script:ComposerVersion = '0.5.0'
 $script:ManifestVersion = 1
 $script:Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 $script:SensitivePattern = '(?i)(password|(?<!semantic)token|secret|credential|connectionstring|api[_-]?key|private[_-]?key)'
@@ -324,6 +324,27 @@ function Resolve-MachinePath {
     return [System.IO.Path]::GetFullPath((Join-Path $RepositoryRoot $MachineFile))
 }
 
+function Get-MachineSettingIds {
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$Settings)
+
+    $reserved = @('workbench.settings.applyToAllProfiles', 'settingsSync.ignoredSettings')
+    return @($Settings.Keys | Where-Object { $reserved -cnotcontains [string]$_ } | ForEach-Object { [string]$_ })
+}
+
+function Add-MachineOwnershipValidation {
+    param(
+        [Parameter(Mandatory)][System.Collections.IDictionary]$Settings,
+        [Parameter(Mandatory)]$Result,
+        [Parameter(Mandatory)][string]$Source
+    )
+
+    foreach ($reservedKey in @('workbench.settings.applyToAllProfiles', 'settingsSync.ignoredSettings')) {
+        if ($Settings.Contains($reservedKey)) {
+            Add-ValidationItem $Result errors 'machine-ownership-setting' "Machine overlays cannot set '$reservedKey'; the composer owns this list." $Source "/$reservedKey"
+        }
+    }
+}
+
 function Resolve-UiStateSeedPath {
     param([Parameter(Mandatory)][string]$RepositoryRoot, [string]$UiStateFromProfile)
     if (-not $UiStateFromProfile) { return $null }
@@ -361,6 +382,10 @@ function Test-ComposerRepository {
             elseif (-not $globalSettings.Contains('workbench.settings.applyToAllProfiles') -or
                 $globalSettings['workbench.settings.applyToAllProfiles'] -isnot [System.Array]) {
                 Add-ValidationItem $result errors 'global-settings-list' "Global settings must contain an array 'workbench.settings.applyToAllProfiles'." $globalSource
+            }
+            elseif (-not $globalSettings.Contains('settingsSync.ignoredSettings') -or
+                $globalSettings['settingsSync.ignoredSettings'] -isnot [System.Array]) {
+                Add-ValidationItem $result errors 'global-sync-ignored-list' "Global settings must contain an array 'settingsSync.ignoredSettings'." $globalSource
             }
             else {
                 foreach ($settingId in $globalSettings['workbench.settings.applyToAllProfiles']) {
@@ -530,6 +555,9 @@ function Test-ComposerRepository {
                     }
                 }
             }
+            elseif ($source.StartsWith('machine/', [System.StringComparison]::OrdinalIgnoreCase)) {
+                Add-MachineOwnershipValidation -Settings $value -Result $result -Source $source
+            }
         }
         catch { Add-ValidationItem $result errors 'invalid-jsonc' $_.Exception.Message $source }
     }
@@ -556,6 +584,7 @@ function Test-ComposerRepository {
                 if (-not (Test-IsDictionary $machineSettings)) {
                     Add-ValidationItem $result errors 'overlay-root' 'Platform and machine settings roots must be objects.' $source
                 }
+                else { Add-MachineOwnershipValidation -Settings $machineSettings -Result $result -Source $source }
             }
             catch { Add-ValidationItem $result errors 'invalid-jsonc' $_.Exception.Message $source }
         }
@@ -944,12 +973,15 @@ function Invoke-GlobalSettingsComposition {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$RepositoryRoot,
+        [string]$Machine,
+        [string]$MachineFile,
         [switch]$DryRun,
         [switch]$Strict
     )
 
     $root = [System.IO.Path]::GetFullPath($RepositoryRoot)
-    $validation = Test-ComposerRepository -RepositoryRoot $root
+    if ($Machine -and $MachineFile) { throw '-Machine and -MachineFile cannot be used together.' }
+    $validation = Test-ComposerRepository -RepositoryRoot $root -Machine $Machine -MachineFile $MachineFile
     if ($validation.errors.Count -gt 0 -or ($Strict -and $validation.warnings.Count -gt 0)) {
         $reason = if ($validation.errors.Count -gt 0) { "$($validation.errors.Count) validation error(s)" } else { "$($validation.warnings.Count) warning(s) in strict mode" }
         throw "Global settings composition stopped because repository validation found $reason."
@@ -957,12 +989,49 @@ function Invoke-GlobalSettingsComposition {
 
     $sourcePath = Join-Path $root 'global/settings.jsonc'
     $settings = Read-JsonCFile $sourcePath
+    $resolvedMachine = Resolve-MachinePath -RepositoryRoot $root -Machine $Machine -MachineFile $MachineFile
+    $machineSettings = if ($resolvedMachine) { Read-JsonCFile $resolvedMachine } else { $null }
+    $machineSettingIds = @()
+    if ($resolvedMachine) { $machineSettingIds = @(Get-MachineSettingIds $machineSettings) }
+    $machineId = if ($Machine) { $Machine } elseif ($resolvedMachine) { [System.IO.Path]::GetFileNameWithoutExtension($resolvedMachine) } else { $null }
+    $overrides = [System.Collections.Generic.List[object]]::new()
+
+    if ($resolvedMachine) {
+        $sourceMap = [hashtable]::new([System.StringComparer]::Ordinal)
+        foreach ($key in $settings.Keys) { Set-SourceTree $settings[$key] "/$(ConvertTo-JsonPointerSegment ([string]$key))" 'global/settings.jsonc' $sourceMap }
+        Merge-Settings $settings $machineSettings (Get-RelativeDisplayPath $root $resolvedMachine) $sourceMap $overrides | Out-Null
+
+        $applyToAll = [System.Collections.Generic.List[string]]::new()
+        $applySet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+        foreach ($id in @($settings['workbench.settings.applyToAllProfiles'])) {
+            if ($applySet.Add([string]$id)) { $applyToAll.Add([string]$id) }
+        }
+        foreach ($id in $machineSettingIds) {
+            if ($applySet.Add($id)) { $applyToAll.Add($id) }
+        }
+        $settings['workbench.settings.applyToAllProfiles'] = [string[]]$applyToAll.ToArray()
+
+        $ignored = [System.Collections.Generic.List[string]]::new()
+        $ignoredSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+        foreach ($id in @($settings['settingsSync.ignoredSettings'])) {
+            if ($machineSettingIds -ccontains ([string]$id).TrimStart('-')) { continue }
+            if ($ignoredSet.Add([string]$id)) { $ignored.Add([string]$id) }
+        }
+        foreach ($id in $machineSettingIds) {
+            if ($ignoredSet.Add($id)) { $ignored.Add($id) }
+        }
+        $settings['settingsSync.ignoredSettings'] = [string[]]$ignored.ToArray()
+    }
+
     $targetDirectory = [System.IO.Path]::GetFullPath((Join-Path $root 'build/global'))
     if ($DryRun) {
         return [pscustomobject][ordered]@{
             outputDirectory = Get-RelativeDisplayPath $root $targetDirectory
             sourcePath = Get-RelativeDisplayPath $root $sourcePath
             settingCount = $settings.Count - 1
+            machineId = $machineId
+            machineSettingCount = $machineSettingIds.Count
+            overrideCount = $overrides.Count
             dryRun = $true
         }
     }
@@ -974,8 +1043,15 @@ function Invoke-GlobalSettingsComposition {
     try {
         $settingsPath = Join-Path $temporaryDirectory 'settings.json'
         Write-Utf8File $settingsPath (ConvertTo-PrettyJson -Value $settings)
+        $overridesPath = Join-Path $temporaryDirectory 'overrides.json'
+        Write-Utf8File $overridesPath (ConvertTo-PrettyJson -Value ([ordered]@{
+            artifact = 'vscode-built-in-default-settings'
+            overrides = [object[]]$overrides.ToArray()
+            warnings = @()
+        }))
         $generated = Read-JsonCFile $settingsPath
         if (-not (Test-IsDictionary $generated)) { throw 'Generated global settings did not validate as a JSON object.' }
+        Read-JsonCFile $overridesPath | Out-Null
         $manifest = [ordered]@{
             manifestVersion = $script:ManifestVersion
             artifact = 'vscode-built-in-default-settings'
@@ -983,10 +1059,25 @@ function Invoke-GlobalSettingsComposition {
             composerVersion = $script:ComposerVersion
             gitCommit = Get-GitCommit $root
             source = 'global/settings.jsonc'
+            machineOverlay = if ($resolvedMachine) {
+                [ordered]@{
+                    id = $machineId
+                    path = Get-RelativeDisplayPath $root $resolvedMachine
+                    selection = if ($Machine) { 'named-machine' } else { 'explicit-file' }
+                    settingCount = $machineSettingIds.Count
+                    valuesRecorded = $false
+                }
+            }
+            else { $null }
             applicationTarget = 'vscode-built-in-default-profile'
             applicationMethod = 'manual-application-settings-json-merge'
+            settingsSyncPolicy = 'machine-settings-ignored-and-applied-to-all-profiles'
             settingCount = $settings.Count - 1
-            outputHashes = [ordered]@{ 'settings.json' = Get-FileHashValue $settingsPath }
+            overrideCount = $overrides.Count
+            outputHashes = [ordered]@{
+                'settings.json' = Get-FileHashValue $settingsPath
+                'overrides.json' = Get-FileHashValue $overridesPath
+            }
             validation = [ordered]@{
                 result = 'passed'
                 errors = $validation.errors.Count
@@ -1007,6 +1098,9 @@ function Invoke-GlobalSettingsComposition {
         outputDirectory = Get-RelativeDisplayPath $root $targetDirectory
         sourcePath = Get-RelativeDisplayPath $root $sourcePath
         settingCount = $settings.Count - 1
+        machineId = $machineId
+        machineSettingCount = $machineSettingIds.Count
+        overrideCount = $overrides.Count
         dryRun = $false
     }
 }
@@ -1084,10 +1178,12 @@ function Invoke-ProfileComposition {
     }
     $resolvedMachine = Resolve-MachinePath -RepositoryRoot $root -Machine $Machine -MachineFile $MachineFile
     $machineId = if ($Machine) { $Machine } elseif ($resolvedMachine) { [System.IO.Path]::GetFileNameWithoutExtension($resolvedMachine) } else { $null }
+    $machineSettingIds = @()
     if ($resolvedMachine) {
         $source = Get-RelativeDisplayPath $root $resolvedMachine
-        $settingsLayers.Add([pscustomobject]@{ Path = $resolvedMachine; Source = $source })
-        $inputFiles.Add([pscustomobject]@{ type = 'machine-settings'; path = $source })
+        $machineSettings = Read-JsonCFile $resolvedMachine
+        $machineSettingIds = @(Get-MachineSettingIds $machineSettings)
+        $inputFiles.Add([pscustomobject]@{ type = 'machine-application-settings'; path = $source })
     }
 
     $settings = New-OrderedMap
@@ -1097,6 +1193,18 @@ function Invoke-ProfileComposition {
         $incoming = Read-JsonCFile $layer.Path
         if (-not (Test-IsDictionary $incoming)) { throw "Settings root must be an object in '$($layer.Source)'." }
         Merge-Settings $settings $incoming $layer.Source $sourceMap $overrides | Out-Null
+    }
+    foreach ($settingId in $machineSettingIds) {
+        $machinePath = "/$(ConvertTo-JsonPointerSegment $settingId)"
+        if ($settings.Contains($settingId)) {
+            $settings.Remove($settingId)
+            Remove-SourceDescendants $sourceMap $machinePath
+        }
+        for ($index = $overrides.Count - 1; $index -ge 0; $index--) {
+            if ($overrides[$index].path -eq $machinePath -or $overrides[$index].path.StartsWith("$machinePath/", [System.StringComparison]::Ordinal)) {
+                $overrides.RemoveAt($index)
+            }
+        }
     }
     $extensions = @(Merge-Extensions -Files $extensionFiles.ToArray())
     $keybindingsResult = Merge-Keybindings -Files $keybindingFiles.ToArray()
@@ -1194,6 +1302,10 @@ function Invoke-ProfileComposition {
                     id = $machineId
                     path = $machineDisplay
                     selection = if ($Machine) { 'named-machine' } else { 'explicit-file' }
+                    settingCount = $machineSettingIds.Count
+                    appliedTo = 'build/global/settings.json'
+                    includedInProfileSettings = $false
+                    includedInCodeProfile = $false
                 }
             }
             else { $null }
@@ -1208,10 +1320,9 @@ function Invoke-ProfileComposition {
                         version = $script:CodeProfileVerifiedVersion
                         commit = $script:CodeProfileVerifiedCommit
                     }
-                    machineOverlayIncluded = [bool]$resolvedMachine
-                    portability = if ($resolvedMachine -and $null -ne $uiState) { 'machine-overlay-and-ui-state-seed-included' }
-                        elseif ($resolvedMachine) { 'machine-overlay-included' }
-                        elseif ($null -ne $uiState) { 'ui-state-seed-included' }
+                    machineOverlayIncluded = $false
+                    machineSettingsDelivery = if ($resolvedMachine) { 'built-in-default-application-settings' } else { 'not-requested' }
+                    portability = if ($null -ne $uiState) { 'ui-state-seed-included' }
                         else { 'portable' }
                     uiStatePolicy = if ($null -ne $uiState) { 'seed-on-import-then-managed-by-vscode' } else { 'managed-by-vscode' }
                     uiStateSeeded = ($null -ne $uiState)
