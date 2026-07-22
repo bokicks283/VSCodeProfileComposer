@@ -69,7 +69,7 @@ Select this computer's machine overlay while composing a portable .code-profile
 → repeat the local machine overlay and Application Settings merge on each computer
 ```
 
-Settings Sync can synchronize settings, keyboard shortcuts, snippets, tasks, UI state, extensions, and profiles. Generated exports omit machine values and UI state by default. An explicit `-UiStateFromProfile` snapshot makes the artifact private and non-portable even though VS Code owns the live UI after import.
+Settings Sync can synchronize settings, keyboard shortcuts, snippets, tasks, UI state, extensions, and profiles. Generated exports omit machine values and UI state by default. An explicit `-UiStateFromProfile` snapshot or locally stored `-UiStateProfile` seed makes the artifact private and non-portable even though VS Code owns the live UI after import.
 
 When adding a second machine, review **Settings Sync: Configure** even if synchronization is already enabled. If unexpected changes occur, identify the affected resource, inspect **Settings Sync: Show Synced Data**, and back up both machines before restoring or resetting anything. The machine-ownership workflow above is designed to keep Sync on while excluding local paths. The composer never controls Settings Sync.
 
@@ -92,7 +92,7 @@ Database tooling is selected only when the active profile composes `database` or
 
 Generate portable `.code-profile` artifacts under ignored `build/profiles/` with `-ExportCodeProfile`. Inspect them before import or private storage. A composer-generated database profile contains only repository-owned settings and extension identifiers, but still review it before use.
 
-Separately, a profile exported from live VS Code can contain additional runtime-owned resources or machine/account state. Treat live exports as sensitive until inspected and store them privately rather than using them as canonical repository source. When one is passed through `-UiStateFromProfile`, only its opaque `globalState` resource is copied, but that resource can itself contain extension or account-related state. It is a one-time layout seed, not a portable or canonical source.
+Separately, a profile exported from live VS Code can contain additional runtime-owned resources or machine/account state. Treat live exports as sensitive until inspected and store them privately rather than using them as canonical repository source. `Save-ProfileUiState.ps1` discards every resource except the opaque `globalState` and stores it under ignored `machine/local/ui-state/<profile>/`; that resource can itself contain extension or account-related state. `-UiStateProfile` reuses it as a one-time layout seed, not a portable or canonical source.
 
 ## Temporary family or friend machines
 

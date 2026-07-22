@@ -1,6 +1,6 @@
 Set-StrictMode -Version Latest
 
-$script:ComposerVersion = '0.5.0'
+$script:ComposerVersion = '0.6.0'
 $script:ManifestVersion = 1
 $script:Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 $script:SensitivePattern = '(?i)(password|(?<!semantic)token|secret|credential|connectionstring|api[_-]?key|private[_-]?key)'
@@ -855,6 +855,68 @@ function Read-CodeProfileGlobalState {
     return [string]$template.globalState
 }
 
+function Get-StoredUiStateSeedPath {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RepositoryRoot,
+        [Parameter(Mandatory)][string]$Profile
+    )
+
+    if ($Profile -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$') { throw "Invalid profile ID '$Profile'." }
+    return [System.IO.Path]::GetFullPath((Join-Path $RepositoryRoot "machine/local/ui-state/$Profile/seed.code-profile"))
+}
+
+function Save-ProfileUiStateSeed {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RepositoryRoot,
+        [Parameter(Mandatory)][string]$Profile,
+        [Parameter(Mandatory)][string]$SourceProfileExport,
+        [switch]$DryRun
+    )
+
+    $root = [System.IO.Path]::GetFullPath($RepositoryRoot)
+    $definition = @(Get-ProfileDefinitions $root | Where-Object { $_.Id -ieq $Profile })
+    if ($definition.Count -eq 0) { throw "Unknown profile '$Profile'." }
+    if ($definition.Count -gt 1) { throw "Profile ID '$Profile' is ambiguous." }
+
+    $sourcePath = if ([System.IO.Path]::IsPathRooted($SourceProfileExport)) {
+        [System.IO.Path]::GetFullPath($SourceProfileExport)
+    }
+    else { [System.IO.Path]::GetFullPath((Join-Path $root $SourceProfileExport)) }
+    $globalState = Read-CodeProfileGlobalState -Path $sourcePath
+    $targetPath = Get-StoredUiStateSeedPath -RepositoryRoot $root -Profile $definition[0].Id
+    $targetDirectory = Split-Path -Parent $targetPath
+    $result = [ordered]@{
+        profileId = $definition[0].Id
+        outputPath = Get-RelativeDisplayPath $root $targetPath
+        sha256 = Get-StringHashValue $globalState
+        sourcePathRecorded = $false
+        dryRun = [bool]$DryRun
+    }
+    if ($DryRun) { return [pscustomobject]$result }
+
+    $parent = Split-Path -Parent $targetDirectory
+    [System.IO.Directory]::CreateDirectory($parent) | Out-Null
+    $temporaryDirectory = Join-Path $parent ".$($definition[0].Id).$([guid]::NewGuid().ToString('N')).tmp"
+    [System.IO.Directory]::CreateDirectory($temporaryDirectory) | Out-Null
+    try {
+        $temporaryPath = Join-Path $temporaryDirectory 'seed.code-profile'
+        $seed = [ordered]@{
+            name = "Stored UI state seed for $($definition[0].Id)"
+            globalState = $globalState
+        }
+        Write-Utf8File $temporaryPath (ConvertTo-PrettyJson -Value $seed)
+        Read-CodeProfileGlobalState -Path $temporaryPath | Out-Null
+        Invoke-SafeDirectoryReplace -TemporaryDirectory $temporaryDirectory -TargetDirectory $targetDirectory
+    }
+    catch {
+        if (Test-Path -LiteralPath $temporaryDirectory) { Remove-Item -LiteralPath $temporaryDirectory -Recurse -Force }
+        throw
+    }
+    return [pscustomobject]$result
+}
+
 function Test-CodeProfileTemplate {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Path)
@@ -1116,11 +1178,13 @@ function Invoke-ProfileComposition {
         [switch]$DryRun,
         [switch]$ExportCodeProfile,
         [string]$UiStateFromProfile,
+        [string]$UiStateProfile,
         [switch]$Strict
     )
 
     $root = [System.IO.Path]::GetFullPath($RepositoryRoot)
-    if ($UiStateFromProfile -and -not $ExportCodeProfile) { throw '-UiStateFromProfile requires -ExportCodeProfile.' }
+    if (($UiStateFromProfile -or $UiStateProfile) -and -not $ExportCodeProfile) { throw 'UI-state seeding requires -ExportCodeProfile.' }
+    if ($UiStateFromProfile -and $UiStateProfile) { throw '-UiStateFromProfile and -UiStateProfile cannot be used together.' }
     if ($Machine -and $MachineFile) { throw '-Machine and -MachineFile cannot be used together.' }
     $validation = Test-ComposerRepository -RepositoryRoot $root -Platform $Platform -Machine $Machine -MachineFile $MachineFile
     if ($validation.errors.Count -gt 0 -or ($Strict -and $validation.warnings.Count -gt 0)) {
@@ -1131,7 +1195,13 @@ function Invoke-ProfileComposition {
     $definition = @(Get-ProfileDefinitions $root | Where-Object { $_.Id -ieq $Profile })
     if ($definition.Count -eq 0) { throw "Unknown profile '$Profile'." }
     if ($definition.Count -gt 1) { throw "Profile ID '$Profile' is ambiguous." }
-    $resolvedUiStateSeed = Resolve-UiStateSeedPath -RepositoryRoot $root -UiStateFromProfile $UiStateFromProfile
+    $resolvedUiStateSeed = if ($UiStateProfile) {
+        $uiDefinition = @(Get-ProfileDefinitions $root | Where-Object { $_.Id -ieq $UiStateProfile })
+        if ($uiDefinition.Count -eq 0) { throw "Unknown UI-state profile '$UiStateProfile'." }
+        if ($uiDefinition.Count -gt 1) { throw "UI-state profile ID '$UiStateProfile' is ambiguous." }
+        Get-StoredUiStateSeedPath -RepositoryRoot $root -Profile $uiDefinition[0].Id
+    }
+    else { Resolve-UiStateSeedPath -RepositoryRoot $root -UiStateFromProfile $UiStateFromProfile }
     $uiState = if ($resolvedUiStateSeed) { Read-CodeProfileGlobalState -Path $resolvedUiStateSeed } else { $null }
     $uiStateHash = if ($null -ne $uiState) { Get-StringHashValue $uiState } else { $null }
     $profileId = $definition[0].Id
@@ -1326,7 +1396,15 @@ function Invoke-ProfileComposition {
                         else { 'portable' }
                     uiStatePolicy = if ($null -ne $uiState) { 'seed-on-import-then-managed-by-vscode' } else { 'managed-by-vscode' }
                     uiStateSeeded = ($null -ne $uiState)
-                    uiStateSeed = if ($null -ne $uiState) { [ordered]@{ sha256 = $uiStateHash; sourcePathRecorded = $false } } else { $null }
+                    uiStateSeed = if ($null -ne $uiState) {
+                        [ordered]@{
+                            sha256 = $uiStateHash
+                            sourcePathRecorded = $false
+                            source = if ($UiStateProfile) { 'stored-local-profile-ui-state' } else { 'explicit-profile-export' }
+                            profileId = if ($UiStateProfile) { $UiStateProfile } else { $null }
+                        }
+                    }
+                    else { $null }
                     importMethod = 'manual-vscode-profile-import'
                 }
             }
@@ -1367,4 +1445,4 @@ function Invoke-ProfileComposition {
     }
 }
 
-Export-ModuleMember -Function ConvertFrom-JsonC, Read-ProfileRecipe, Get-ProfileDefinitions, Get-MachineDefinitions, Test-ComposerRepository, Merge-Settings, Merge-Extensions, Merge-Keybindings, Get-CodeProfileFileName, New-CodeProfileTemplate, Read-CodeProfileGlobalState, Test-CodeProfileTemplate, Invoke-SafeDirectoryReplace, Invoke-GlobalSettingsComposition, Invoke-ProfileComposition
+Export-ModuleMember -Function ConvertFrom-JsonC, Read-ProfileRecipe, Get-ProfileDefinitions, Get-MachineDefinitions, Test-ComposerRepository, Merge-Settings, Merge-Extensions, Merge-Keybindings, Get-CodeProfileFileName, New-CodeProfileTemplate, Read-CodeProfileGlobalState, Get-StoredUiStateSeedPath, Save-ProfileUiStateSeed, Test-CodeProfileTemplate, Invoke-SafeDirectoryReplace, Invoke-GlobalSettingsComposition, Invoke-ProfileComposition

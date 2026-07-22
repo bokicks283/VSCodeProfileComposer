@@ -177,6 +177,22 @@ pwsh ./scripts/Compose-Profile.ps1 -All -Platform windows -ExportCodeProfile -Ui
 
 `-UiStateFromProfile` requires `-ExportCodeProfile`. It never exports from or modifies the running VS Code instance.
 
+Store a manually exported layout for later reuse:
+
+```powershell
+pwsh ./scripts/Save-ProfileUiState.ps1 -Profile default -SourceProfileExport "C:\private\Adjusted Default.code-profile"
+```
+
+The stored seed is `machine/local/ui-state/default/seed.code-profile`, which is ignored by Git. It contains only the export's opaque `globalState` resource and a generic local name. Preview capture without replacing a prior seed by adding `-DryRun`.
+
+Use the stored Default layout to create the urgent Python + Database profile:
+
+```powershell
+pwsh ./scripts/Compose-Profile.ps1 -Profile python-database -Platform windows -Machine excalibur117-w -ExportCodeProfile -UiStateProfile default
+```
+
+`-UiStateProfile` can name any recipe with a stored seed and can seed a different target recipe. To update a layout, arrange that live profile, export it manually again, rerun `Save-ProfileUiState.ps1` for its recipe ID, and rebuild. `-UiStateProfile` and `-UiStateFromProfile` are mutually exclusive.
+
 ### Treat warnings as failures
 
 ```powershell
@@ -290,11 +306,15 @@ Generated output is ignored and disposable. Never edit it as source; make change
 
 The generated `.code-profile` contains composed settings, extension identifiers, and keybindings. It omits `globalState` by default.
 
-When `-UiStateFromProfile` is supplied, the composer validates and copies only the source export's opaque `globalState` string. It ignores the source export's settings, extensions, keybindings, display name, and every other resource. It does not inspect individual UI entries, merge layouts, read the running VS Code profile, or record the private source path in the manifest.
+When `-UiStateFromProfile` or `-UiStateProfile` is supplied, the composer validates and copies only the source export's opaque `globalState` string. It ignores source settings, extensions, keybindings, display name, and every other resource. It does not inspect individual UI entries, merge layouts, read the running VS Code profile, or record the private source path in the manifest.
 
 The result is copy-on-create behavior: all generated profiles begin with the same captured layout, then diverge normally. Later changes to the source layout do not update existing profiles, and UI contributed by extensions that were not present in the seed uses VS Code's defaults.
 
 Treat both the source and seeded exports as private. `globalState` can contain profile-scoped extension or account-related state. The composer preserves it as supplied and does not attempt unsafe partial redaction. Keep the source outside Git or under an ignored private location, inspect the import preview, and delete generated seeded exports when they are no longer needed.
+
+### Why exported settings are not written back automatically
+
+A VS Code export contains the final flattened settings and extension list, but it does not record which repository component originally owned each entry. Automatically writing it back would require guessing whether a change belongs in Default, Python, Database, a profile override, the platform layer, or machine settings. The CLI therefore captures UI state only. Settings and extensions remain an explicit review-and-edit workflow; a future comparison command can present differences without mutating components.
 
 Use VS Code's supported Profiles editor:
 
@@ -420,7 +440,7 @@ The filename is the profile ID. Use only letters, numbers, periods, underscores,
 - absolute compiler, SDK, engine, database, or executable paths;
 - employer-specific resources or account state;
 - workspace-owned formatter, linter, build, schema, or generated-folder policy;
-- committed component-level VS Code `globalState` or composed UI layout declarations; use only the explicit private `-UiStateFromProfile` pass-through when a starting snapshot is wanted.
+- committed component-level VS Code `globalState` or composed UI layout declarations; use only a private `-UiStateFromProfile` source or ignored `-UiStateProfile` seed when a starting snapshot is wanted.
 
 ## Testing changes
 

@@ -38,10 +38,16 @@ pwsh ./scripts/Compose-Profile.ps1 -Profile default -Platform windows -ExportCod
 pwsh ./scripts/Compose-Profile.ps1 -Profile default -Platform windows -ExportCodeProfile -DryRun
 ```
 
-After arranging a disposable source profile in VS Code and exporting it manually, seed that same starting layout into one or every generated import:
+After arranging a profile in VS Code and exporting it manually, store only its UI state under ignored local project data:
 
 ```powershell
-pwsh ./scripts/Compose-Profile.ps1 -All -Platform windows -ExportCodeProfile -UiStateFromProfile "C:\private\Composer Default Layout.code-profile"
+pwsh ./scripts/Save-ProfileUiState.ps1 -Profile default -SourceProfileExport "C:\private\Adjusted Default.code-profile"
+```
+
+Reuse that stored layout for the same profile or as the starting layout for another profile:
+
+```powershell
+pwsh ./scripts/Compose-Profile.ps1 -Profile python-database -Platform windows -Machine excalibur117-w -ExportCodeProfile -UiStateProfile default
 ```
 
 Warnings are informational by default. Add `-Strict` to make warnings fail validation or composition.
@@ -93,7 +99,7 @@ Add `-ExportCodeProfile` to one-profile or `-All` composition. For example, Defa
 
 Machine overlays are deliberately excluded from named-profile settings and `.code-profile` exports. Selecting `-Machine` or `-MachineFile` instead adds those keys to `build/global/settings.json`, `workbench.settings.applyToAllProfiles`, and `settingsSync.ignoredSettings`. This makes the values effective on the selected computer without sending its paths through Settings Sync. Exports remain portable unless `-UiStateFromProfile` adds a private UI snapshot.
 
-`-UiStateFromProfile` requires `-ExportCodeProfile`. It reads a manually exported `.code-profile`, validates its `globalState` resource, and copies only that opaque resource into the new export. Source settings, extensions, keybindings, name, and source path are not copied. This is a one-time starting snapshot, not inheritance: VS Code owns each profile's UI after import, later layout changes do not propagate, and views introduced by other extensions use their normal defaults. A seeded export is private and must be reviewed because VS Code `globalState` can include extension or account-related state.
+`Save-ProfileUiState.ps1` validates a manually exported `.code-profile` and stores only its opaque `globalState` resource at `machine/local/ui-state/<profile>/seed.code-profile`. The source settings, extensions, keybindings, name, and path are not copied. `-UiStateProfile <id>` reuses a stored seed; `-UiStateFromProfile <path>` remains available for a one-off build. This is copy-on-create, not inheritance: VS Code owns each profile's UI after import, later layout changes do not propagate, and views introduced by other extensions use their defaults. Stored and generated UI-seeded files are private because `globalState` can include extension or account-related state.
 
 Import manually:
 

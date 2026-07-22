@@ -111,6 +111,15 @@ pwsh ./scripts/Compose-Profile.ps1 -All -Platform windows -ExportCodeProfile -Ui
 
 The composer validates the source wrapper and passes only its opaque `globalState` string through unchanged. It does not copy source settings, extensions, keybindings, name, or path, and it does not interpret or merge the UI payload. The manifest records the payload hash and `seed-on-import-then-managed-by-vscode`. Generated profiles receive the same starting snapshot, after which VS Code owns each live layout independently.
 
+For repeatable local use, capture the opaque resource under an ignored profile ID and reuse it:
+
+```powershell
+pwsh ./scripts/Save-ProfileUiState.ps1 -Profile default -SourceProfileExport "C:\private\Adjusted Default.code-profile"
+pwsh ./scripts/Compose-Profile.ps1 -Profile python-database -Platform windows -ExportCodeProfile -UiStateProfile default
+```
+
+The stored file contains only a generic name and `globalState`; its original path and other export resources are discarded. `-UiStateProfile` may seed the same recipe or a different target recipe. Stored UI data is local and private, not canonical component input.
+
 Portable export:
 
 ```powershell
@@ -160,7 +169,7 @@ Tests require Pester 5.5 or newer and use isolated temporary repositories:
 pwsh -NoProfile -Command "Invoke-Pester -Path ./tests -Output Detailed"
 ```
 
-The suite covers recipe and JSONC parsing, validation, every merge mode, redaction, overlay order, safe replacement, failure preservation, dry run behavior, output structure, current core recipes, export schema/resources, portability metadata, hashes, filename containment, and the no-UI-state policy.
+The suite covers recipe and JSONC parsing, validation, every merge mode, redaction, overlay order, safe replacement, failure preservation, dry run behavior, output structure, current core recipes, export schema/resources, portability metadata, hashes, filename containment, and safe local UI-state capture/reuse.
 
 ## Troubleshooting
 
@@ -170,7 +179,7 @@ The suite covers recipe and JSONC parsing, validation, every merge mode, redacti
 - `global-setting-in-profile-source`: remove the setting from the component, profile override, or platform file and edit it in `global/settings.jsonc`.
 - `portable-absolute-path`: move the setting into `machine/local/` and pass it explicitly.
 - `invalid-export-filename`: keep the profile display name free of path separators, traversal sequences, and reserved Windows names.
-- `unsupported-ui-state-source`: remove the component-level file; starting UI state is accepted only through explicit `-UiStateFromProfile` pass-through.
+- `unsupported-ui-state-source`: remove the component-level file; starting UI state is accepted only through `-UiStateFromProfile` or a locally stored `-UiStateProfile` seed.
 - missing or invalid UI seed: manually export the arranged source profile again and confirm it contains a non-empty `globalState` resource.
 - strict-mode warning failure: rerun without `-Strict` to inspect an otherwise valid build, or resolve the warning at its source.
 

@@ -8,7 +8,7 @@
 - Platform and explicitly supplied ignored machine overlays are supported.
 - Named machine IDs under `machine/local/` can be listed and selected explicitly. Their values are generated only into the built-in Default/application artifact, automatically applied to every profile, and excluded from Settings Sync; private overlays remain outside Git.
 - Reviewed `.code-profile` artifacts can be generated explicitly for manual import through VS Code.
-- Exported resources are limited to composed settings, extensions, keybindings, profile identity, and an optional explicitly supplied opaque UI-state seed; VS Code owns live UI state after import.
+- Exported resources are limited to composed settings, extensions, keybindings, profile identity, and an optional opaque UI-state seed captured from a manual export; VS Code owns live UI state after import.
 - Pester tests cover merge behavior, validation, safe replacement, and current core profiles.
 
 ## Current delivery state
@@ -17,7 +17,7 @@
 - Settings Sync remains the primary cross-machine delivery mechanism after a profile is imported.
 - This repository is the canonical human-readable configuration and composition source.
 - Live VS Code profiles remain the runtime source of truth for UI placement and other VS Code-owned state.
-- A private manually exported profile can provide a copy-on-create UI starting point through `-UiStateFromProfile`; automatic capture, layout merging, and continuing inheritance remain deferred.
+- `Save-ProfileUiState.ps1` can extract and retain only the opaque UI resource from a manually exported profile under ignored local data. `-UiStateProfile` reuses that copy-on-create starting point. Direct live capture, layout parsing or merging, and continuing inheritance remain deferred.
 - Stable profiles may be exported and stored privately.
 - Default is the shared base and already provides everyday shell-language support to every profile.
 - PowerShell Development is an optional advanced profile, not a sixth required daily profile.

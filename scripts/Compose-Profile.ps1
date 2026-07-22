@@ -50,6 +50,11 @@ param(
 
     [Parameter(ParameterSetName = 'One')]
     [Parameter(ParameterSetName = 'All')]
+    [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9._-]*$')]
+    [string]$UiStateProfile,
+
+    [Parameter(ParameterSetName = 'One')]
+    [Parameter(ParameterSetName = 'All')]
     [Parameter(ParameterSetName = 'Validate')]
     [Parameter(ParameterSetName = 'Global')]
     [switch]$Strict
@@ -73,9 +78,10 @@ function Write-ValidationSummary {
 }
 
 try {
-    if ($UiStateFromProfile -and -not $ExportCodeProfile) {
-        throw '-UiStateFromProfile requires -ExportCodeProfile.'
+    if (($UiStateFromProfile -or $UiStateProfile) -and -not $ExportCodeProfile) {
+        throw 'UI-state seeding requires -ExportCodeProfile.'
     }
+    if ($UiStateFromProfile -and $UiStateProfile) { throw '-UiStateFromProfile and -UiStateProfile cannot be used together.' }
     if ($Machine -and $MachineFile) { throw '-Machine and -MachineFile cannot be used together.' }
 
     if ($ListMachines) {
@@ -140,12 +146,16 @@ try {
         if ($Machine) { $parameters.Machine = $Machine }
         if ($MachineFile) { $parameters.MachineFile = $MachineFile }
         if ($UiStateFromProfile) { $parameters.UiStateFromProfile = $UiStateFromProfile }
+        if ($UiStateProfile) { $parameters.UiStateProfile = $UiStateProfile }
         $result = Invoke-ProfileComposition @parameters
         if ($DryRun) {
             Write-Host "DRY RUN: $($result.profileId) ($($result.displayName))"
             Write-Host "  Planned output: $($result.outputDirectory)"
             if ($result.codeProfileExportPath) { Write-Host "  Planned .code-profile: $($result.codeProfileExportPath)" }
-            if ($result.uiStateSeeded) { Write-Host '  UI state seed: copied from the explicitly supplied profile export' }
+            if ($result.uiStateSeeded) {
+                $sourceDescription = if ($UiStateProfile) { "stored local profile '$UiStateProfile'" } else { 'explicitly supplied profile export' }
+                Write-Host "  UI state seed: copied from $sourceDescription"
+            }
             if ($result.machineId) { Write-Host "  Machine: $($result.machineId) (delivered through built-in Default settings, not this named profile)" }
             Write-Host "  Inputs:"
             foreach ($input in $result.inputFiles) { Write-Host "    $($input.type): $($input.path)" }

@@ -574,6 +574,42 @@ Describe 'VS Code .code-profile export' {
         Test-CodeProfileTemplate (Join-Path $output 'Default.code-profile') | Should -BeTrue
     }
 
+    It 'stores only UI state under ignored local profile data and reuses it by profile ID' {
+        $fixture = New-ComposerFixture 'stored-ui-state'
+        $sourcePath = Join-Path $TestDrive 'adjusted-default.code-profile'
+        $expectedGlobalState = New-UiStateSeedExport $sourcePath
+
+        $saved = Save-ProfileUiStateSeed -RepositoryRoot $fixture -Profile default -SourceProfileExport $sourcePath
+        $storedPath = Join-Path $fixture $saved.outputPath
+        $storedText = [System.IO.File]::ReadAllText($storedPath)
+        $stored = ConvertFrom-JsonC $storedText
+        $stored.Keys | Should -Be @('name', 'globalState')
+        $stored.globalState | Should -BeExactly $expectedGlobalState
+        $storedText | Should -Not -Match ([regex]::Escape($sourcePath))
+
+        Invoke-ProfileComposition $fixture python-database -Platform windows -ExportCodeProfile -UiStateProfile default | Out-Null
+        $output = Join-Path $fixture 'build/profiles/python-database'
+        $profile = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $output 'Python-Database.code-profile')))
+        $manifest = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $output 'manifest.json')))
+        $profile.globalState | Should -BeExactly $expectedGlobalState
+        $manifest.codeProfileExport.uiStateSeed.source | Should -Be 'stored-local-profile-ui-state'
+        $manifest.codeProfileExport.uiStateSeed.profileId | Should -Be 'default'
+    }
+
+    It 'validates stored UI-state capture and selection without partial writes' {
+        $fixture = New-ComposerFixture 'stored-ui-state-validation'
+        $sourcePath = Join-Path $TestDrive 'valid-source.code-profile'
+        New-UiStateSeedExport $sourcePath | Out-Null
+
+        $preview = Save-ProfileUiStateSeed -RepositoryRoot $fixture -Profile default -SourceProfileExport $sourcePath -DryRun
+        $preview.dryRun | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $fixture 'machine/local/ui-state/default') | Should -BeFalse
+        { Save-ProfileUiStateSeed -RepositoryRoot $fixture -Profile missing -SourceProfileExport $sourcePath } | Should -Throw '*Unknown profile*'
+        { Invoke-ProfileComposition $fixture default -UiStateProfile default } | Should -Throw '*requires -ExportCodeProfile*'
+        { Invoke-ProfileComposition $fixture default -ExportCodeProfile -UiStateProfile default } | Should -Throw '*does not exist*'
+        { Invoke-ProfileComposition $fixture default -ExportCodeProfile -UiStateProfile default -UiStateFromProfile $sourcePath } | Should -Throw '*cannot be used together*'
+    }
+
     It 'records only UI-state seed policy and content hash, never its source path' {
         $fixture = New-ComposerFixture 'export-ui-seed-manifest'
         $privateDirectory = Join-Path $TestDrive 'personal-private-location'
