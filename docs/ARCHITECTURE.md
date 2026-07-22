@@ -2,7 +2,7 @@
 
 ## Components and profiles
 
-A component is a focused reusable unit with portable `settings.jsonc`, an extension list, and ownership documentation. Every focused component can participate in a standalone profile when combined with `default`.
+A component is a focused reusable unit with portable `settings.jsonc`, an extension list, and ownership documentation. `composer.jsonc` names the shared default component; it currently points to `default`.
 
 A profile is an explicit YAML recipe. Profiles do not inherit other profiles. The composer parses the narrow current recipe schema and rejects unsupported YAML structures.
 
@@ -27,7 +27,9 @@ The global and selected machine layers are generated separately under `build/glo
 
 ## Default shared base
 
-Default is the shared daily-driver foundation for common repository formats, source browsing, general terminal behavior, routine shell-language work, and the user's expected cross-profile tools.
+The component named by `composer.jsonc` is required exactly once and first in every recipe. Validation enforces this invariant. `ProfileComposer.ps1 default set` changes the configuration and recipe order together through a staged, rollback-safe transaction; this deliberately remains one shared-default rule rather than a general component dependency graph.
+
+Default is the current shared daily-driver foundation for common repository formats, source browsing, general terminal behavior, routine shell-language work, and the user's expected cross-profile tools.
 
 It owns:
 
@@ -81,4 +83,8 @@ Repositories own generated-folder exclusions, include paths, compile commands, t
 
 ## Generated artifacts
 
-`scripts/Compose-Profile.ps1` materializes reviewable artifacts under ignored `build/global/` and `build/profiles/`. When explicitly requested with `-ExportCodeProfile`, it also creates a manual-import `.code-profile` containing composed settings, extension identifiers, and keybindings. `Save-ProfileUiState.ps1` may retain one opaque `globalState` snapshot per recipe under ignored `machine/local/ui-state/`; `-UiStateProfile` reuses a stored snapshot and `-UiStateFromProfile` supports a one-off source. The composer never reads live VS Code state, interprets or merges that payload, or maintains UI inheritance. It does not import profiles, install extensions, or control Settings Sync. Source components, global settings, and recipes remain canonical.
+`scripts/ProfileComposer.ps1` is the unified command surface. It materializes reviewable artifacts under ignored `build/global/` and `build/profiles/`, lists repository definitions, captures an explicitly supplied opaque UI-state seed, and performs safe source-ID/default-ownership transactions. `Compose-Profile.ps1` and `Save-ProfileUiState.ps1` remain compatibility wrappers.
+
+When explicitly requested with `-ExportCodeProfile`, composition creates a manual-import `.code-profile` containing composed settings, extension identifiers, and keybindings. UI-state capture may retain one opaque `globalState` snapshot per recipe under ignored `machine/local/ui-state/`; `-UiStateProfile` reuses a stored snapshot and `-UiStateFromProfile` supports a one-off source. The composer never reads live VS Code state during ordinary operation, interprets or merges that payload, or maintains UI inheritance. It does not import or rename live profiles, install extensions, or control Settings Sync. Source components, global settings, configuration, and recipes remain canonical.
+
+Rename and shared-default mutations are prepared and validated in an isolated staging copy. Only the affected source roots are swapped into place; a second validation runs before rollback backups are removed. A collision, I/O failure, or validation failure restores every swapped path.

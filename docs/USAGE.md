@@ -53,7 +53,7 @@ Default is the general daily profile and the shared base for every focused profi
 You can also list the recipe IDs directly:
 
 ```powershell
-Get-ChildItem ./profiles/*.yaml | Select-Object -ExpandProperty BaseName
+pwsh ./scripts/ProfileComposer.ps1 list-profiles
 ```
 
 ## First run
@@ -63,13 +63,13 @@ Run all commands from the repository root.
 1. Validate the repository without generating anything:
 
    ```powershell
-   pwsh ./scripts/Compose-Profile.ps1 -Validate
+   pwsh ./scripts/ProfileComposer.ps1 validate
    ```
 
 2. Generate the settings owned by VS Code's built-in Default profile for this computer:
 
    ```powershell
-   pwsh ./scripts/Compose-Profile.ps1 -Global -Machine main-windows
+   pwsh ./scripts/ProfileComposer.ps1 compose-global -Machine main-windows
    ```
 
    Substitute your local machine ID, or omit `-Machine` if the computer has no private overlay. Review `build/global/settings.json`. In VS Code, run **Preferences: Open Application Settings (JSON)** and merge these values into that file. Do not replace unrelated existing settings.
@@ -77,13 +77,13 @@ Run all commands from the repository root.
 3. Preview the named Default build for Windows:
 
    ```powershell
-   pwsh ./scripts/Compose-Profile.ps1 -Profile default -Platform windows -DryRun
+   pwsh ./scripts/ProfileComposer.ps1 compose default -Platform windows -DryRun
    ```
 
 4. Compose Default:
 
    ```powershell
-   pwsh ./scripts/Compose-Profile.ps1 -Profile default -Platform windows
+   pwsh ./scripts/ProfileComposer.ps1 compose default -Platform windows
    ```
 
 5. Inspect `build/profiles/default/`. This step does not affect VS Code.
@@ -91,17 +91,25 @@ Run all commands from the repository root.
 6. When you want a manually importable file, compose again with export enabled:
 
    ```powershell
-   pwsh ./scripts/Compose-Profile.ps1 -Profile default -Platform windows -ExportCodeProfile
+   pwsh ./scripts/ProfileComposer.ps1 compose default -Platform windows -ExportCodeProfile
    ```
 
 7. Import `build/profiles/default/Default.code-profile` into a new, clearly named VS Code profile. Review the import form before selecting **Create**.
 
 ## Command reference
 
+Start with built-in help. Every command returns nonzero on invalid arguments,
+validation failures, collisions, or unsafe paths.
+
+```powershell
+pwsh ./scripts/ProfileComposer.ps1 help
+pwsh ./scripts/ProfileComposer.ps1 help rename-component
+```
+
 ### Validate all repository sources
 
 ```powershell
-pwsh ./scripts/Compose-Profile.ps1 -Validate
+pwsh ./scripts/ProfileComposer.ps1 validate
 ```
 
 Validation checks all known components and recipes. It produces no profile output. Errors return a nonzero exit code; warnings do not fail unless `-Strict` is supplied.
@@ -109,14 +117,14 @@ Validation checks all known components and recipes. It produces no profile outpu
 Validate an explicitly selected overlay as well:
 
 ```powershell
-pwsh ./scripts/Compose-Profile.ps1 -Validate -Platform windows
-pwsh ./scripts/Compose-Profile.ps1 -Validate -Platform windows -Machine windows
+pwsh ./scripts/ProfileComposer.ps1 validate -Platform windows
+pwsh ./scripts/ProfileComposer.ps1 validate -Platform windows -Machine windows
 ```
 
 ### Generate built-in Default settings
 
 ```powershell
-pwsh ./scripts/Compose-Profile.ps1 -Global
+pwsh ./scripts/ProfileComposer.ps1 compose-global
 ```
 
 This writes `build/global/settings.json`, `overrides.json`, and `manifest.json`. The source is `global/settings.jsonc`. These settings are excluded from named profiles because VS Code applies the built-in Default profile's value everywhere and ignores duplicates.
@@ -130,13 +138,13 @@ Profiles imported before this split can still contain ignored copies. Re-import 
 Preview without writing:
 
 ```powershell
-pwsh ./scripts/Compose-Profile.ps1 -Global -DryRun
+pwsh ./scripts/ProfileComposer.ps1 compose-global -DryRun
 ```
 
 Generate the artifact for one computer without composing a named profile:
 
 ```powershell
-pwsh ./scripts/Compose-Profile.ps1 -Global -Machine main-windows
+pwsh ./scripts/ProfileComposer.ps1 compose-global -Machine main-windows
 ```
 
 The composer adds every selected machine key to both `workbench.settings.applyToAllProfiles` and `settingsSync.ignoredSettings`. The value therefore comes from this computer's built-in Default profile, applies in every named profile, and does not travel through Settings Sync. Machine overlays may not edit either ownership list directly.
@@ -144,7 +152,7 @@ The composer adds every selected machine key to both `workbench.settings.applyTo
 ### Compose one profile
 
 ```powershell
-pwsh ./scripts/Compose-Profile.ps1 -Profile unreal -Platform windows
+pwsh ./scripts/ProfileComposer.ps1 compose unreal -Platform windows
 ```
 
 Omit `-Platform` only when no platform overlay is wanted. For normal Windows or Linux use, select the matching committed overlay explicitly.
@@ -152,7 +160,7 @@ Omit `-Platform` only when no platform overlay is wanted. For normal Windows or 
 ### Preview without writing
 
 ```powershell
-pwsh ./scripts/Compose-Profile.ps1 -Profile unreal -Platform windows -ExportCodeProfile -DryRun
+pwsh ./scripts/ProfileComposer.ps1 compose unreal -Platform windows -ExportCodeProfile -DryRun
 ```
 
 Dry run reports the recipe, ordered inputs, planned directory, planned export path, and result counts. It does not create or replace generated files.
@@ -160,19 +168,19 @@ Dry run reports the recipe, ordered inputs, planned directory, planned export pa
 ### Compose every recipe
 
 ```powershell
-pwsh ./scripts/Compose-Profile.ps1 -All -Platform windows
+pwsh ./scripts/ProfileComposer.ps1 compose-all -Platform windows
 ```
 
 Generate a `.code-profile` for every recipe:
 
 ```powershell
-pwsh ./scripts/Compose-Profile.ps1 -All -Platform windows -ExportCodeProfile
+pwsh ./scripts/ProfileComposer.ps1 compose-all -Platform windows -ExportCodeProfile
 ```
 
 Seed every generated export from a layout you already arranged and manually exported from VS Code:
 
 ```powershell
-pwsh ./scripts/Compose-Profile.ps1 -All -Platform windows -ExportCodeProfile -UiStateFromProfile "C:\private\Composer Default Layout.code-profile"
+pwsh ./scripts/ProfileComposer.ps1 compose-all -Platform windows -ExportCodeProfile -UiStateFromProfile "C:\private\Composer Default Layout.code-profile"
 ```
 
 `-UiStateFromProfile` requires `-ExportCodeProfile`. It never exports from or modifies the running VS Code instance.
@@ -180,7 +188,7 @@ pwsh ./scripts/Compose-Profile.ps1 -All -Platform windows -ExportCodeProfile -Ui
 Store a manually exported layout for later reuse:
 
 ```powershell
-pwsh ./scripts/Save-ProfileUiState.ps1 -Profile default -SourceProfileExport "C:\private\Adjusted Default.code-profile"
+pwsh ./scripts/ProfileComposer.ps1 capture-ui-state default "C:\private\Adjusted Default.code-profile"
 ```
 
 The stored seed is `machine/local/ui-state/default/seed.code-profile`, which is ignored by Git. It contains only the export's opaque `globalState` resource and a generic local name. Preview capture without replacing a prior seed by adding `-DryRun`.
@@ -188,26 +196,60 @@ The stored seed is `machine/local/ui-state/default/seed.code-profile`, which is 
 Use the stored Default layout to create the urgent Python + Database profile:
 
 ```powershell
-pwsh ./scripts/Compose-Profile.ps1 -Profile python-database -Platform windows -Machine excalibur117-w -ExportCodeProfile -UiStateProfile default
+pwsh ./scripts/ProfileComposer.ps1 compose python-database -Platform windows -Machine excalibur117-w -ExportCodeProfile -UiStateProfile default
 ```
 
-`-UiStateProfile` can name any recipe with a stored seed and can seed a different target recipe. To update a layout, arrange that live profile, export it manually again, rerun `Save-ProfileUiState.ps1` for its recipe ID, and rebuild. `-UiStateProfile` and `-UiStateFromProfile` are mutually exclusive.
+`-UiStateProfile` can name any recipe with a stored seed and can seed a different target recipe. To update a layout, arrange that live profile, export it manually again, rerun `capture-ui-state` for its recipe ID, and rebuild. `-UiStateProfile` and `-UiStateFromProfile` are mutually exclusive.
 
 ### Treat warnings as failures
 
 ```powershell
-pwsh ./scripts/Compose-Profile.ps1 -Validate -Strict
-pwsh ./scripts/Compose-Profile.ps1 -Profile default -Platform windows -Strict
+pwsh ./scripts/ProfileComposer.ps1 validate -Strict
+pwsh ./scripts/ProfileComposer.ps1 compose default -Platform windows -Strict
 ```
 
 Strict mode is useful before committing source changes. Ordinary composition still reports warnings but fails only on errors.
+
+### Shared default ownership
+
+`composer.jsonc` declares the shared default component. Show or change it with:
+
+```powershell
+pwsh ./scripts/ProfileComposer.ps1 default show
+pwsh ./scripts/ProfileComposer.ps1 default set default -DryRun
+```
+
+Setting a new shared default requires an existing component. The command places
+it first in every recipe, removes duplicate occurrences, and preserves the
+remaining declared order. Validation rejects a missing configured component or
+any recipe that omits it, duplicates it, or places it later.
+
+### Rename repository IDs safely
+
+Always inspect the exact plan first:
+
+```powershell
+pwsh ./scripts/ProfileComposer.ps1 rename-profile python python-work -DryRun
+pwsh ./scripts/ProfileComposer.ps1 rename-component cpp native-cpp -DryRun
+```
+
+Profile rename moves the recipe, optional profile settings override, and
+ignored stored UI-state seed. Component rename moves the component directory,
+updates every ordered recipe reference, and updates `composer.jsonc` when the
+component is the shared default. Both operations reject invalid IDs, missing
+sources, collisions, and path escapes. They validate a staged repository before
+applying a rollback-safe transaction and validate again afterward. They do not
+rename or otherwise modify live VS Code profiles.
+
+`Compose-Profile.ps1` and `Save-ProfileUiState.ps1` remain compatible wrappers
+for existing automation. New workflows should use `ProfileComposer.ps1`.
 
 ## Portable profiles and machine-specific application settings
 
 A named-profile build uses components, an optional profile override, and an optional platform overlay. Its `.code-profile` is portable because private machine values are never embedded:
 
 ```powershell
-pwsh ./scripts/Compose-Profile.ps1 -Profile unreal -Platform windows -ExportCodeProfile
+pwsh ./scripts/ProfileComposer.ps1 compose unreal -Platform windows -ExportCodeProfile
 ```
 
 Use this form when the export should work on multiple compatible Windows machines.
@@ -217,8 +259,8 @@ To target a computer, explicitly select its private overlay. Create one file per
 ```powershell
 Copy-Item ./machine/windows.example.jsonc ./machine/local/main-windows.jsonc
 Copy-Item ./machine/windows.example.jsonc ./machine/local/gaming-server.jsonc
-pwsh ./scripts/Compose-Profile.ps1 -ListMachines
-pwsh ./scripts/Compose-Profile.ps1 -Profile unreal -Platform windows -Machine main-windows -ExportCodeProfile
+pwsh ./scripts/ProfileComposer.ps1 list-machines
+pwsh ./scripts/ProfileComposer.ps1 compose unreal -Platform windows -Machine main-windows -ExportCodeProfile
 ```
 
 Edit the copied file locally and replace placeholders. Confirm Git ignores it:
@@ -453,7 +495,7 @@ Install-Module Pester -MinimumVersion 5.5.0 -Scope CurrentUser
 Run validation and the isolated test suite:
 
 ```powershell
-pwsh ./scripts/Compose-Profile.ps1 -Validate -Strict
+pwsh ./scripts/ProfileComposer.ps1 validate -Strict
 pwsh -NoProfile -Command "Invoke-Pester -Path ./tests -Output Detailed"
 ```
 
@@ -493,9 +535,9 @@ Composition is temporary-directory-first. If parsing, validation, export creatio
 For ordinary maintenance, use this repeatable sequence:
 
 ```powershell
-pwsh ./scripts/Compose-Profile.ps1 -Validate -Strict
-pwsh ./scripts/Compose-Profile.ps1 -Profile default -Platform windows -ExportCodeProfile -DryRun
-pwsh ./scripts/Compose-Profile.ps1 -Profile default -Platform windows -ExportCodeProfile
+pwsh ./scripts/ProfileComposer.ps1 validate -Strict
+pwsh ./scripts/ProfileComposer.ps1 compose default -Platform windows -ExportCodeProfile -DryRun
+pwsh ./scripts/ProfileComposer.ps1 compose default -Platform windows -ExportCodeProfile
 pwsh -NoProfile -Command "Invoke-Pester -Path ./tests -Output Detailed"
 git status --short
 ```

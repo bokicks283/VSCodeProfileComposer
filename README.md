@@ -1,6 +1,6 @@
 # VS Code Profile Composer
 
-This repository contains reusable VS Code settings and extension components plus a safe PowerShell 7 composer. One command validates the source model and materializes a complete profile without reading or changing the user's VS Code installation.
+This repository contains reusable VS Code settings and extension components plus a safe PowerShell 7 composer. `scripts/ProfileComposer.ps1` is the unified CLI for validation, composition, discovery, UI-state capture, and transactional source maintenance without changing the user's VS Code installation.
 
 For a complete first-run walkthrough, profile-selection guide, import procedure, Settings Sync precautions, maintenance workflow, and troubleshooting reference, start with [Complete usage guide](docs/USAGE.md).
 
@@ -15,39 +15,43 @@ Requirements:
 The composer has no external runtime dependencies and never installs modules automatically.
 
 ```powershell
+# Discover commands and detailed command-specific help.
+pwsh ./scripts/ProfileComposer.ps1 help
+pwsh ./scripts/ProfileComposer.ps1 help compose
+
 # Validate every component and recipe.
-pwsh ./scripts/Compose-Profile.ps1 -Validate
+pwsh ./scripts/ProfileComposer.ps1 validate
 
 # Compose one profile.
-pwsh ./scripts/Compose-Profile.ps1 -Profile default -Platform windows
+pwsh ./scripts/ProfileComposer.ps1 compose default -Platform windows
 
 # List and select private machine-local overlays by ID.
-pwsh ./scripts/Compose-Profile.ps1 -ListMachines
-pwsh ./scripts/Compose-Profile.ps1 -Profile unreal -Platform windows -Machine windows
+pwsh ./scripts/ProfileComposer.ps1 list-machines
+pwsh ./scripts/ProfileComposer.ps1 compose unreal -Platform windows -Machine windows
 
 # Generate only the settings owned by VS Code's built-in Default profile.
-pwsh ./scripts/Compose-Profile.ps1 -Global
+pwsh ./scripts/ProfileComposer.ps1 compose-global
 
 # Compose every valid recipe.
-pwsh ./scripts/Compose-Profile.ps1 -All -Platform windows
+pwsh ./scripts/ProfileComposer.ps1 compose-all -Platform windows
 
 # Compose and create a file for manual import through VS Code Profiles.
-pwsh ./scripts/Compose-Profile.ps1 -Profile default -Platform windows -ExportCodeProfile
+pwsh ./scripts/ProfileComposer.ps1 compose default -Platform windows -ExportCodeProfile
 
 # Inspect inputs and planned output without writing build files.
-pwsh ./scripts/Compose-Profile.ps1 -Profile default -Platform windows -ExportCodeProfile -DryRun
+pwsh ./scripts/ProfileComposer.ps1 compose default -Platform windows -ExportCodeProfile -DryRun
 ```
 
 After arranging a profile in VS Code and exporting it manually, store only its UI state under ignored local project data:
 
 ```powershell
-pwsh ./scripts/Save-ProfileUiState.ps1 -Profile default -SourceProfileExport "C:\private\Adjusted Default.code-profile"
+pwsh ./scripts/ProfileComposer.ps1 capture-ui-state default "C:\private\Adjusted Default.code-profile"
 ```
 
 Reuse that stored layout for the same profile or as the starting layout for another profile:
 
 ```powershell
-pwsh ./scripts/Compose-Profile.ps1 -Profile python-database -Platform windows -Machine excalibur117-w -ExportCodeProfile -UiStateProfile default
+pwsh ./scripts/ProfileComposer.ps1 compose python-database -Platform windows -Machine excalibur117-w -ExportCodeProfile -UiStateProfile default
 ```
 
 Warnings are informational by default. Add `-Strict` to make warnings fail validation or composition.
@@ -68,7 +72,16 @@ Later layers win. Settings objects merge recursively, while scalar values, array
 
 Workspace settings are not materialized into personal profiles. `workspace-examples/` remains project guidance only.
 
-Default is the shared first component in every recipe, so its 34 extensions and portable settings are present in every generated profile. Focused components add only their specialized tools afterward.
+`composer.jsonc` declares the shared default component. It starts as `default`, which remains first in every recipe, so its portable settings and extensions are present in every generated profile. Use `default show` or `default set <component> -DryRun`; setting ownership normalizes every recipe without duplicates while preserving the remaining order.
+
+Repository IDs can be maintained without hand-editing references:
+
+```powershell
+pwsh ./scripts/ProfileComposer.ps1 rename-profile old-id new-id -DryRun
+pwsh ./scripts/ProfileComposer.ps1 rename-component old-id new-id -DryRun
+```
+
+Rename and shared-default changes are validated in an isolated staged copy, then applied as a rollback-safe source transaction. They never rename live VS Code profiles. The older `Compose-Profile.ps1` and `Save-ProfileUiState.ps1` commands remain compatible wrappers.
 
 ## Output and safety
 
@@ -122,8 +135,8 @@ Create one ignored file per computer. Its filename is the machine ID:
 
 ```powershell
 Copy-Item ./machine/windows.example.jsonc ./machine/local/main-windows.jsonc
-pwsh ./scripts/Compose-Profile.ps1 -ListMachines
-pwsh ./scripts/Compose-Profile.ps1 -Profile default -Platform windows -Machine main-windows
+pwsh ./scripts/ProfileComposer.ps1 list-machines
+pwsh ./scripts/ProfileComposer.ps1 compose default -Platform windows -Machine main-windows
 ```
 
 Replace placeholders locally, then select the filename without `.jsonc` using `-Machine`. `-MachineFile` remains available for an exceptional explicit path. The same command generates the portable named profile and the selected computer's `build/global/settings.json`; manually merge the latter into **Preferences: Open Application Settings (JSON)**. In particular, Todo Tree's confirmed working Windows ripgrep path is machine-specific; no portable `"rg"` override is present in Default.
@@ -139,11 +152,11 @@ Install-Module Pester -MinimumVersion 5.5.0 -Scope CurrentUser
 Run the isolated suite:
 
 ```powershell
-pwsh -NoProfile -Command "Invoke-Pester -Path ./tests -Output Detailed"
+pwsh -NoProfile -Command "Invoke-Pester -Path ./tests -Output Detailed -CI"
 ```
 
 ## Installer status
 
 Direct installation into VS Code is intentionally deferred. `.code-profile` generation is an export only and never invokes import. The composer never edits VS Code user data, profile storage, extensions, Settings Sync, or operating-system configuration. Settings Sync remains the primary cross-machine delivery mechanism for imported active profiles.
 
-See [Complete usage guide](docs/USAGE.md), [Composer details](docs/COMPOSER.md), [Architecture](docs/ARCHITECTURE.md), [Portability](docs/PORTABILITY.md), [Migration](docs/MIGRATION.md), and the sanitized [historical extension reference](reference/extensions/README.md).
+See [Complete usage guide](docs/USAGE.md), [Composer details](docs/COMPOSER.md), [Architecture](docs/ARCHITECTURE.md), [Main-profile ownership audit](docs/audits/2026-07-22-main-profile-ownership.md), [Portability](docs/PORTABILITY.md), [Migration](docs/MIGRATION.md), and the sanitized [historical extension reference](reference/extensions/README.md).
