@@ -15,6 +15,8 @@ The source export contained settings, extensions, and `globalState`. Only the ex
 
 The inventory is [extension-library-staging.txt](extension-library-staging.txt).
 
+The current repository and live `Main` comparison is documented in [2026-07-21-main-gap-review.md](2026-07-21-main-gap-review.md).
+
 This is historical project memory, not an install list or component. The composer never reads it during validation or composition. It includes extensions that were intentionally retired or deferred, including `trunk.io`, so do not add the file wholesale to a profile.
 
 After the composed profiles have been used in representative workspaces, compare missing capabilities against this inventory. Add only extensions with a current, profile-specific reason to the smallest correct component. The component `extensions.txt` files remain canonical.
