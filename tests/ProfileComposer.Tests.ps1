@@ -431,3 +431,20 @@ Describe 'VS Code .code-profile export' {
         $manifest.codeProfileExport | Should -BeNullOrEmpty
     }
 }
+
+Describe 'Historical extension reference' {
+    It 'preserves the sanitized Extension Library Staging inventory' {
+        $path = Join-Path $script:RepositoryRoot 'reference/extensions/extension-library-staging.txt'
+        $ids = @(
+            [System.IO.File]::ReadAllLines($path) |
+                ForEach-Object { $_.Trim() } |
+                Where-Object { $_ -and -not $_.StartsWith('#') }
+        )
+
+        $ids.Count | Should -Be 150
+        @($ids | Sort-Object -Unique).Count | Should -Be 150
+        foreach ($id in $ids) {
+            $id | Should -Match '^[A-Za-z0-9][A-Za-z0-9-]*\.[A-Za-z0-9][A-Za-z0-9._-]*$'
+        }
+    }
+}

@@ -258,6 +258,12 @@ Official references:
 
 The composer deliberately does not copy live user keybindings. Before adding global bindings, review each one and place only portable, intentional bindings in a component `keybindings.jsonc`. Unresolved or machine-specific bindings should remain live and outside the repository.
 
+## Historical extension reference
+
+The sanitized [Extension Library Staging inventory](../reference/extensions/README.md) preserves 150 extension IDs from the pre-optimization live profile. It is project memory only and is never composed or installed. All currently owned extensions appear in the snapshot; the remaining historical candidates can be reviewed individually after the new profiles have been tested.
+
+Do not copy the historical list wholesale into a component. It includes deliberately retired and deferred tools. When a missing capability is identified, select the smallest correct component and add only the extension that solves the current need.
+
 ## Settings Sync and multiple machines
 
 Settings Sync can synchronize settings, keyboard shortcuts, snippets, tasks, UI state, extensions, and profiles. Importing a generated profile and enabling Sync are separate actions.
