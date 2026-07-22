@@ -1,2 +1,2 @@
 # No advanced-only PowerShell extensions are currently approved.
-# ms-vscode.powershell is owned by suggested-baseline for everyday scripting.
+# ms-vscode.powershell is owned by default for everyday scripting.

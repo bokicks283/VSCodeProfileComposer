@@ -1,4 +1,4 @@
 name: "Python"
 components:
-  - suggested-baseline
+  - default
   - python

@@ -23,7 +23,15 @@ Describe 'Recipe parsing and repository validation' {
     It 'parses the current ordered recipe format' {
         $recipe = Read-ProfileRecipe (Join-Path $script:RepositoryRoot 'profiles/unreal.yaml')
         $recipe.Name | Should -Be 'Unreal Engine'
-        $recipe.Components | Should -Be @('suggested-baseline', 'cpp', 'unreal')
+        $recipe.Components | Should -Be @('default', 'cpp', 'unreal')
+    }
+
+    It 'uses Default as the shared first component in every recipe' {
+        foreach ($definition in Get-ProfileDefinitions $script:RepositoryRoot) {
+            $recipe = Read-ProfileRecipe $definition.Path
+            $recipe.Components[0] | Should -BeExactly 'default'
+        }
+        Test-Path -LiteralPath (Join-Path $script:RepositoryRoot 'components/suggested-baseline') | Should -BeFalse
     }
 
     It 'detects missing recipe components' {
@@ -297,7 +305,7 @@ Describe 'VS Code .code-profile export' {
 
     It 'embeds generated keybindings and Windows platform metadata' {
         $fixture = New-ComposerFixture 'export-keybindings'
-        Write-TestFile (Join-Path $fixture 'components/suggested-baseline/keybindings.jsonc') '[{ "key": "ctrl+alt+t", "command": "workbench.action.files.newUntitledFile" }]'
+        Write-TestFile (Join-Path $fixture 'components/default/keybindings.jsonc') '[{ "key": "ctrl+alt+t", "command": "workbench.action.files.newUntitledFile" }]'
         Invoke-ProfileComposition $fixture default -Platform windows -ExportCodeProfile | Out-Null
         $output = Join-Path $fixture 'build/profiles/default'
         $profile = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $output 'Default.code-profile')))

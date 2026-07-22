@@ -1,5 +1,5 @@
 name: "MongoDB"
 components:
-  - suggested-baseline
+  - default
   - database
   - mongodb

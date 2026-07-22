@@ -2,7 +2,7 @@
 
 ## Components and profiles
 
-A component is a focused reusable unit with portable `settings.jsonc`, an extension list, and ownership documentation. Every component can participate in a standalone profile when combined with `suggested-baseline`.
+A component is a focused reusable unit with portable `settings.jsonc`, an extension list, and ownership documentation. Every focused component can participate in a standalone profile when combined with `default`.
 
 A profile is an explicit YAML recipe. Profiles do not inherit other profiles. The composer parses the narrow current recipe schema and rejects unsupported YAML structures.
 
@@ -17,9 +17,9 @@ Recipe components in declared order
 
 The composer materializes exactly this order. Workspace settings stay separate and are never appended to a personal profile. Manual VS Code profile import and, when deliberately enabled, Settings Sync remain the runtime delivery mechanisms.
 
-## Suggested Baseline
+## Default shared base
 
-The baseline is the lightweight daily driver for common repository formats, source browsing, general terminal behavior, and routine shell-language work across mixed repositories and machines.
+Default is the shared daily-driver foundation for common repository formats, source browsing, general terminal behavior, routine shell-language work, and the user's expected cross-profile tools.
 
 It owns:
 
@@ -32,11 +32,11 @@ Default therefore supports everyday `.ps1`, `.psm1`, `.psd1`, `.sh`, `.bash`, `.
 
 The Microsoft PowerShell placement is provisional: available evidence shows PowerShell language/debug/command activation and prior cross-profile ownership, but no reliable activation-time measurement. Revisit it if later Default measurements show a meaningful cost.
 
-Suggested Baseline and Default deliberately exclude database clients, database language servers, connection explorers, and vendor-specific database extensions.
+Default deliberately excludes database clients, database language servers, connection explorers, and vendor-specific database extensions.
 
 ## Focused components
 
-- `default` adds optional cross-stack daily tools.
+- `default` is the shared portable and daily-driver base used by every recipe.
 - `cpp` owns general C/C++.
 - `unreal` owns only Unreal-specific concerns and reuses `cpp`.
 - `web` and `python` own their language/workflow behavior without database tooling.
@@ -48,11 +48,11 @@ Suggested Baseline and Default deliberately exclude database clients, database l
 ## Database composition
 
 ```text
-Database          = Suggested Baseline + Database
-Web + Database    = Suggested Baseline + Web + Database
-Python + Database = Suggested Baseline + Python + Database
-SQL Server        = Suggested Baseline + Database + SQL Server
-MongoDB           = Suggested Baseline + Database + MongoDB
+Database          = Default + Database
+Web + Database    = Default + Web + Database
+Python + Database = Default + Python + Database
+SQL Server        = Default + Database + SQL Server
+MongoDB           = Default + Database + MongoDB
 ```
 
 Generic and vendor-specific concerns remain separate. PostgreSQL, MySQL/MariaDB, and SQLite are planned only; no empty components are created without reviewed content.

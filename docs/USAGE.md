@@ -36,19 +36,19 @@ The composer uses built-in PowerShell and .NET functionality. It does not requir
 
 | Profile ID | Display name | Components |
 | --- | --- | --- |
-| `default` | Default | Suggested Baseline + Default |
-| `cpp` | C++ | Suggested Baseline + C++ |
-| `unreal` | Unreal Engine | Suggested Baseline + C++ + Unreal |
-| `web` | Web | Suggested Baseline + Web |
-| `python` | Python | Suggested Baseline + Python |
-| `powershell` | PowerShell Development | Suggested Baseline + PowerShell |
-| `database` | Database | Suggested Baseline + Database |
-| `web-database` | Web + Database | Suggested Baseline + Web + Database |
-| `python-database` | Python + Database | Suggested Baseline + Python + Database |
-| `sql-server` | SQL Server | Suggested Baseline + Database + SQL Server |
-| `mongodb` | MongoDB | Suggested Baseline + Database + MongoDB |
+| `default` | Default | Default |
+| `cpp` | C++ | Default + C++ |
+| `unreal` | Unreal Engine | Default + C++ + Unreal |
+| `web` | Web | Default + Web |
+| `python` | Python | Default + Python |
+| `powershell` | PowerShell Development | Default + PowerShell |
+| `database` | Database | Default + Database |
+| `web-database` | Web + Database | Default + Web + Database |
+| `python-database` | Python + Database | Default + Python + Database |
+| `sql-server` | SQL Server | Default + Database + SQL Server |
+| `mongodb` | MongoDB | Default + Database + MongoDB |
 
-Default is the general daily profile. PowerShell Development is for advanced module, testing, analysis, debugging, publishing, or administration work. Database profiles are opt-in so database clients and connection explorers do not become part of Default.
+Default is the general daily profile and the shared base for every focused profile. Its 32 extensions are therefore present in all current compositions. PowerShell Development is for advanced module, testing, analysis, debugging, publishing, or administration work. Database profiles are opt-in so database clients and connection explorers do not become part of Default.
 
 You can also list the recipe IDs directly:
 
@@ -254,7 +254,7 @@ Official references:
 
 ## Current keybinding behavior
 
-`components/suggested-baseline/keybindings.jsonc` is currently absent, so current exports contain a valid encoded empty keybinding array.
+`components/default/keybindings.jsonc` is currently absent, so current exports contain a valid encoded empty keybinding array.
 
 The composer deliberately does not copy live user keybindings. Before adding global bindings, review each one and place only portable, intentional bindings in a component `keybindings.jsonc`. Unresolved or machine-specific bindings should remain live and outside the repository.
 
@@ -318,7 +318,7 @@ Create `profiles/<id>.yaml` using the supported narrow schema:
 ```yaml
 name: Example Profile
 components:
-  - suggested-baseline
+  - default
   - web
 ```
 

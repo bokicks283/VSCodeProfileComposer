@@ -17,7 +17,7 @@
 - This repository is the canonical human-readable configuration and composition source.
 - Live VS Code profiles remain the runtime source of truth for UI placement and other VS Code-owned state.
 - Stable profiles may be exported and stored privately.
-- Default already receives everyday shell-language support from Suggested Baseline.
+- Default is the shared base and already provides everyday shell-language support to every profile.
 - PowerShell Development is an optional advanced profile, not a sixth required daily profile.
 - Database support is opt-in through explicit Database, SQL Server, MongoDB, Web + Database, or Python + Database recipes.
 - Database connection details remain local or employer-managed and are not materialized by this repository.

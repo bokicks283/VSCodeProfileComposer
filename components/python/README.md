@@ -17,7 +17,7 @@ Personal interpreter paths, virtual environment paths, Flask-only behavior, data
 ```yaml
 name: Python
 components:
-  - suggested-baseline
+  - default
   - python
 ```
 

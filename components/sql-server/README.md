@@ -17,7 +17,7 @@ Generic SQL ownership, MongoDB behavior, live connections, connection groups, se
 ```yaml
 name: SQL Server
 components:
-  - suggested-baseline
+  - default
   - database
   - sql-server
 ```

@@ -39,8 +39,8 @@ Warnings are informational by default. Add `-Strict` to make warnings fail valid
 ## Repository model
 
 ```text
-Suggested Baseline
-→ recipe components in declared order
+Default shared base
+→ additional recipe components in declared order
 → optional profiles/<id>.settings.jsonc override
 → platform/<platform>.jsonc
 → optional machine-local settings file
@@ -49,6 +49,8 @@ Suggested Baseline
 Later layers win. Settings objects merge recursively, while scalar values, arrays, and null values replace earlier values. Extension IDs are validated and deduplicated case-insensitively in first-appearance order. Keybinding arrays are concatenated unchanged; identical objects produce warnings but remain in the output.
 
 Workspace settings are not materialized into personal profiles. `workspace-examples/` remains project guidance only.
+
+Default is the shared first component in every recipe, so its 32 extensions and portable settings are present in every generated profile. Focused components add only their specialized tools afterward.
 
 ## Output and safety
 
@@ -90,7 +92,7 @@ File → Preferences → Profiles
 
 UI placement is not composed. After import, customize the profile UI in VS Code. VS Code owns and syncs the resulting live UI state. Review every import preview: re-importing may create a profile or replace selected profile resources according to VS Code's current import workflow.
 
-`components/suggested-baseline/keybindings.jsonc` is currently absent, so current exports correctly carry an empty custom-keybinding array. Add repository-owned bindings there when they are ready; the composer never reads live user keybindings.
+`components/default/keybindings.jsonc` is currently absent, so current exports correctly carry an empty custom-keybinding array. Add repository-owned bindings there when they are ready; the composer never reads live user keybindings.
 
 ## Machine-local setup
 
@@ -100,7 +102,7 @@ Copy the appropriate example and keep the result ignored:
 Copy-Item ./machine/windows.example.jsonc ./machine/local/windows.jsonc
 ```
 
-Replace placeholders locally, then pass the file with `-MachineFile`. In particular, Todo Tree's confirmed working Windows ripgrep path is machine-specific; no portable `"rg"` override is present in Suggested Baseline.
+Replace placeholders locally, then pass the file with `-MachineFile`. In particular, Todo Tree's confirmed working Windows ripgrep path is machine-specific; no portable `"rg"` override is present in Default.
 
 ## Tests
 

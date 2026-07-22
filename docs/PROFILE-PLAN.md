@@ -8,16 +8,16 @@
 4. Web
 5. Python
 
-Default already handles everyday PowerShell, Bash/Zsh shell scripts, and Windows batch files through Suggested Baseline. It intentionally excludes database tooling.
+Default is the shared foundation for every profile and already handles everyday PowerShell, Bash/Zsh shell scripts, Windows batch files, and the user's cross-profile extensions. It intentionally excludes database tooling.
 
 ## Available opt-in profiles
 
-- PowerShell Development = Suggested Baseline + PowerShell
-- Database = Suggested Baseline + Database
-- Web + Database = Suggested Baseline + Web + Database
-- Python + Database = Suggested Baseline + Python + Database
-- SQL Server = Suggested Baseline + Database + SQL Server
-- MongoDB = Suggested Baseline + Database + MongoDB
+- PowerShell Development = Default + PowerShell
+- Database = Default + Database
+- Web + Database = Default + Web + Database
+- Python + Database = Default + Python + Database
+- SQL Server = Default + Database + SQL Server
+- MongoDB = Default + Database + MongoDB
 
 Use PowerShell Development for module authoring, Command Explorer, dedicated Pester/PSScriptAnalyzer workflows, advanced debugging, administration tooling, or publishing—not for ordinary script editing.
 
@@ -25,9 +25,9 @@ Use database profiles only when database editing, querying, schema work, migrati
 
 ## Near-term compositions
 
-- Flask + Database = Suggested Baseline + Python + Web + future Flask + Database
-- PHP + Database = Suggested Baseline + future PHP + Web + Database
-- Python + PostgreSQL = Suggested Baseline + Python + Database + future PostgreSQL
+- Flask + Database = Default + Python + Web + future Flask + Database
+- PHP + Database = Default + future PHP + Web + Database
+- Python + PostgreSQL = Default + Python + Database + future PostgreSQL
 
 These remain planning examples until their missing components contain reviewed configuration.
 
@@ -35,7 +35,7 @@ These remain planning examples until their missing components contain reviewed c
 
 ```text
 Backend Work
-= Suggested Baseline
+= Default
 + Python
 + Flask
 + Database
@@ -45,7 +45,7 @@ Backend Work
 
 ```text
 Enterprise Work
-= Suggested Baseline
+= Default
 + C#
 + Web
 + Database
@@ -75,8 +75,8 @@ No empty vendor component is created without real reviewed content.
 
 ## Unresolved questions
 
-- Which measurement-pending global extensions earn baseline placement?
-- Does the Microsoft PowerShell extension create a meaningful measured Default-profile cost in representative workspaces?
+- Which measurement-pending global extensions earn shared Default placement?
+- Does the Microsoft PowerShell extension create a meaningful measured shared-profile cost in representative workspaces?
 - Should ESLint and Tailwind split from Web after MVP validation?
 - Which Python formatter/linter stack should own save formatting?
 - Should HLSL Tools and C++ Dev Tools be mandatory in Unreal?
@@ -91,7 +91,7 @@ No empty vendor component is created without real reviewed content.
 
 Import each generated `.code-profile` into a new, clearly named test profile and review the selected resources before creating it. Do not replace the active Default profile during initial validation.
 
-1. Suggested Baseline and Default in a small mixed repository, including common shell files.
+1. Default in a small mixed repository, including common shell files.
 2. Default cold-start measurements.
 3. C++ in a normal native C++ repository.
 4. Unreal in the primary Unreal workspace.

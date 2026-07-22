@@ -1,4 +1,4 @@
 name: "Web"
 components:
-  - suggested-baseline
+  - default
   - web

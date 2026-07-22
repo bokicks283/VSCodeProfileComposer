@@ -17,7 +17,7 @@ General C/C++ settings, compiler paths, engine installation paths, project-gener
 ```yaml
 name: Unreal Engine
 components:
-  - suggested-baseline
+  - default
   - cpp
   - unreal
 ```

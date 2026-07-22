@@ -37,7 +37,7 @@ The recipe parser accepts the repository's narrow schema:
 ```yaml
 name: Unreal Engine
 components:
-  - suggested-baseline
+  - default
   - cpp
   - unreal
 ```
@@ -77,7 +77,7 @@ The optional export follows VS Code's `IUserDataProfileTemplate` JSON representa
 - `extensions`: an array of `{ "identifier": { "id": "publisher.extension" } }`; versions and local installation state are not embedded
 - `keybindings`: `{ "keybindings": "<generated keybindings.json text>", "platform": <number> }`
 
-`components/suggested-baseline/keybindings.jsonc` is currently absent, so present exports use VS Code's encoded empty-array representation. The composer does not infer or read the user's live keybindings.
+`components/default/keybindings.jsonc` is currently absent, so present exports use VS Code's encoded empty-array representation. The composer does not infer or read the user's live keybindings.
 
 The format has no identifiable schema version, so the manifest records `schemaVersion: "unversioned"` plus the VS Code version and commit used for verification. On import, VS Code reviews the resources and resolves/installs extension identifiers through its normal profile-import workflow.
 

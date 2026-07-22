@@ -17,7 +17,7 @@ Generic SQL tooling, SQL Server settings, connection strings, saved connections,
 ```yaml
 name: MongoDB
 components:
-  - suggested-baseline
+  - default
   - database
   - mongodb
 ```

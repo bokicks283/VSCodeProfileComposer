@@ -30,8 +30,8 @@ The source repository was reference-only and was not modified.
 
 ## Migrated
 
-- reviewed application/editor behavior → Suggested Baseline
-- selected Default-only preferences and optional tools → Default
+- reviewed application/editor behavior → the shared Default base
+- selected daily-driver preferences and optional tools → the shared Default base
 - general `C_Cpp.*` and language blocks → C++
 - Unreal extension overlay and planning boundary → Unreal
 - initial PowerShell extension behavior → PowerShell
@@ -46,13 +46,13 @@ The source repository was reference-only and was not modified.
 
 After the initial migration, shell-language ownership was refined without redoing the repository:
 
-- `ms-vscode.powershell` moved from `components/powershell/extensions.txt` to `components/suggested-baseline/extensions.txt`.
+- `ms-vscode.powershell` moved from `components/powershell/extensions.txt` to the then-named Suggested Baseline, which has since been consolidated into Default.
 - PowerShell file recognition expanded from `.ps1` to `.ps1`, `.psm1`, and `.psd1`.
 - Built-in shell-script associations were added for `.sh`, `.bash`, and `.zsh`.
 - Built-in Windows batch associations were added for `.bat` and `.cmd`.
-- `terminal.explorerKind`, persistent-session scrollback, and shell-integration environment reporting moved from Default to Suggested Baseline because they are portable cross-profile terminal behavior.
+- `terminal.explorerKind`, persistent-session scrollback, and shell-integration environment reporting were classified as portable cross-profile terminal behavior and now live in Default.
 - Command Explorer remained in the PowerShell component as an advanced development preference.
-- The PowerShell recipe display name changed to `PowerShell Development`; Default still composes only Suggested Baseline + Default.
+- The PowerShell recipe display name changed to `PowerShell Development`; every recipe now begins with the shared Default component.
 
 The Microsoft PowerShell extension placement is provisional. Available audit evidence showed prior cross-profile ownership and activation on PowerShell language/debug/commands rather than eager startup, but no reliable timing measurement. No item was left in the advanced component because of a proven performance cost.
 
@@ -60,7 +60,7 @@ The Microsoft PowerShell extension placement is provisional. Available audit evi
 
 Database ownership was refined without redoing the migration:
 
-- Confirmed Suggested Baseline and Default already contained no database settings, clients, language servers, or connection explorers.
+- Confirmed the shared Default base contains no database settings, clients, language servers, or connection explorers.
 - Confirmed Web and Python were already database-independent.
 - Moved the previously reviewed generic SQLTools extension into a new opt-in `database` component.
 - Preserved the five reviewed `mssql.*` behavior settings in a focused `sql-server` component.
@@ -68,7 +68,7 @@ Database ownership was refined without redoing the migration:
 - Preserved `mongodbLanguageServer.maxNumberOfProblems` in a focused `mongodb` component.
 - Added `mongodb.mongodb-vscode` to the MongoDB component.
 - Added explicit Database, Web + Database, Python + Database, SQL Server, and MongoDB recipes.
-- Default remains Suggested Baseline + Default and does not compose Database.
+- Default remains database-free; database tooling is added only through explicit focused components.
 
 The old source settings contained live connection-profile metadata. No connection object, connection group, host, database name, username, password, token, certificate, account ID, private cloud resource, or authentication cache was copied or reproduced.
 
@@ -78,13 +78,19 @@ The old source settings contained live connection-profile metadata. No connectio
 
 - Generated-file headers were removed because destination files are manually curated.
 - Personal spell-check dictionaries were excluded.
-- The source global extension set was reduced to a lighter Suggested Baseline.
-- Measurement-pending and known-bug extensions were documented rather than forced into the baseline.
+- The source global extension set was reduced to a reviewed shared Default set.
+- Measurement-pending and known-bug extensions were documented rather than forced into shared Default.
 - The unreliable portable Todo Tree `"rg"` override was removed. The confirmed Windows path shape remains a placeholder example, while real values belong only in ignored machine-local overlays.
 - C++ memory and workspace-symbol tuning were classified as machine/performance decisions.
 - Web framework settings were kept together for MVP only where useful.
 - Unreal settings remain minimal because the current reviewed fragment is only a planning stub.
 - Database settings were separated into generic, SQL Server, and MongoDB ownership without carrying connection data into the public repository.
+
+## Default base consolidation
+
+The former `suggested-baseline` component was merged into `default` after the user confirmed that both extension groups should be available in every profile. Every recipe now begins with `default`, and the standalone Default recipe contains only that component.
+
+The merge preserved the former Baseline-then-Default order inside the consolidated settings and extension files. Focused components still apply afterward, so their later settings retain precedence. The redundant `components/suggested-baseline/` directory and recipe references were removed.
 
 ## Intentionally retired
 

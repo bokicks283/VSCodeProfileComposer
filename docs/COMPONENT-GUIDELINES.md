@@ -6,13 +6,13 @@ A setting or extension belongs in the smallest reusable component that fully exp
 
 ## Standalone usability
 
-Every focused component must work in a recipe with `suggested-baseline`.
+Every focused component must work in a recipe with `default`.
 
 ## Settings ownership
 
-- General editor and portable terminal behavior → Suggested Baseline
-- Basic PowerShell, Bash/Zsh shell-script, and Windows batch support → Suggested Baseline
-- Personal cross-stack optional behavior → Default
+- General editor and portable terminal behavior → Default
+- Basic PowerShell, Bash/Zsh shell-script, and Windows batch support → Default
+- Cross-profile daily-driver behavior and extensions → Default
 - General C/C++ → C++
 - Unreal-only → Unreal
 - Advanced PowerShell development → PowerShell
@@ -25,7 +25,7 @@ Every focused component must work in a recipe with `suggested-baseline`.
 - Personal executable, module, SDK, or database client path → Machine
 - Repository policy, Pester/PSScriptAnalyzer rules, database schema/migration policy, and team formatting → Workspace
 
-Basic language support must not be duplicated in an advanced component. The PowerShell component may assume the Microsoft PowerShell extension is already available from Suggested Baseline.
+Basic language support must not be duplicated in an advanced component. The PowerShell component may assume the Microsoft PowerShell extension is already available from Default.
 
 Web and Python must not absorb database tooling. Database-enabled variants compose `database` and any required vendor component explicitly.
 
@@ -42,9 +42,9 @@ MongoDB-specific           → MongoDB
 Machine- or employer-owned → Exclude from portable components
 ```
 
-Do not duplicate database extension IDs across Database, SQL Server, MongoDB, Web, Python, Suggested Baseline, and Default without a documented reason.
+Do not duplicate database extension IDs across Database, SQL Server, MongoDB, Web, Python, and Default without a documented reason.
 
-A frequently used extension may belong in Suggested Baseline when available evidence does not show a material Default-profile cost. Record provisional placement and revisit it after representative measurements rather than claiming unmeasured performance.
+A frequently used extension may belong in Default when the user expects it across profiles and available evidence does not show a material cost. Record provisional placement and revisit it after representative measurements rather than claiming unmeasured performance.
 
 ## Dependencies
 

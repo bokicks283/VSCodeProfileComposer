@@ -1,5 +1,5 @@
 name: "Unreal Engine"
 components:
-  - suggested-baseline
+  - default
   - cpp
   - unreal

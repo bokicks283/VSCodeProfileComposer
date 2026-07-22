@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Adds advanced PowerShell development behavior on top of the everyday PowerShell support already present in Suggested Baseline.
+Adds advanced PowerShell development behavior on top of the everyday PowerShell support already present in Default.
 
 The current reviewed overlay enables Command Explorer for dedicated module, administration, debugging, testing, and analysis work.
 
@@ -19,7 +19,7 @@ Basic `.ps1`, `.psm1`, or `.psd1` editing; the Microsoft PowerShell extension it
 ```yaml
 name: PowerShell Development
 components:
-  - suggested-baseline
+  - default
   - powershell
 ```
 
@@ -45,7 +45,7 @@ Repository-specific PSScriptAnalyzer rules, Pester configuration, module paths, 
 
 ## Performance concerns
 
-The Microsoft PowerShell extension is loaded from Suggested Baseline for frequent everyday use. This component should contain only advanced settings or tools whose extra UI, indexing, startup cost, or background activity is justified during dedicated PowerShell work.
+The Microsoft PowerShell extension is loaded from Default for frequent everyday use. This component should contain only advanced settings or tools whose extra UI, indexing, startup cost, or background activity is justified during dedicated PowerShell work.
 
 ## Deferred decisions
 

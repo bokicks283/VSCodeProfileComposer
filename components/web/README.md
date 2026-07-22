@@ -17,7 +17,7 @@ Database tools, database connections, Python/Flask behavior, PHP language toolin
 ```yaml
 name: Web
 components:
-  - suggested-baseline
+  - default
   - web
 ```
 

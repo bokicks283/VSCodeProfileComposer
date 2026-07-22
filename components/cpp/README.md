@@ -17,7 +17,7 @@ Unreal-only settings, Unreal generated-folder exclusions, project include paths,
 ```yaml
 name: C++
 components:
-  - suggested-baseline
+  - default
   - cpp
 ```
 
