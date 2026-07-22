@@ -211,6 +211,8 @@ An export generated with `-Machine` or `-MachineFile` is classified as `machine-
 
 Machine files are deliberately not synchronized by Git or Settings Sync. Recreate them from the committed examples on each computer or store them in a separate secure private backup. You can build for another computer only if its local overlay is present on the current computer.
 
+`global/settings.jsonc` also keeps `todo-tree.ripgrep.ripgrep` in `settingsSync.ignoredSettings`, so an imported absolute path is not treated as an ordinary cross-machine setting. The composer does not otherwise control Sync.
+
 ## Composition and merge order
 
 Global and profile settings have separate ownership. `global/settings.jsonc` generates the built-in Default artifact. Named profiles then apply sources in this order:

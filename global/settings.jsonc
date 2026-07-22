@@ -27,6 +27,7 @@
     "scm.alwaysShowRepositories",
     "security.workspace.trust.enabled",
     "security.workspace.trust.untrustedFiles",
+    "settingsSync.ignoredSettings",
     "terminal.integrated.accessibleViewFocusOnCommandExecution",
     "terminal.integrated.allowedLinkSchemes",
     "terminal.integrated.confirmOnKill",
@@ -79,6 +80,13 @@
 
   "security.workspace.trust.enabled": true,
   "security.workspace.trust.untrustedFiles": "open",
+
+  // Keep the machine-specific Todo Tree executable out of Settings Sync.
+  // The leading '-' preserves the existing choice to sync window zoom.
+  "settingsSync.ignoredSettings": [
+    "-window.zoomLevel",
+    "todo-tree.ripgrep.ripgrep"
+  ],
 
   "terminal.integrated.accessibleViewFocusOnCommandExecution": false,
   "terminal.integrated.allowedLinkSchemes": [

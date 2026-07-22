@@ -14,6 +14,8 @@ Portable files must not contain usernames, home paths, drive-specific SDK paths,
 
 Portable settings intentionally applied to every profile live in `global/settings.jsonc`. They are generated separately because VS Code takes their values from the built-in Default profile and ignores duplicate values stored in named profiles. Apply `build/global/settings.json` manually through **Preferences: Open Application Settings (JSON)**; merge it with any other intentional application settings instead of replacing the entire live file.
 
+The global source includes `settingsSync.ignoredSettings` for `todo-tree.ripgrep.ripgrep`, preventing that selected machine's absolute executable path from being synchronized as an ordinary setting. The composer still never enables, disables, resets, or otherwise operates Settings Sync.
+
 ## Platform settings
 
 `platform/windows.jsonc` and `platform/linux.jsonc` hold reusable OS-specific preferences.

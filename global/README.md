@@ -5,3 +5,5 @@
 The composer generates `build/global/settings.json` for review and manual application to VS Code's built-in Default profile. These settings are deliberately absent from generated named-profile settings because VS Code ignores those copies.
 
 Do not put machine paths, secrets, workspace policy, or profile-specific settings here.
+
+The portable `settingsSync.ignoredSettings` value keeps the machine-specific Todo Tree ripgrep path out of Sync. The composer does not otherwise control Settings Sync.
