@@ -114,7 +114,7 @@ File → Preferences → Profiles
 
 By default, UI placement is not included. When an explicit UI seed is supplied, the composer passes the snapshot through without interpreting or merging it. After import, VS Code owns and syncs the resulting live UI state. Review every import preview: re-importing may create a profile or replace selected profile resources according to VS Code's current import workflow.
 
-`components/default/keybindings.jsonc` is currently absent, so current exports correctly carry an empty custom-keybinding array. Add repository-owned bindings there when they are ready; the composer never reads live user keybindings.
+Portable custom keybindings are canonical component inputs. `components/default/keybindings.jsonc` supplies the editor, notebook, panel, Markdown, and spelling shortcuts inherited by every recipe; focused extension commands such as SQL Server's IntelliSense-cache rebuild shortcut stay in their owning component. The composer never reads live user keybindings during composition.
 
 ## Machine-local setup
 

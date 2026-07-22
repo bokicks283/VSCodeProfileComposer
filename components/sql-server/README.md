@@ -6,7 +6,7 @@ Adds reviewed SQL Server-specific editing and object-explorer behavior on top of
 
 ## Belongs here
 
-`mssql.*` behavior settings, the official SQL Server extension, T-SQL behavior, SQL Server object exploration, and SQL Server-specific query tooling.
+`mssql.*` behavior settings, the official SQL Server extension, T-SQL behavior, SQL Server object exploration, SQL Server-specific query tooling, and SQL Server-only keybindings.
 
 ## Does not belong here
 
@@ -28,7 +28,7 @@ SQL Server and future enterprise, C#, Python, Web, migration, or administration 
 
 ## Portability classification
 
-The five active `mssql.*` settings are reviewed behavior preferences. No saved connection or authentication object is committed.
+The five active `mssql.*` settings and the IntelliSense-cache rebuild keybinding are reviewed behavior preferences. No saved connection or authentication object is committed.
 
 ## Platform concerns
 

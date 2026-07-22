@@ -12,7 +12,8 @@ It supports everyday editing of PowerShell, Bash/Zsh shell scripts, Windows batc
 - broadly useful repository, format, navigation, diagnostics, Markdown, viewer, and API tools;
 - built-in shell and batch file associations;
 - the Microsoft PowerShell extension for normal scripting and occasional debugging;
-- extensions and preferences the user expects in every profile.
+- extensions and preferences the user expects in every profile;
+- portable editor, notebook, panel, Markdown, and spell-checker keybindings expected in every profile.
 
 ## Does not belong here
 
@@ -33,6 +34,8 @@ Every recipe begins with `default`. Focused components add to this shared base r
 ## Portability classification
 
 Settings and extension IDs are portable and contain no account state. Settings intentionally applied to every profile are owned by `global/settings.jsonc`, not duplicated here. The unreliable portable `todo-tree.ripgrep.ripgrep: "rg"` value is intentionally absent; machines that require it must provide a confirmed absolute path through an ignored named machine overlay.
+
+`keybindings.jsonc` is the canonical shared keybinding source. It preserves explicit removal entries alongside replacement shortcuts so VS Code does not reactivate displaced defaults. Extension-specific bindings belong here only when the owning extension is also part of Default.
 
 ## Platform concerns
 

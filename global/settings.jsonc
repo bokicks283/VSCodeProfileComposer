@@ -7,6 +7,8 @@
     "accessibility.verbosity.panelChat",
     "accessibility.verbosity.terminal",
     "accessibility.verbosity.terminalChatOutput",
+    "cSpell.suggestionMenuType",
+    "cSpell.useCustomDecorations",
     "diffEditor.codeLens",
     "editor.accessibilityPageSize",
     "editor.autoClosingDelete",
@@ -56,6 +58,10 @@
   "accessibility.verbosity.panelChat": false,
   "accessibility.verbosity.terminal": false,
   "accessibility.verbosity.terminalChatOutput": false,
+
+  // Keep spelling issues out of Problems and show corrections next to the word.
+  "cSpell.suggestionMenuType": "quickFix",
+  "cSpell.useCustomDecorations": true,
 
   "diffEditor.codeLens": true,
   "editor.accessibilityPageSize": 14,

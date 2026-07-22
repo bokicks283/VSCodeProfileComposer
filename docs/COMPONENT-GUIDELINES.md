@@ -46,6 +46,10 @@ Do not duplicate database extension IDs across Database, SQL Server, MongoDB, We
 
 A frequently used extension may belong in Default when the user expects it across profiles and available evidence does not show a material cost. Record provisional placement and revisit it after representative measurements rather than claiming unmeasured performance.
 
+## Keybinding ownership
+
+Portable editor and commands supplied by Default extensions belong in `components/default/keybindings.jsonc`. Commands supplied by focused extensions belong in the same focused component as the extension. Preserve explicit `-command.id` entries created when replacing a default binding, and keep `when` clauses so overlapping keys remain deterministic.
+
 ## Dependencies
 
 Document conceptual dependencies in profile recipes. Do not implement inheritance or hidden dependencies.

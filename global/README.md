@@ -7,3 +7,5 @@ The composer generates `build/global/settings.json` for review and manual applic
 Do not put machine paths, secrets, workspace policy, or profile-specific settings here.
 
 The portable `settingsSync.ignoredSettings` value keeps the machine-specific Todo Tree ripgrep path out of Sync. The composer does not otherwise control Settings Sync.
+
+cSpell uses custom decorations so spelling issues stay out of VS Code's Problems panel. Its correction menu is displayed inline, while the shared Default keybindings provide `Ctrl+Alt+S` for direct spelling suggestions.

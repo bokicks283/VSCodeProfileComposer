@@ -348,9 +348,9 @@ Official references:
 
 ## Current keybinding behavior
 
-`components/default/keybindings.jsonc` is currently absent, so current exports contain a valid encoded empty keybinding array.
+`components/default/keybindings.jsonc` is the canonical shared set inherited by every recipe. It contains portable editor, notebook, panel, Markdown, and cSpell bindings. Commands that require a focused extension remain in that extension's owning component; for example, `mssql.rebuildIntelliSenseCache` is in `components/sql-server/keybindings.jsonc`.
 
-The composer deliberately does not copy live user keybindings. Before adding global bindings, review each one and place only portable, intentional bindings in a component `keybindings.jsonc`. Unresolved or machine-specific bindings should remain live and outside the repository.
+The composer does not read live user keybindings during validation or composition. To retain a new customization, review it and add it to the smallest appropriate component. Preserve VS Code's explicit `-command.id` removal entries when they accompany a remapping, because removing them can restore an old default shortcut and create a conflict.
 
 ## Historical extension reference
 
@@ -419,6 +419,8 @@ Create or edit a component `keybindings.jsonc` whose root is an array:
 ```
 
 Files concatenate in composition order. The composer does not attempt semantic deduplication because VS Code keybinding precedence depends on ordered entries and `when` clauses.
+
+Bindings from `default` appear in every generated profile because every recipe begins with that component. Put extension-specific commands in the component that owns the extension so profiles without that extension do not receive dead shortcuts.
 
 ### Add a profile recipe
 

@@ -30,6 +30,13 @@ Describe 'Global settings ownership' {
         @($settings.Keys | Where-Object { $_ -ne 'workbench.settings.applyToAllProfiles' }).Count | Should -Be $ids.Count
     }
 
+    It 'keeps cSpell out of Problems and uses the inline correction menu globally' {
+        $path = Join-Path $script:RepositoryRoot 'global/settings.jsonc'
+        $settings = ConvertFrom-JsonC ([System.IO.File]::ReadAllText($path))
+        $settings['cSpell.useCustomDecorations'] | Should -BeTrue
+        $settings['cSpell.suggestionMenuType'] | Should -BeExactly 'quickFix'
+    }
+
     It 'rejects globally owned settings in profile component sources' {
         $fixture = New-ComposerFixture 'global-setting-in-component'
         $path = Join-Path $fixture 'components/default/settings.jsonc'
@@ -161,6 +168,30 @@ Describe 'Recipe parsing and repository validation' {
     It 'passes repository-wide validation for the current source' {
         $result = Test-ComposerRepository $script:RepositoryRoot
         $result.errors.Count | Should -Be 0
+    }
+}
+
+Describe 'Repository keybinding ownership' {
+    It 'inherits the shared custom bindings through Default' {
+        $fixture = New-ComposerFixture 'shared-keybindings'
+        Invoke-ProfileComposition $fixture default -Platform windows | Out-Null
+        $bindings = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'build/profiles/default/keybindings.json')))
+        $bindings.Count | Should -Be 22
+        $bindings.command | Should -Contain 'cSpell.suggestSpellingCorrections'
+        $bindings.command | Should -Contain 'editor.foldAll'
+        $bindings.command | Should -Contain 'workbench.action.toggleMaximizedPanel'
+        $bindings.command | Should -Not -Contain 'mssql.rebuildIntelliSenseCache'
+    }
+
+    It 'adds SQL Server-only bindings only to recipes that declare that component' {
+        $fixture = New-ComposerFixture 'focused-keybindings'
+        Invoke-ProfileComposition $fixture sql-server -Platform windows | Out-Null
+        Invoke-ProfileComposition $fixture python -Platform windows | Out-Null
+        $sqlBindings = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'build/profiles/sql-server/keybindings.json')))
+        $pythonBindings = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'build/profiles/python/keybindings.json')))
+        $sqlBindings.Count | Should -Be 23
+        $sqlBindings.command | Should -Contain 'mssql.rebuildIntelliSenseCache'
+        $pythonBindings.command | Should -Not -Contain 'mssql.rebuildIntelliSenseCache'
     }
 }
 
@@ -445,6 +476,7 @@ Describe 'VS Code .code-profile export' {
 
     It 'uses VS Code empty-array keybinding representation when no bindings exist' {
         $fixture = New-ComposerFixture 'export-empty-keybindings'
+        Write-TestFile (Join-Path $fixture 'components/default/keybindings.jsonc') '[]'
         Invoke-ProfileComposition $fixture default -Platform windows -ExportCodeProfile | Out-Null
         $profile = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'build/profiles/default/Default.code-profile')))
         $resource = ConvertFrom-JsonC $profile.keybindings
@@ -601,12 +633,19 @@ Describe 'VS Code .code-profile export' {
         $sourcePath = Join-Path $TestDrive 'valid-source.code-profile'
         New-UiStateSeedExport $sourcePath | Out-Null
 
+        $storedDirectory = Join-Path $fixture 'machine/local/ui-state/default'
+        $storedPath = Join-Path $storedDirectory 'seed.code-profile'
+        $existedBefore = Test-Path -LiteralPath $storedPath -PathType Leaf
+        $contentBefore = if ($existedBefore) { [System.IO.File]::ReadAllText($storedPath) } else { $null }
+
         $preview = Save-ProfileUiStateSeed -RepositoryRoot $fixture -Profile default -SourceProfileExport $sourcePath -DryRun
         $preview.dryRun | Should -BeTrue
-        Test-Path -LiteralPath (Join-Path $fixture 'machine/local/ui-state/default') | Should -BeFalse
+        (Test-Path -LiteralPath $storedPath -PathType Leaf) | Should -Be $existedBefore
+        if ($existedBefore) { [System.IO.File]::ReadAllText($storedPath) | Should -BeExactly $contentBefore }
         { Save-ProfileUiStateSeed -RepositoryRoot $fixture -Profile missing -SourceProfileExport $sourcePath } | Should -Throw '*Unknown profile*'
         { Invoke-ProfileComposition $fixture default -UiStateProfile default } | Should -Throw '*requires -ExportCodeProfile*'
-        { Invoke-ProfileComposition $fixture default -ExportCodeProfile -UiStateProfile default } | Should -Throw '*does not exist*'
+        Write-TestFile (Join-Path $fixture 'profiles/no-ui-seed.yaml') "name: No UI Seed`ncomponents:`n  - default`n"
+        { Invoke-ProfileComposition $fixture no-ui-seed -ExportCodeProfile -UiStateProfile no-ui-seed } | Should -Throw '*does not exist*'
         { Invoke-ProfileComposition $fixture default -ExportCodeProfile -UiStateProfile default -UiStateFromProfile $sourcePath } | Should -Throw '*cannot be used together*'
     }
 
