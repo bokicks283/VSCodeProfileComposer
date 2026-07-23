@@ -41,6 +41,24 @@ git --version
 
 The composer uses built-in PowerShell and .NET functionality. It does not require a YAML or JSONC module.
 
+On this computer, `vscomp` may be a PowerShell alias to a forwarding function
+rather than an installed executable:
+
+```powershell
+function composer {
+  & "C:\path\to\VSCodeProfileComposer\scripts\ProfileComposer.ps1" @args
+}
+Set-Alias vscomp composer
+```
+
+The current local profile uses the absolute path to this checkout in that
+placeholder. The function forwards quoted paths, `-Platform`, `-Machine`, and
+every other token unchanged. All `vscomp` examples in this guide work through
+that wrapper; the wrapper's absolute script path is invocation context and is
+never inspected as imported profile data. Direct
+`pwsh ./scripts/ProfileComposer.ps1 ...` commands remain useful for diagnostic
+comparison.
+
 ## Know the available profiles
 
 | Profile ID | Display name | Components |
@@ -430,24 +448,26 @@ VS Code exports the final flattened profile but does not record which component 
 # In VS Code first: Profiles → profile overflow menu → Export Profile...
 
 # Preview every repository path that would change.
-pwsh ./scripts/ProfileComposer.ps1 sync "C:\private\Adjusted Python.code-profile" -Platform windows -DryRun
+pwsh ./scripts/ProfileComposer.ps1 sync "C:\private\Adjusted Python.code-profile" -Platform windows -Machine main-windows -DryRun
 
 # Apply the staged, validated transaction.
-pwsh ./scripts/ProfileComposer.ps1 sync "C:\private\Adjusted Python.code-profile" -Platform windows
+pwsh ./scripts/ProfileComposer.ps1 sync "C:\private\Adjusted Python.code-profile" -Platform windows -Machine main-windows
 
 # If the export name does not match exactly one recipe:
-pwsh ./scripts/ProfileComposer.ps1 sync python-database "C:\private\Adjusted DB Profile.code-profile" -Platform windows
+pwsh ./scripts/ProfileComposer.ps1 sync python-database "C:\private\Adjusted DB Profile.code-profile" -Platform windows -Machine main-windows
 ```
 
-The command synchronizes settings, extensions, keyboard shortcuts, and the export's opaque UI layout. Settings that differ from component values become exact recipe replacements; missing component settings become recipe removals. Extension and keybinding changes become add/remove operations, while reordered keybindings use an exact recipe array. The UI resource is stored only under ignored `machine/local/ui-state/<recipe>/`.
+The command synchronizes settings, extensions, keyboard shortcuts, and the export's opaque UI layout. Before constructing recipe changes, it recursively classifies every setting value. Safe absolute, UNC, POSIX, home-relative, environment-home, and file-URI paths route to the selected ignored machine definition. Portable differences become exact recipe replacements; missing component settings become recipe removals. Extension and keybinding changes become add/remove operations, while reordered keybindings use an exact recipe array. The UI resource is stored only under ignored `machine/local/ui-state/<recipe>/`.
+
+Machine resolution order is explicit `-Machine`/`-MachineFile`, ignored `machine/local/.default-machine`, then one unique machine whose metadata is compatible with `-Platform`. Multiple matches fail rather than guessing. Create a local default with `Set-Content ./machine/local/.default-machine 'main-windows'`. New definitions use the schema in [Schema and ownership contract](SCHEMA.md); legacy plain maps remain readable.
 
 Unless `-SkipGlobal` is supplied, `sync` also reads the selected VS Code User directory's `settings.json`. It treats `workbench.settings.applyToAllProfiles` as the explicit global ownership list and rewrites `global/settings.jsonc` from those values. Values whose keys are ignored by Settings Sync are considered machine-owned and are skipped; their values are never printed. Use `-VSCodeUserDataPath` for Insiders or a nonstandard User directory.
 
-Because the live file contains no repository comments, a global reconciliation normalizes `global/settings.jsonc` to formatted JSON and cannot preserve its prior comments. The values and ownership order remain reviewable; use `-DryRun` first and inspect the resulting Git diff before committing.
+Because live exports contain no repository comments, a changed global, recipe, or machine source is normalized to formatted JSON and cannot reconstruct prior comments. Unchanged files retain their bytes. The values and ownership order remain reviewable; use `-DryRun` first and inspect the resulting Git diff before committing.
 
 Settings owned by the selected `-Platform` overlay are also excluded from recipe deltas. Update the platform source deliberately when an OS-wide choice changes; the sync summary reports the filtered count.
 
-The source export must include UI State. Use `-SkipUiState` only when intentionally syncing the other resources. Snippet and task resources are rejected because the current composer schema does not own them. Keep the export private: it can contain account or extension state. After a real sync, inspect `git diff`, validate, and compose before committing.
+The source export must include UI State. Use `-SkipUiState` only when intentionally syncing the other resources. Snippet and task resources are rejected because the current composer schema does not own them. Credential-bearing settings, saved connections, private hosts/endpoints, account IDs, certificates, SSH keys, and authentication state also fail before writes and are never printed in full. Keep the export private: it can contain account or extension state. After a real sync, inspect `git diff`, validate, and compose before committing.
 
 Shared components still require human intent. Once a recipe-specific change proves broadly useful, move it from the generated recipe sidecar into the smallest correct component and remove the redundant sidecar entry.
 
@@ -618,7 +638,9 @@ Do not force-add `build/`, `machine/local/`, or unreviewed `.code-profile` backu
 | Setting is gray and says it applies to all profiles | Change it in `global/settings.jsonc`, regenerate with `pwsh ./scripts/ProfileComposer.ps1 compose-global`, then merge into **Preferences: Open Application Settings (JSON)**. Do not add it to a component. |
 | Machine setting missing from named-profile settings | This is intentional. Run a composing command with `-Machine <id>`, then merge `build/global/settings.json` into **Preferences: Open Application Settings (JSON)**. The value applies to all profiles and is ignored by Settings Sync. |
 | Setting is gray and says it cannot be applied while a non-default profile is active | The built-in Default/application scope owns it. It is not being ignored: use **Preferences: Open Application Settings (JSON)** (or briefly activate Default) to change the effective value, then update the repository source. |
-| `portable-absolute-path` | Move the value into `machine/local/` and supply it explicitly. |
+| `portable-absolute-path` | A path remains in tracked portable source. For an imported profile, rerun `sync ... -Platform <id> -Machine <id>`; for hand-edited source, move the setting into the local machine definition. |
+| `sync-machine-local-path` | Review the redacted route. If automatic resolution is ambiguous, rerun with `-Machine <id>` or configure ignored `machine/local/.default-machine`. |
+| `sync-sensitive-setting` | Remove the credential/private resource from the export or manage it through the owning extension or a dedicated secret store. Do not put it in tracked or ordinary machine JSONC. |
 | Secret warning | Remove the value from portable sources. Do not rely on report redaction as permission to commit it. |
 | Sync cannot match the export | Supply the recipe explicitly: `sync <recipe> <export>`. |
 | Sync says UI layout is missing | Re-export with **UI State** selected, or intentionally add `-SkipUiState`. |
@@ -646,7 +668,7 @@ Then inspect the manifest, validation, overrides, and VS Code import preview. Co
 When the maintenance started in a live test profile, insert these steps before validation:
 
 ```powershell
-pwsh ./scripts/ProfileComposer.ps1 sync "C:\private\Adjusted Profile.code-profile" -Platform windows -DryRun
-pwsh ./scripts/ProfileComposer.ps1 sync "C:\private\Adjusted Profile.code-profile" -Platform windows
+pwsh ./scripts/ProfileComposer.ps1 sync "C:\private\Adjusted Profile.code-profile" -Platform windows -Machine main-windows -DryRun
+pwsh ./scripts/ProfileComposer.ps1 sync "C:\private\Adjusted Profile.code-profile" -Platform windows -Machine main-windows
 git diff
 ```

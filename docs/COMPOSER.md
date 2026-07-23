@@ -18,7 +18,7 @@ pwsh ./scripts/ProfileComposer.ps1 compose main
 pwsh ./scripts/ProfileComposer.ps1 compose unreal -Platform windows -Machine windows
 pwsh ./scripts/ProfileComposer.ps1 compose-all -Platform windows -ExportCodeProfile
 pwsh ./scripts/ProfileComposer.ps1 capture-ui-state main "C:\private\Adjusted Main.code-profile"
-pwsh ./scripts/ProfileComposer.ps1 sync "C:\private\Adjusted Python.code-profile" -Platform windows -DryRun
+pwsh ./scripts/ProfileComposer.ps1 sync "C:\private\Adjusted Python.code-profile" -Platform windows -Machine main-windows -DryRun
 pwsh ./scripts/ProfileComposer.ps1 vscode list
 pwsh ./scripts/ProfileComposer.ps1 vscode import python-database -Platform windows -DryRun
 pwsh ./scripts/ProfileComposer.ps1 vscode replace python-database -LiveProfile "Old Python Setup" -DryRun
@@ -62,7 +62,7 @@ build/global/
 
 This artifact targets VS Code's built-in Default profile. It is not included in `.code-profile` exports because those create named profiles, where VS Code ignores these values. Apply it manually by merging it into **Preferences: Open Application Settings (JSON)**. `build/global/overrides.json` records any machine value that replaced a portable global default, using the same sensitive-value redaction as profile reports.
 
-Named machine overlays use `machine/local/<id>.jsonc`. `ProfileComposer.ps1 list-machines` discovers available IDs and `-Machine <id>` selects one for a validating or composing subcommand. Each selected machine key is merged into `build/global/settings.json`, appended to `workbench.settings.applyToAllProfiles`, and appended to `settingsSync.ignoredSettings`; a conflicting `-setting.name` force-sync entry is removed. The same key is omitted from named-profile output and exports. The manifests record the ID, selection mode, delivery target, and count without recording machine values. `-MachineFile` remains supported for an explicit path.
+Named machine overlays use `machine/local/<id>.jsonc`. Schema 1 stores `machine.id`, display name, platform, optional hostnames, and a `settings` object; legacy plain setting maps remain readable. `ProfileComposer.ps1 list-machines` discovers available IDs and `-Machine <id>` selects one for a validating, composing, or syncing subcommand. Each selected machine key is merged into `build/global/settings.json`, appended to `workbench.settings.applyToAllProfiles`, and appended to `settingsSync.ignoredSettings`; a conflicting `-setting.name` force-sync entry is removed. The same key is omitted from named-profile output and exports. The manifests record the ID, selection mode, delivery target, and count without recording machine values. `-MachineFile` remains supported for an explicit path.
 
 The recipe parser accepts the repository's narrow schema:
 
@@ -139,11 +139,11 @@ The recipe ID may be omitted from `capture-ui-state` when exactly one active VS 
 VS Code has no supported complete profile-export CLI, so synchronization starts with **Profiles: Export Profile...** and a private local `.code-profile` file:
 
 ```powershell
-pwsh ./scripts/ProfileComposer.ps1 sync "C:\private\Adjusted Python.code-profile" -Platform windows -DryRun
-pwsh ./scripts/ProfileComposer.ps1 sync "C:\private\Adjusted Python.code-profile" -Platform windows
+pwsh ./scripts/ProfileComposer.ps1 sync "C:\private\Adjusted Python.code-profile" -Platform windows -Machine main-windows -DryRun
+pwsh ./scripts/ProfileComposer.ps1 sync "C:\private\Adjusted Python.code-profile" -Platform windows -Machine main-windows
 ```
 
-The export name automatically selects one exact recipe ID or display name. The explicit form is `sync <recipe> <export>`. The command validates the export and synchronizes:
+The export name automatically selects one exact recipe ID or display name. The explicit form is `sync <recipe> <export>`. The command recursively classifies every setting before constructing tracked changes. Safe absolute and home-derived paths route to a machine target; secret, connection, account, certificate, private-host, and authentication resources fail with redacted diagnostics. The command then validates the final routed plan and synchronizes:
 
 - changed or added profile settings as exact recipe replacements;
 - component settings absent from the export as recipe removals;
@@ -152,13 +152,15 @@ The export name automatically selects one exact recipe ID or display name. The e
 - the opaque `globalState` resource under ignored `machine/local/ui-state/<recipe>/`;
 - built-in Default/application values named by the live `workbench.settings.applyToAllProfiles` list.
 
+For routed settings, machine resolution is explicit `-Machine`/`-MachineFile`, then ignored `machine/local/.default-machine`, then one unique platform-compatible definition. Multiple matches never resolve by hostname or path text. A sync `-MachineFile` must resolve under `machine/local/` so it can join the rollback transaction. The route report records add, update, or retain by setting key, destination file, selection mode, and any earlier portable/platform owner without printing the value.
+
 Application settings are read from the selected VS Code User directory. Keys also present in `settingsSync.ignoredSettings` are treated as machine-owned and their values are not copied into tracked settings. A leading `-` means VS Code force-syncs that key and is not treated as machine ownership. `-SkipGlobal` disables application reconciliation; `-SkipUiState` permits an export without UI state.
 
 Global reconciliation rewrites `global/settings.jsonc` as normalized JSON because live application settings carry no repository comments. Preview and review this diff before committing.
 
 Keys already owned by the selected `-Platform` overlay are excluded from recipe deltas. Change reusable OS behavior in `platform/<id>.jsonc`; the sync summary reports how many platform-owned settings were filtered.
 
-Exports are flattened and contain no component provenance. Sync therefore never edits shared components. It writes recipe sidecars, validates an isolated staging repository, and atomically replaces only `profiles/`, `global/`, and the recipe's ignored UI-state root. A validation or commit failure rolls everything back. The command never edits the source export, live profile storage, installed extensions, or Settings Sync state. Task or snippet resources are rejected because the repository does not own them.
+Exports are flattened and contain no component provenance. Sync therefore never edits shared components. It writes recipe sidecars, the selected ignored machine definition, global settings, and the ignored UI seed in one staging repository; only changed paths are swapped. A validation or commit failure rolls every path back. Repeating the same sync produces retain routes and no source changes. The command never edits the source export, live profile storage, installed extensions, or Settings Sync state. Task or snippet resources are rejected because the repository does not own them.
 
 Portable export:
 
@@ -217,7 +219,9 @@ The suite covers recipe and JSONC parsing, validation, global ownership repair, 
 - `invalid-yaml`: keep the recipe to `name` plus an indented `components` list.
 - `missing-platform-overlay` or `missing-machine-overlay`: check the explicit argument; run `pwsh ./scripts/ProfileComposer.ps1 list-machines` for named local overlays.
 - `global-setting-in-profile-source`: remove the setting from the component, profile override, or platform file and edit it in `global/settings.jsonc`.
-- `portable-absolute-path`: move the setting into `machine/local/` and pass it explicitly.
+- `portable-absolute-path`: portable source still contains a machine path. For a live export, rerun `sync ... -Machine <id>` so classification can route it before validation; for a hand-edited tracked source, move it into `machine/local/`.
+- `sync-machine-local-path`: review the redacted route and select a machine explicitly when local default or unique platform metadata cannot resolve one.
+- `sync-sensitive-setting`: remove the credential/private resource from the export or manage it with the owning extension or a dedicated secret store; ordinary machine JSONC is not an approved secret store.
 - `invalid-export-filename`: keep the profile display name free of path separators, traversal sequences, and reserved Windows names.
 - `unsupported-ui-state-source`: remove the component-level file; starting UI state is accepted only through `-UiStateFromProfile` or a locally stored `-UiStateProfile` seed.
 - missing or invalid UI seed: manually export the arranged source profile again and confirm it contains a non-empty `globalState` resource.

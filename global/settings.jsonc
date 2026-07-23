@@ -1,6 +1,4 @@
 {
-  // These settings are owned by VS Code's built-in Default profile and apply
-  // to every named profile. Keep the list and values together.
   "workbench.settings.applyToAllProfiles": [
     "accessibility.dimUnfocused.enabled",
     "accessibility.signals.terminalBell",
@@ -41,7 +39,6 @@
     "terminal.integrated.enableMultiLinePasteWarning",
     "terminal.integrated.enableVisualBell",
     "terminal.integrated.initialHint",
-    "terminal.integrated.persistentSessionScrollback",
     "workbench.editor.closeOnFileDelete",
     "workbench.editor.empty.hint",
     "workbench.editor.enablePreviewFromCodeNavigation",
@@ -52,8 +49,7 @@
     "workbench.editor.tabSizingFixedMinWidth",
     "workbench.editor.titleScrollbarSizing",
     "workbench.editor.untitled.labelFormat",
-    "workbench.editor.wrapTabs",
-    "window.newWindowProfile"
+    "workbench.editor.wrapTabs"
   ],
   "accessibility.dimUnfocused.enabled": true,
   "accessibility.signals.terminalBell": {
@@ -62,12 +58,11 @@
   "accessibility.verbosity.panelChat": false,
   "accessibility.verbosity.terminal": false,
   "accessibility.verbosity.terminalChatOutput": false,
+  "cSpell.suggestionMenuType": "quickFix",
+  "cSpell.useCustomDecorations": true,
   "cSpell.checkVSCodeSystemFiles": true,
   "cSpell.checkOnlyEnabledFileTypes": false,
-  "cSpell.suggestionMenuType": "quickFix",
   "cSpell.suggestionNumChanges": 5,
-  // Keep spelling issues out of Problems and show corrections next to the word.
-  "cSpell.useCustomDecorations": true,
   "diffEditor.codeLens": true,
   "editor.accessibilityPageSize": 14,
   "editor.autoClosingDelete": "always",
@@ -88,8 +83,6 @@
   "scm.alwaysShowRepositories": true,
   "security.workspace.trust.enabled": true,
   "security.workspace.trust.untrustedFiles": "open",
-  // Keep the machine-specific Todo Tree executable out of Settings Sync.
-  // The leading '-' preserves the existing choice to sync window zoom.
   "settingsSync.ignoredSettings": [
     "todo-tree.ripgrep.ripgrep"
   ],
@@ -110,7 +103,6 @@
   "terminal.integrated.enableMultiLinePasteWarning": "never",
   "terminal.integrated.enableVisualBell": true,
   "terminal.integrated.initialHint": false,
-  "terminal.integrated.persistentSessionScrollback": 1000,
   "workbench.editor.closeOnFileDelete": true,
   "workbench.editor.empty.hint": "hidden",
   "workbench.editor.enablePreviewFromCodeNavigation": true,
@@ -121,6 +113,5 @@
   "workbench.editor.tabSizingFixedMinWidth": 38,
   "workbench.editor.titleScrollbarSizing": "large",
   "workbench.editor.untitled.labelFormat": "name",
-  "workbench.editor.wrapTabs": true,
-  "window.newWindowProfile": "Main"
+  "workbench.editor.wrapTabs": true
 }

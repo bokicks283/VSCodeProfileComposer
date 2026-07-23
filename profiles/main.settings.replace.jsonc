@@ -1,0 +1,7 @@
+{
+  "workbench.editorAssociations": {
+    "{hexdiff}:/**/*.*": "hexEditor.hexedit",
+    "*.copilotmd": "vscode.markdown.preview.editor",
+    "*.md": "vscode.markdown.editor"
+  }
+}

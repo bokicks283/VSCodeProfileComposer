@@ -129,3 +129,23 @@ Trunk CLI, CI, and repository `.trunk` files remain valid external tooling.
 ## Generated infrastructure omitted
 
 No generated profile packages, rollout/apply scripts, fragment builders, performance harnesses, temporary workflows, or artifact trees were migrated during the ownership refinements. The later unified CLI adds a reviewed `sync` transaction for manually exported profiles; it creates recipe-specific deltas and does not retroactively treat flattened historical exports as component sources.
+
+## Machine schema 1 and sync-routing migration
+
+Machine definitions created from the committed examples now use
+`schemaVersion: 1` with explicit durable ID, display name, platform, optional
+hostnames, and a nested `settings` object. Existing ignored plain settings maps
+remain supported as legacy schema 0 and are not rewritten merely by validation
+or composition. A changed legacy file keeps its legacy shape.
+
+No tracked personal value migration is required. To adopt the new schema,
+copy the matching example to `machine/local/<id>.jsonc`, keep `machine.id`
+equal to `<id>`, and privately transfer only reviewed non-secret settings.
+Optionally put that ID in ignored `machine/local/.default-machine`.
+
+Reverse synchronization now classifies imported values before tracked changes
+are constructed. Safe path-bearing settings move into the selected ignored
+machine file; credential/private resources fail closed; remaining flattened
+settings continue to become recipe-specific deltas. This fixes the earlier
+failure where a routed machine value was first written into a staged portable
+replacement and only then rejected by `portable-absolute-path`.

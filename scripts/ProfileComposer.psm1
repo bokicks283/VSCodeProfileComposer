@@ -1,9 +1,12 @@
 Set-StrictMode -Version Latest
 
-$script:ComposerVersion = '0.10.0'
+$script:ComposerVersion = '0.11.0'
 $script:ManifestVersion = 1
+$script:MachineSchemaVersion = 1
 $script:Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 $script:SensitivePattern = '(?i)(password|(?<!semantic)token|secret|credential|connectionstring|api[_-]?key|private[_-]?key)'
+$script:PrivateResourcePattern = '(?i)(saved.?connections?|connection.?profiles?|(^|[._/-])connections?($|[._/-])|user(name)?|account.?id|private.?host|remote.?endpoint|remote\.ssh\.(remoteplatform|serverinstallpath)|certificate|identity.?file|ssh.?key|authentication.?state)'
+$script:CredentialValuePattern = '(?i)(ghp_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{16,}|sk-[A-Za-z0-9_-]{16,}|Bearer\s+[A-Za-z0-9._-]{12,}|(?:password|token|secret|api[_-]?key)\s*[:=]\s*\S+|(?:postgres(?:ql)?|mongodb(?:\+srv)?|mysql|mssql|redis|amqp|ssh)://[^\s/@:]+:[^@\s]+@|(?:Server|Data Source|Host)\s*=[^;]+;|-----BEGIN [A-Z ]*PRIVATE KEY-----)'
 $script:CodeProfileSchema = 'vscode-user-data-profile-template'
 $script:CodeProfileSchemaVersion = 'unversioned'
 $script:CodeProfileVerifiedVersion = '1.129.1'
@@ -255,6 +258,90 @@ function Get-ValueLeaves {
     [pscustomobject]@{ Path = $Path; Value = $Value }
 }
 
+function Get-PathValueKind {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Value)
+
+    $trimmed = $Value.Trim().Trim('"', "'")
+    if ([string]::IsNullOrWhiteSpace($trimmed)) { return $null }
+    if ($trimmed -match '^/(?:[^/\\]|\\.)+/[dgimsuvy]*$') { return $null }
+    if ($trimmed -match '(?i)^file:(//)?/?[A-Z]:[\\/]' -or
+        $trimmed -match '(?i)^[A-Z]:[\\/]' -or
+        $trimmed -match '^(\\\\|//)[^\\/]+[\\/][^\\/]+' -or
+        $trimmed -match '^/(?!/)[^\s]*' -or
+        $trimmed -match '^~[\\/]' -or
+        $trimmed -match '(?i)^(%((USERPROFILE)|(HOME)|(LOCALAPPDATA)|(APPDATA))%[\\/]|(\$\{?env:)(USERPROFILE|HOME|LOCALAPPDATA|APPDATA)\}?[\\/]|(\$\{?)(USERPROFILE|HOME|LOCALAPPDATA|APPDATA)\}?[\\/])') {
+        return 'machine-path'
+    }
+    return $null
+}
+
+function Get-SafeSettingValueDisplay {
+    param(
+        [Parameter(Mandatory)][string]$Classification,
+        [AllowNull()]$Value
+    )
+
+    if ($Classification -in @('secret-or-private', 'machine-local-path')) {
+        return "[REDACTED: $Classification]"
+    }
+    $text = ConvertTo-Json -InputObject $Value -Depth 100 -Compress
+    if ($text.Length -gt 120) { return $text.Substring(0, 117) + '...' }
+    return $text
+}
+
+function Get-SettingValueClassification {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$SettingKey,
+        [AllowNull()]$Value
+    )
+
+    $sensitivePaths = [System.Collections.Generic.List[string]]::new()
+    $machinePaths = [System.Collections.Generic.List[string]]::new()
+    if ($SettingKey -match $script:SensitivePattern -or $SettingKey -match $script:PrivateResourcePattern) {
+        $sensitivePaths.Add("/$(ConvertTo-JsonPointerSegment $SettingKey)")
+    }
+    foreach ($leaf in (Get-ValueLeaves -Value $Value)) {
+        $leafPath = "/$(ConvertTo-JsonPointerSegment $SettingKey)$($leaf.Path)"
+        $text = if ($null -eq $leaf.Value) { '' } else { [string]$leaf.Value }
+        if ($leaf.Path -match $script:SensitivePattern -or
+            $leaf.Path -match $script:PrivateResourcePattern -or
+            $text -match $script:CredentialValuePattern) {
+            $sensitivePaths.Add($leafPath)
+            continue
+        }
+        if ($leaf.Value -is [string] -and (Get-PathValueKind -Value $text)) {
+            $machinePaths.Add($leafPath)
+        }
+    }
+
+    if ($sensitivePaths.Count -gt 0) {
+        return [pscustomobject][ordered]@{
+            classification = 'secret-or-private'
+            destination = 'excluded-private'
+            ruleId = 'sync-sensitive-setting'
+            paths = [string[]]$sensitivePaths.ToArray()
+            safeValue = Get-SafeSettingValueDisplay 'secret-or-private' $Value
+        }
+    }
+    if ($machinePaths.Count -gt 0) {
+        return [pscustomobject][ordered]@{
+            classification = 'machine-local-path'
+            destination = 'machine-local'
+            ruleId = 'sync-machine-local-path'
+            paths = [string[]]$machinePaths.ToArray()
+            safeValue = Get-SafeSettingValueDisplay 'machine-local-path' $Value
+        }
+    }
+    return [pscustomobject][ordered]@{
+        classification = 'portable'
+        destination = 'profile-recipe'
+        ruleId = 'sync-portable-setting'
+        paths = [string[]]@()
+        safeValue = Get-SafeSettingValueDisplay 'portable' $Value
+    }
+}
+
 function Test-PortableSettings {
     param(
         [Parameter(Mandatory)]$Settings,
@@ -263,13 +350,16 @@ function Test-PortableSettings {
     )
     foreach ($leaf in (Get-ValueLeaves -Value $Settings)) {
         $stringValue = if ($null -eq $leaf.Value) { '' } else { [string]$leaf.Value }
-        if ($stringValue -match '(?i)([A-Z]:[\\/]+Users[\\/]+|/home/|/Users/)') {
-            Add-ValidationItem -Result $Result -Level errors -Code 'portable-absolute-path' -Message 'Portable component contains an absolute personal path.' -Source $Source -Path $leaf.Path
+        if ($leaf.Value -is [string] -and (Get-PathValueKind -Value $stringValue)) {
+            Add-ValidationItem -Result $Result -Level errors -Code 'portable-absolute-path' -Message 'Portable source contains an absolute or machine-local path.' -Source $Source -Path $leaf.Path
         }
         $placeholder = $stringValue -match '(?i)(<[^>]+>|example|placeholder|replace[- ]?me)'
         if (($leaf.Path -match $script:SensitivePattern -and $stringValue -and -not $placeholder) -or
-            ($stringValue -match '(?i)(ghp_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{16,}|sk-[A-Za-z0-9_-]{16,}|Bearer\s+[A-Za-z0-9._-]{12,}|(?:password|token|secret|api[_-]?key)\s*[:=]\s*\S+)')) {
+            ($stringValue -match $script:CredentialValuePattern)) {
             Add-ValidationItem -Result $Result -Level errors -Code 'portable-likely-secret' -Message 'Portable component contains a likely secret or credential value.' -Source $Source -Path $leaf.Path
+        }
+        elseif ($leaf.Path -match $script:PrivateResourcePattern -and $stringValue -and -not $placeholder) {
+            Add-ValidationItem -Result $Result -Level errors -Code 'portable-private-resource' -Message 'Portable component contains private connection, host, account, certificate, or authentication state.' -Source $Source -Path $leaf.Path
         }
     }
 }
@@ -492,8 +582,136 @@ function Get-MachineDefinitions {
     $localRoot = Join-Path $RepositoryRoot 'machine/local'
     if (-not (Test-Path -LiteralPath $localRoot -PathType Container)) { return @() }
     return @(Get-ChildItem -LiteralPath $localRoot -Filter '*.jsonc' -File | Sort-Object Name | ForEach-Object {
-        [pscustomobject]@{ Id = $_.BaseName; Path = $_.FullName }
+        $configuration = Read-MachineConfiguration -Path $_.FullName -ExpectedId $_.BaseName
+        [pscustomobject][ordered]@{
+            Id = $configuration.Id
+            Name = $configuration.Name
+            Platform = $configuration.Platform
+            Path = $_.FullName
+            SchemaVersion = $configuration.SchemaVersion
+            Legacy = $configuration.Legacy
+        }
     })
+}
+
+function Read-MachineConfiguration {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [string]$ExpectedId
+    )
+
+    $value = Read-JsonCFile $Path
+    if (-not (Test-IsDictionary $value)) {
+        throw "Machine settings root must be an object in '$Path'."
+    }
+    $isEnvelope = $value.Contains('schemaVersion') -or $value.Contains('machine') -or $value.Contains('settings')
+    if (-not $isEnvelope) {
+        $legacyId = if ($ExpectedId) { $ExpectedId } else { [System.IO.Path]::GetFileNameWithoutExtension($Path) }
+        return [pscustomobject][ordered]@{
+            Id = $legacyId
+            Name = $legacyId
+            Platform = $null
+            Hostnames = [string[]]@()
+            Settings = $value
+            SchemaVersion = 0
+            Legacy = $true
+            Document = $value
+        }
+    }
+
+    foreach ($key in $value.Keys) {
+        if ([string]$key -notin @('schemaVersion', 'machine', 'settings')) {
+            throw "Machine definition '$Path' contains unknown schema field '$key'."
+        }
+    }
+    if (-not $value.Contains('schemaVersion') -or
+        ($value.schemaVersion -isnot [long] -and $value.schemaVersion -isnot [int]) -or
+        [int]$value.schemaVersion -ne $script:MachineSchemaVersion) {
+        throw "Machine definition '$Path' requires supported schemaVersion $($script:MachineSchemaVersion)."
+    }
+    if (-not $value.Contains('machine') -or -not (Test-IsDictionary $value.machine)) {
+        throw "Machine definition '$Path' requires an object 'machine'."
+    }
+    if (-not $value.Contains('settings') -or -not (Test-IsDictionary $value.settings)) {
+        throw "Machine definition '$Path' requires an object 'settings'."
+    }
+    foreach ($key in $value.machine.Keys) {
+        if ([string]$key -notin @('id', 'name', 'platform', 'hostnames')) {
+            throw "Machine definition '$Path' contains unknown machine field '$key'."
+        }
+    }
+    foreach ($required in @('id', 'name', 'platform')) {
+        if (-not $value.machine.Contains($required) -or
+            $value.machine[$required] -isnot [string] -or
+            [string]::IsNullOrWhiteSpace([string]$value.machine[$required])) {
+            throw "Machine definition '$Path' requires non-empty machine.$required."
+        }
+    }
+    $id = [string]$value.machine.id
+    if (-not (Test-ComposerId $id)) { throw "Machine definition '$Path' has invalid machine.id '$id'." }
+    if ($ExpectedId -and $id -cne $ExpectedId) {
+        throw "Machine definition '$Path' has machine.id '$id', which must match filename ID '$ExpectedId'."
+    }
+    $platform = ([string]$value.machine.platform).ToLowerInvariant()
+    if ($platform -notin @('windows', 'linux', 'macos', 'wsl', 'container', 'remote')) {
+        throw "Machine definition '$Path' has unsupported machine.platform '$platform'."
+    }
+    $hostnames = [string[]]@()
+    if ($value.machine.Contains('hostnames')) {
+        if ($value.machine.hostnames -isnot [System.Array]) {
+            throw "Machine definition '$Path' machine.hostnames must be an array."
+        }
+        $hostList = [System.Collections.Generic.List[string]]::new()
+        $seenHosts = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        foreach ($hostname in $value.machine.hostnames) {
+            if ($hostname -isnot [string] -or [string]::IsNullOrWhiteSpace($hostname)) {
+                throw "Machine definition '$Path' machine.hostnames entries must be non-empty strings."
+            }
+            if (-not $seenHosts.Add([string]$hostname)) {
+                throw "Machine definition '$Path' repeats hostname '$hostname'."
+            }
+            $hostList.Add([string]$hostname)
+        }
+        $hostnames = [string[]]$hostList.ToArray()
+    }
+    return [pscustomobject][ordered]@{
+        Id = $id
+        Name = [string]$value.machine.name
+        Platform = $platform
+        Hostnames = $hostnames
+        Settings = $value.settings
+        SchemaVersion = [int]$value.schemaVersion
+        Legacy = $false
+        Document = $value
+    }
+}
+
+function Write-MachineConfiguration {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)]$Configuration
+    )
+
+    $value = if ($Configuration.Legacy) { $Configuration.Settings } else { $Configuration.Document }
+    Write-Utf8File $Path (ConvertTo-PrettyJson $value)
+}
+
+function Get-LocalDefaultMachinePath {
+    param([Parameter(Mandatory)][string]$RepositoryRoot)
+    return [System.IO.Path]::GetFullPath((Join-Path $RepositoryRoot 'machine/local/.default-machine'))
+}
+
+function Get-LocalDefaultMachine {
+    param([Parameter(Mandatory)][string]$RepositoryRoot)
+
+    $path = Get-LocalDefaultMachinePath $RepositoryRoot
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $null }
+    $id = [System.IO.File]::ReadAllText($path).Trim()
+    if (-not (Test-ComposerId $id)) {
+        throw "Local default-machine selector '$path' must contain exactly one valid machine ID."
+    }
+    return $id
 }
 
 function Resolve-MachinePath {
@@ -510,6 +728,71 @@ function Resolve-MachinePath {
     if (-not $MachineFile) { return $null }
     if ([System.IO.Path]::IsPathRooted($MachineFile)) { return [System.IO.Path]::GetFullPath($MachineFile) }
     return [System.IO.Path]::GetFullPath((Join-Path $RepositoryRoot $MachineFile))
+}
+
+function Resolve-SyncMachine {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RepositoryRoot,
+        [string]$Platform,
+        [string]$Machine,
+        [string]$MachineFile
+    )
+
+    if ($Machine -and $MachineFile) { throw '-Machine and -MachineFile cannot be used together.' }
+    $selection = $null
+    $path = $null
+    $id = $null
+    if ($Machine -or $MachineFile) {
+        $path = Resolve-MachinePath -RepositoryRoot $RepositoryRoot -Machine $Machine -MachineFile $MachineFile
+        $id = if ($Machine) { $Machine } else { [System.IO.Path]::GetFileNameWithoutExtension($path) }
+        $selection = if ($Machine) { 'explicit-machine' } else { 'explicit-file' }
+    }
+    else {
+        $defaultMachine = Get-LocalDefaultMachine $RepositoryRoot
+        if ($defaultMachine) {
+            $path = Resolve-MachinePath -RepositoryRoot $RepositoryRoot -Machine $defaultMachine
+            $id = $defaultMachine
+            $selection = 'local-default'
+        }
+        else {
+            $definitions = @(Get-MachineDefinitions $RepositoryRoot)
+            $compatible = if ($Platform) {
+                @($definitions | Where-Object { -not $_.Platform -or $_.Platform -ieq $Platform })
+            }
+            else {
+                $definitions
+            }
+            if ($compatible.Count -eq 1) {
+                $path = $compatible[0].Path
+                $id = $compatible[0].Id
+                $selection = if ($compatible[0].Platform) { 'unique-platform-match' } else { 'unique-local-machine' }
+            }
+            elseif ($compatible.Count -gt 1) {
+                $ids = @($compatible | ForEach-Object Id) -join ', '
+                throw "Machine target is ambiguous for platform '$Platform': $ids. Re-run with -Machine <id> or configure machine/local/.default-machine."
+            }
+            else {
+                throw "No compatible machine target is available for platform '$Platform'. Re-run with -Machine <id> or configure machine/local/.default-machine."
+            }
+        }
+    }
+
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        throw "Selected machine '$id' does not exist at '$path'. Run 'ProfileComposer.ps1 list-machines' or choose another -Machine value."
+    }
+    $configuration = Read-MachineConfiguration -Path $path -ExpectedId $(if ($Machine -or $selection -ne 'explicit-file') { $id } else { $null })
+    if ($Platform -and $configuration.Platform -and $configuration.Platform -ine $Platform) {
+        throw "Machine '$($configuration.Id)' targets platform '$($configuration.Platform)', not selected platform '$Platform'."
+    }
+    return [pscustomobject][ordered]@{
+        Id = $configuration.Id
+        Name = $configuration.Name
+        Platform = $configuration.Platform
+        Path = $path
+        Selection = $selection
+        Configuration = $configuration
+    }
 }
 
 function Get-MachineSettingIds {
@@ -529,6 +812,22 @@ function Add-MachineOwnershipValidation {
     foreach ($reservedKey in @('workbench.settings.applyToAllProfiles', 'settingsSync.ignoredSettings')) {
         if ($Settings.Contains($reservedKey)) {
             Add-ValidationItem $Result errors 'machine-ownership-setting' "Machine overlays cannot set '$reservedKey'; the composer owns this list." $Source "/$reservedKey"
+        }
+    }
+}
+
+function Add-MachinePrivacyValidation {
+    param(
+        [Parameter(Mandatory)][System.Collections.IDictionary]$Settings,
+        [Parameter(Mandatory)]$Result,
+        [Parameter(Mandatory)][string]$Source
+    )
+
+    foreach ($keyValue in $Settings.Keys) {
+        $key = [string]$keyValue
+        $classification = Get-SettingValueClassification -SettingKey $key -Value $Settings[$key]
+        if ($classification.classification -eq 'secret-or-private') {
+            Add-ValidationItem $Result errors 'machine-sensitive-setting' "Machine setting '$key' contains excluded credential or private-resource state. Use the owning extension or a dedicated secret store." $Source "/$key"
         }
     }
 }
@@ -612,6 +911,7 @@ function Test-ComposerRepository {
 
     $componentIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     $extensionOwners = @{}
+    $settingOwners = @{}
     if (Test-Path -LiteralPath $componentRoot -PathType Container) {
         foreach ($directory in (Get-ChildItem -LiteralPath $componentRoot -Directory | Sort-Object Name)) {
             if (-not $componentIds.Add($directory.Name)) {
@@ -628,6 +928,11 @@ function Test-ComposerRepository {
                     else {
                         Test-PortableSettings $settings $result $source
                         foreach ($key in $settings.Keys) {
+                            $normalizedKey = [string]$key
+                            if (-not $settingOwners.ContainsKey($normalizedKey)) {
+                                $settingOwners[$normalizedKey] = [System.Collections.Generic.List[string]]::new()
+                            }
+                            $settingOwners[$normalizedKey].Add($source)
                             if ($globalSettingIds.Contains([string]$key)) {
                                 Add-ValidationItem $result errors 'global-setting-in-profile-source' "Setting '$key' is globally owned and must not be declared in a component." $source "/$key"
                             }
@@ -674,6 +979,12 @@ function Test-ComposerRepository {
         $owners = @($entry.Value | Select-Object -Unique)
         if ($owners.Count -gt 1) {
             Add-ValidationItem $result warnings 'cross-component-extension-duplicate' "Extension '$($entry.Key)' is declared by multiple components: $($owners -join ', ')."
+        }
+    }
+    foreach ($entry in $settingOwners.GetEnumerator()) {
+        $owners = @($entry.Value | Select-Object -Unique)
+        if ($owners.Count -gt 1) {
+            Add-ValidationItem $result warnings 'cross-component-setting-ownership' "Setting '$($entry.Key)' is declared by multiple portable components: $($owners -join ', '). Later recipe order wins, but the duplicate ownership requires review."
         }
     }
 
@@ -796,34 +1107,63 @@ function Test-ComposerRepository {
         }
     }
 
-    $jsoncCandidates = [System.Collections.Generic.List[string]]::new()
-    foreach ($directoryName in @('platform', 'machine/local')) {
-        $directoryPath = Join-Path $root $directoryName
-        if (Test-Path -LiteralPath $directoryPath -PathType Container) {
-            foreach ($file in (Get-ChildItem -LiteralPath $directoryPath -Filter '*.jsonc' -File)) { $jsoncCandidates.Add($file.FullName) }
-        }
+    $platformCandidates = [System.Collections.Generic.List[string]]::new()
+    $platformRoot = Join-Path $root 'platform'
+    if (Test-Path -LiteralPath $platformRoot -PathType Container) {
+        foreach ($file in (Get-ChildItem -LiteralPath $platformRoot -Filter '*.jsonc' -File)) { $platformCandidates.Add($file.FullName) }
     }
-    $machineRoot = Join-Path $root 'machine'
-    if (Test-Path -LiteralPath $machineRoot -PathType Container) {
-        foreach ($file in (Get-ChildItem -LiteralPath $machineRoot -Filter '*.example.jsonc' -File)) { $jsoncCandidates.Add($file.FullName) }
-    }
-    foreach ($path in $jsoncCandidates) {
+    foreach ($path in $platformCandidates) {
         $source = Get-RelativeDisplayPath $root $path
         try {
             $value = Read-JsonCFile $path
-            if (-not (Test-IsDictionary $value)) { Add-ValidationItem $result errors 'overlay-root' 'Platform and machine settings roots must be objects.' $source }
-            elseif ($source.StartsWith('platform/', [System.StringComparison]::OrdinalIgnoreCase)) {
+            if (-not (Test-IsDictionary $value)) {
+                Add-ValidationItem $result errors 'overlay-root' 'Platform settings root must be an object.' $source
+            }
+            else {
+                Test-PortableSettings $value $result $source
                 foreach ($key in $value.Keys) {
                     if ($globalSettingIds.Contains([string]$key)) {
                         Add-ValidationItem $result errors 'global-setting-in-profile-source' "Setting '$key' is globally owned and must not be declared in a platform overlay." $source "/$key"
                     }
                 }
             }
-            elseif ($source.StartsWith('machine/', [System.StringComparison]::OrdinalIgnoreCase)) {
-                Add-MachineOwnershipValidation -Settings $value -Result $result -Source $source
-            }
         }
         catch { Add-ValidationItem $result errors 'invalid-jsonc' $_.Exception.Message $source }
+    }
+
+    $machineCandidates = [System.Collections.Generic.List[string]]::new()
+    $machineLocalRoot = Join-Path $root 'machine/local'
+    if (Test-Path -LiteralPath $machineLocalRoot -PathType Container) {
+        foreach ($file in (Get-ChildItem -LiteralPath $machineLocalRoot -Filter '*.jsonc' -File)) { $machineCandidates.Add($file.FullName) }
+    }
+    $machineRoot = Join-Path $root 'machine'
+    if (Test-Path -LiteralPath $machineRoot -PathType Container) {
+        foreach ($file in (Get-ChildItem -LiteralPath $machineRoot -Filter '*.example.jsonc' -File)) { $machineCandidates.Add($file.FullName) }
+    }
+    foreach ($path in $machineCandidates) {
+        $source = Get-RelativeDisplayPath $root $path
+        try {
+            $expectedId = if ($source.StartsWith('machine/local/', [System.StringComparison]::OrdinalIgnoreCase)) {
+                [System.IO.Path]::GetFileNameWithoutExtension($path)
+            }
+            else { $null }
+            $configuration = Read-MachineConfiguration -Path $path -ExpectedId $expectedId
+            Add-MachineOwnershipValidation -Settings $configuration.Settings -Result $result -Source $source
+            Add-MachinePrivacyValidation -Settings $configuration.Settings -Result $result -Source $source
+        }
+        catch { Add-ValidationItem $result errors 'invalid-jsonc' $_.Exception.Message $source }
+    }
+    try {
+        $defaultMachine = Get-LocalDefaultMachine $root
+        if ($defaultMachine) {
+            $defaultMachinePath = Resolve-MachinePath -RepositoryRoot $root -Machine $defaultMachine
+            if (-not (Test-Path -LiteralPath $defaultMachinePath -PathType Leaf)) {
+                Add-ValidationItem $result errors 'stale-default-machine' "Local default machine '$defaultMachine' does not exist. Update or remove machine/local/.default-machine." 'machine/local/.default-machine'
+            }
+        }
+    }
+    catch {
+        Add-ValidationItem $result errors 'invalid-default-machine' $_.Exception.Message 'machine/local/.default-machine'
     }
 
     if ($Platform) {
@@ -841,14 +1181,12 @@ function Test-ComposerRepository {
             $requested = if ($Machine) { "machine '$Machine'" } else { 'machine overlay' }
             Add-ValidationItem $result errors 'missing-machine-overlay' "Requested $requested does not exist." (Get-RelativeDisplayPath $root $resolvedMachine)
         }
-        elseif ($jsoncCandidates -notcontains $resolvedMachine) {
+        elseif ($machineCandidates -notcontains $resolvedMachine) {
             $source = Get-RelativeDisplayPath $root $resolvedMachine
             try {
-                $machineSettings = Read-JsonCFile $resolvedMachine
-                if (-not (Test-IsDictionary $machineSettings)) {
-                    Add-ValidationItem $result errors 'overlay-root' 'Platform and machine settings roots must be objects.' $source
-                }
-                else { Add-MachineOwnershipValidation -Settings $machineSettings -Result $result -Source $source }
+                $machineConfiguration = Read-MachineConfiguration -Path $resolvedMachine -ExpectedId $Machine
+                Add-MachineOwnershipValidation -Settings $machineConfiguration.Settings -Result $result -Source $source
+                Add-MachinePrivacyValidation -Settings $machineConfiguration.Settings -Result $result -Source $source
             }
             catch { Add-ValidationItem $result errors 'invalid-jsonc' $_.Exception.Message $source }
         }
@@ -1821,6 +2159,42 @@ function Repair-ComposerGlobalOwnership {
     }
 }
 
+function New-SyncSettingDiagnostic {
+    param(
+        [Parameter(Mandatory)][string]$Heading,
+        [Parameter(Mandatory)][string]$SettingKey,
+        [Parameter(Mandatory)][string]$SourcePath,
+        [Parameter(Mandatory)]$Classification,
+        [string]$Platform,
+        [string]$MachineId,
+        [string]$Owner,
+        [Parameter(Mandatory)][string]$Reason,
+        [Parameter(Mandatory)][string]$RecommendedCommand
+    )
+
+    $targetMachine = if ($MachineId) { $MachineId } else { 'not resolved' }
+    $targetPlatform = if ($Platform) { $Platform } else { 'not selected' }
+    $owningSource = if ($Owner) { $Owner } else { 'unowned export setting' }
+    return @"
+$Heading
+
+  Setting: $SettingKey
+  Source: $SourcePath#settings
+  Value: $($Classification.safeValue)
+  Classification: $($Classification.classification)
+  Proposed destination: $($Classification.destination)
+  Target platform: $targetPlatform
+  Target machine: $targetMachine
+  Owning component or file: $owningSource
+  Validation rule: $($Classification.ruleId)
+  Reason: $Reason
+
+Recommended command:
+
+  $RecommendedCommand
+"@
+}
+
 function Sync-ComposerProfileFromExport {
     [CmdletBinding()]
     param(
@@ -1828,6 +2202,8 @@ function Sync-ComposerProfileFromExport {
         [string]$Profile,
         [Parameter(Mandatory)][string]$SourceProfileExport,
         [string]$Platform,
+        [string]$Machine,
+        [string]$MachineFile,
         [string]$VSCodeUserDataPath,
         [switch]$SkipGlobal,
         [switch]$SkipUiState,
@@ -1846,6 +2222,7 @@ function Sync-ComposerProfileFromExport {
         throw 'The profile export does not contain UI layout state. Export the UI State resource or use -SkipUiState.'
     }
 
+    if ($Machine -and $MachineFile) { throw '-Machine and -MachineFile cannot be used together.' }
     $preflight = Test-ComposerRepository -RepositoryRoot $root -Platform $Platform
     if ($preflight.errors.Count -gt 0) {
         throw "Profile sync requires a valid repository; found $($preflight.errors.Count) error(s)."
@@ -1967,6 +2344,107 @@ function Sync-ComposerProfileFromExport {
         foreach ($id in $filteredGlobalIds) { $newGlobal[$id] = Copy-ComposerValue $applicationSettings[$id] }
     }
 
+    $settingClassifications = [ordered]@{}
+    $machineRoutedSettingIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    $machineRoutedValues = New-OrderedMap
+    foreach ($keyValue in $resources.Settings.Keys) {
+        $key = [string]$keyValue
+        $classification = Get-SettingValueClassification -SettingKey $key -Value $resources.Settings[$key]
+        $settingClassifications[$key] = $classification
+        $ownerPath = "/$(ConvertTo-JsonPointerSegment $key)"
+        $owner = if ($componentSettingSources.ContainsKey($ownerPath)) {
+            [string]$componentSettingSources[$ownerPath]
+        }
+        elseif ($platformSettingIds.Contains($key)) {
+            "platform/$Platform.jsonc"
+        }
+        elseif ($globalSettingIds.Contains($key)) {
+            'global/settings.jsonc'
+        }
+        else { $null }
+        if ($classification.classification -eq 'secret-or-private') {
+            $rerun = "vscomp sync `"$sourcePath`"$(if ($Platform) { " -Platform $Platform" }) -DryRun"
+            $diagnostic = New-SyncSettingDiagnostic `
+                -Heading 'Sensitive or private setting cannot be synchronized automatically:' `
+                -SettingKey $key `
+                -SourcePath $sourcePath `
+                -Classification $classification `
+                -Platform $Platform `
+                -Owner $owner `
+                -Reason 'Credential-bearing and private-resource settings are excluded rather than routed into ordinary machine files.' `
+                -RecommendedCommand $rerun
+            throw $diagnostic
+        }
+        if ($classification.destination -eq 'machine-local') {
+            $machineRoutedSettingIds.Add($key) | Out-Null
+            $machineRoutedValues[$key] = Copy-ComposerValue $resources.Settings[$key]
+        }
+    }
+
+    $resolvedSyncMachine = $null
+    $machineRoutes = [System.Collections.Generic.List[object]]::new()
+    $machineFileChanged = $false
+    $machineRelativePath = $null
+    if ($machineRoutedSettingIds.Count -gt 0) {
+        try {
+            $resolvedSyncMachine = Resolve-SyncMachine -RepositoryRoot $root -Platform $Platform -Machine $Machine -MachineFile $MachineFile
+        }
+        catch {
+            $firstKey = [string]@($machineRoutedValues.Keys)[0]
+            $classification = $settingClassifications[$firstKey]
+            $ownerPath = "/$(ConvertTo-JsonPointerSegment $firstKey)"
+            $owner = if ($componentSettingSources.ContainsKey($ownerPath)) { [string]$componentSettingSources[$ownerPath] } else { $null }
+            $commandPlatform = if ($Platform) { $Platform } else { '<platform>' }
+            $diagnostic = New-SyncSettingDiagnostic `
+                -Heading 'Machine-local setting detected, but the target machine could not be resolved:' `
+                -SettingKey $firstKey `
+                -SourcePath $sourcePath `
+                -Classification $classification `
+                -Platform $Platform `
+                -Owner $owner `
+                -Reason $_.Exception.Message `
+                -RecommendedCommand "vscomp sync `"$sourcePath`" -Platform $commandPlatform -Machine <machine-id>"
+            throw $diagnostic
+        }
+        $machineLocalRoot = [System.IO.Path]::GetFullPath((Join-Path $root 'machine/local'))
+        if (-not (Test-PathWithinDirectory $resolvedSyncMachine.Path $machineLocalRoot)) {
+            throw 'Sync machine routing requires a target under machine/local so it can participate in the repository transaction. Use -Machine <id>.'
+        }
+        $machineRelativePath = Get-RelativeDisplayPath $root $resolvedSyncMachine.Path
+        foreach ($keyValue in $machineRoutedValues.Keys) {
+            $key = [string]$keyValue
+            $settingsMap = $resolvedSyncMachine.Configuration.Settings
+            $exists = $settingsMap.Contains($key)
+            $identical = $exists -and (Test-ValuesEqual $settingsMap[$key] $machineRoutedValues[$key])
+            $action = if ($identical) { 'retain' } elseif ($exists) { 'update' } else { 'add' }
+            $ownerPath = "/$(ConvertTo-JsonPointerSegment $key)"
+            $portableOwner = if ($componentSettingSources.ContainsKey($ownerPath)) {
+                [string]$componentSettingSources[$ownerPath]
+            }
+            elseif ($platformSettingIds.Contains($key)) { "platform/$Platform.jsonc" }
+            else { $null }
+            $machineRoutes.Add([pscustomobject][ordered]@{
+                setting = $key
+                classification = 'machine-local-path'
+                destination = $machineRelativePath
+                machineId = $resolvedSyncMachine.Id
+                selection = $resolvedSyncMachine.Selection
+                action = $action
+                portableOwner = $portableOwner
+                previousValue = if ($exists) { '[REDACTED: machine-local-path]' } else { $null }
+                newValue = '[REDACTED: machine-local-path]'
+                ruleId = 'sync-machine-local-path'
+            })
+            if (-not $identical) {
+                $settingsMap[$key] = Copy-ComposerValue $machineRoutedValues[$key]
+                $machineFileChanged = $true
+            }
+        }
+    }
+    elseif ($Machine -or $MachineFile) {
+        $resolvedSyncMachine = Resolve-SyncMachine -RepositoryRoot $root -Platform $Platform -Machine $Machine -MachineFile $MachineFile
+    }
+
     $settingsReplacements = New-OrderedMap
     $settingsRemovals = [System.Collections.Generic.List[string]]::new()
     $globalSettingsIgnored = 0
@@ -1978,6 +2456,9 @@ function Sync-ComposerProfileFromExport {
         if (-not $resources.Settings.Contains($key)) { $settingsRemovals.Add([string]$key) }
     }
     foreach ($key in $resources.Settings.Keys) {
+        if ($machineRoutedSettingIds.Contains([string]$key)) {
+            continue
+        }
         if ($machineOwnedSettingIds.Contains([string]$key)) {
             $globalSettingsIgnored++
             continue
@@ -2017,6 +2498,9 @@ function Sync-ComposerProfileFromExport {
     $replaceKeybindings = $predictedOrder -cne $liveOrder
 
     $changes = [System.Collections.Generic.List[object]]::new()
+    $profilesChanged = $false
+    $globalChanged = $false
+    $uiStateChanged = $false
     $stagingRoot = New-ComposerStagingRepository $root
     try {
         $stagedProfiles = Join-Path $stagingRoot 'profiles'
@@ -2024,6 +2508,7 @@ function Sync-ComposerProfileFromExport {
         if (Test-Path -LiteralPath $legacyOverridePath -PathType Leaf) {
             Remove-Item -LiteralPath $legacyOverridePath -Force
             $changes.Add([pscustomobject]@{ action = 'remove'; path = "profiles/$profileId.settings.jsonc" })
+            $profilesChanged = $true
         }
 
         $resourcePlans = @(
@@ -2061,18 +2546,27 @@ function Sync-ComposerProfileFromExport {
         foreach ($plan in $resourcePlans) {
             $existed = Test-Path -LiteralPath $plan.Path -PathType Leaf
             if ($plan.Present) {
-                Write-Utf8File $plan.Path (ConvertTo-PrettyJson $plan.Value)
-                $changes.Add([pscustomobject]@{ action = if ($existed) { 'update' } else { 'create' }; path = $plan.Relative })
+                $same = $existed -and (Test-ValuesEqual (Read-JsonCFile $plan.Path) $plan.Value)
+                if (-not $same) {
+                    Write-Utf8File $plan.Path (ConvertTo-PrettyJson $plan.Value)
+                    $changes.Add([pscustomobject]@{ action = if ($existed) { 'update' } else { 'create' }; path = $plan.Relative })
+                    $profilesChanged = $true
+                }
             }
             elseif ($existed) {
                 Remove-Item -LiteralPath $plan.Path -Force
                 $changes.Add([pscustomobject]@{ action = 'remove'; path = $plan.Relative })
+                $profilesChanged = $true
             }
         }
 
         if (-not $SkipGlobal) {
-            Write-Utf8File (Join-Path $stagingRoot 'global/settings.jsonc') (ConvertTo-PrettyJson $newGlobal)
-            $changes.Add([pscustomobject]@{ action = 'update'; path = 'global/settings.jsonc' })
+            $stagedGlobalPath = Join-Path $stagingRoot 'global/settings.jsonc'
+            if (-not (Test-ValuesEqual (Read-JsonCFile $stagedGlobalPath) $newGlobal)) {
+                Write-Utf8File $stagedGlobalPath (ConvertTo-PrettyJson $newGlobal)
+                $changes.Add([pscustomobject]@{ action = 'update'; path = 'global/settings.jsonc' })
+                $globalChanged = $true
+            }
         }
         if (-not $SkipUiState) {
             $uiDirectory = Join-Path $stagingRoot "machine/local/ui-state/$profileId"
@@ -2082,18 +2576,31 @@ function Sync-ComposerProfileFromExport {
                 globalState = [string]$resources.GlobalState
             }
             $uiPath = Join-Path $uiDirectory 'seed.code-profile'
-            Write-Utf8File $uiPath (ConvertTo-PrettyJson $seed)
-            Read-CodeProfileGlobalState $uiPath | Out-Null
-            $changes.Add([pscustomobject]@{ action = 'update'; path = "machine/local/ui-state/$profileId/seed.code-profile" })
+            $sameUiState = (Test-Path -LiteralPath $uiPath -PathType Leaf) -and
+                ((Read-CodeProfileGlobalState $uiPath) -ceq [string]$resources.GlobalState)
+            if (-not $sameUiState) {
+                Write-Utf8File $uiPath (ConvertTo-PrettyJson $seed)
+                Read-CodeProfileGlobalState $uiPath | Out-Null
+                $changes.Add([pscustomobject]@{ action = if ($sameUiState) { 'update' } elseif (Test-Path -LiteralPath (Join-Path $root "machine/local/ui-state/$profileId/seed.code-profile")) { 'update' } else { 'create' }; path = "machine/local/ui-state/$profileId/seed.code-profile" })
+                $uiStateChanged = $true
+            }
+        }
+        if ($machineFileChanged) {
+            $stagedMachinePath = Join-Path $stagingRoot $machineRelativePath
+            Write-MachineConfiguration -Path $stagedMachinePath -Configuration $resolvedSyncMachine.Configuration
+            $changes.Add([pscustomobject]@{ action = 'update'; path = $machineRelativePath })
         }
 
         Assert-StagedRepositoryValid $stagingRoot
         if (-not $DryRun) {
             $commitPaths = [System.Collections.Generic.List[string]]::new()
-            $commitPaths.Add('profiles')
-            if (-not $SkipGlobal) { $commitPaths.Add('global') }
-            if (-not $SkipUiState) { $commitPaths.Add('machine/local/ui-state') }
-            Invoke-StagedRepositoryCommit $root $stagingRoot $commitPaths.ToArray()
+            if ($profilesChanged) { $commitPaths.Add('profiles') }
+            if ($globalChanged) { $commitPaths.Add('global') }
+            if ($uiStateChanged) { $commitPaths.Add('machine/local/ui-state') }
+            if ($machineFileChanged) { $commitPaths.Add($machineRelativePath) }
+            if ($commitPaths.Count -gt 0) {
+                Invoke-StagedRepositoryCommit $root $stagingRoot $commitPaths.ToArray()
+            }
         }
     }
     finally {
@@ -2106,6 +2613,17 @@ function Sync-ComposerProfileFromExport {
         displayName = $recipe.Name
         exportName = $resources.Name
         changes = [object[]]$changes.ToArray()
+        routes = [object[]]$machineRoutes.ToArray()
+        machine = if ($resolvedSyncMachine) {
+            [pscustomobject][ordered]@{
+                id = $resolvedSyncMachine.Id
+                name = $resolvedSyncMachine.Name
+                platform = $resolvedSyncMachine.Platform
+                selection = $resolvedSyncMachine.Selection
+                path = $machineRelativePath
+            }
+        }
+        else { $null }
         counts = [pscustomobject][ordered]@{
             settingReplacements = $settingsReplacements.Count
             settingRemovals = $settingsRemovals.Count
@@ -2118,8 +2636,12 @@ function Sync-ComposerProfileFromExport {
             machineOwnedGlobalSettingsSkipped = $machineOwnedGlobalCount
             exportGlobalSettingsIgnored = $globalSettingsIgnored
             platformSettingsIgnored = $platformSettingsIgnored
+            machineSettingsRouted = $machineRoutes.Count
+            machineSettingsAdded = @($machineRoutes | Where-Object action -eq 'add').Count
+            machineSettingsUpdated = @($machineRoutes | Where-Object action -eq 'update').Count
+            machineSettingsRetained = @($machineRoutes | Where-Object action -eq 'retain').Count
         }
-        uiStateUpdated = -not [bool]$SkipUiState
+        uiStateUpdated = $uiStateChanged
         dryRun = [bool]$DryRun
     }
 }
@@ -2145,7 +2667,11 @@ function Invoke-GlobalSettingsComposition {
     $sourcePath = Join-Path $root 'global/settings.jsonc'
     $settings = Read-JsonCFile $sourcePath
     $resolvedMachine = Resolve-MachinePath -RepositoryRoot $root -Machine $Machine -MachineFile $MachineFile
-    $machineSettings = if ($resolvedMachine) { Read-JsonCFile $resolvedMachine } else { $null }
+    $machineConfiguration = if ($resolvedMachine) {
+        Read-MachineConfiguration -Path $resolvedMachine -ExpectedId $Machine
+    }
+    else { $null }
+    $machineSettings = if ($machineConfiguration) { $machineConfiguration.Settings } else { $null }
     $machineSettingIds = @()
     if ($resolvedMachine) { $machineSettingIds = @(Get-MachineSettingIds $machineSettings) }
     $machineId = if ($Machine) { $Machine } elseif ($resolvedMachine) { [System.IO.Path]::GetFileNameWithoutExtension($resolvedMachine) } else { $null }
@@ -2362,7 +2888,7 @@ function Invoke-ProfileComposition {
     $machineSettingIds = @()
     if ($resolvedMachine) {
         $source = Get-RelativeDisplayPath $root $resolvedMachine
-        $machineSettings = Read-JsonCFile $resolvedMachine
+        $machineSettings = (Read-MachineConfiguration -Path $resolvedMachine -ExpectedId $Machine).Settings
         $machineSettingIds = @(Get-MachineSettingIds $machineSettings)
         $inputFiles.Add([pscustomobject]@{ type = 'machine-application-settings'; path = $source })
     }
@@ -2631,4 +3157,4 @@ function Invoke-ProfileComposition {
     }
 }
 
-Export-ModuleMember -Function ConvertFrom-JsonC, Read-ProfileRecipe, Get-ProfileDefinitions, Get-MachineDefinitions, Get-DefaultVSCodeUserDataPath, Get-LiveVSCodeProfileDefinitions, Get-VSCodeStatusText, Resolve-ComposerProfileFromVSCodeStatus, Get-SharedDefaultComponent, Test-ComposerRepository, Merge-Settings, Merge-Extensions, Merge-Keybindings, Get-CodeProfileFileName, New-CodeProfileTemplate, Read-CodeProfileResources, Read-CodeProfileGlobalState, Get-StoredUiStateSeedPath, Save-ProfileUiStateSeed, Test-CodeProfileTemplate, Invoke-SafeDirectoryReplace, Rename-ComposerProfile, Rename-ComposerComponent, Set-SharedDefaultComponent, Repair-ComposerGlobalOwnership, Sync-ComposerProfileFromExport, Invoke-GlobalSettingsComposition, Invoke-ProfileComposition
+Export-ModuleMember -Function ConvertFrom-JsonC, Read-ProfileRecipe, Get-ProfileDefinitions, Get-MachineDefinitions, Read-MachineConfiguration, Get-LocalDefaultMachine, Get-SettingValueClassification, Get-DefaultVSCodeUserDataPath, Get-LiveVSCodeProfileDefinitions, Get-VSCodeStatusText, Resolve-ComposerProfileFromVSCodeStatus, Get-SharedDefaultComponent, Test-ComposerRepository, Merge-Settings, Merge-Extensions, Merge-Keybindings, Get-CodeProfileFileName, New-CodeProfileTemplate, Read-CodeProfileResources, Read-CodeProfileGlobalState, Get-StoredUiStateSeedPath, Save-ProfileUiStateSeed, Test-CodeProfileTemplate, Invoke-SafeDirectoryReplace, Rename-ComposerProfile, Rename-ComposerComponent, Set-SharedDefaultComponent, Repair-ComposerGlobalOwnership, Sync-ComposerProfileFromExport, Invoke-GlobalSettingsComposition, Invoke-ProfileComposition

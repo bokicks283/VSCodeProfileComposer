@@ -1,8 +1,16 @@
 {
-  // Copy to machine/local/linux.jsonc and replace placeholders locally.
-
-  // Examples only:
-  // "todo-tree.ripgrep.ripgrep": "/home/<username>/.local/bin/rg",
-  // "C_Cpp.default.compilerPath": "/usr/bin/clang++",
-  // "vscode-kubernetes.kubectl-path": "/usr/local/bin/kubectl"
+  "schemaVersion": 1,
+  "machine": {
+    // Copy to machine/local/main-linux.jsonc and keep id equal to the filename.
+    "id": "main-linux",
+    "name": "Main Linux",
+    "platform": "linux",
+    "hostnames": []
+  },
+  "settings": {
+    // Examples only:
+    // "todo-tree.ripgrep.ripgrep": "/home/<username>/.local/bin/rg",
+    // "C_Cpp.default.compilerPath": "/usr/bin/clang++",
+    // "vscode-kubernetes.kubectl-path": "/usr/local/bin/kubectl"
+  }
 }

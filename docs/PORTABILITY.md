@@ -29,9 +29,9 @@ Database command-line clients, native drivers, and certificate behavior may vary
 
 ## Machine-local settings
 
-Real machine values live under ignored `machine/local/<machine-id>.jsonc`. Committed examples use placeholders only. Use `ProfileComposer.ps1 list-machines` to see available local IDs and `-Machine <machine-id>` on a validating or composing subcommand to choose the computer being targeted. The selected values are written only to `build/global/settings.json`; named profiles and `.code-profile` exports remain portable.
+Real machine values live under ignored `machine/local/<machine-id>.jsonc`. Committed examples use schema 1 placeholders with stable ID, display name, platform, optional hostnames, and a `settings` object. Legacy plain setting maps remain compatible. Use `ProfileComposer.ps1 list-machines` to see available local IDs and `-Machine <machine-id>` on a validating, composing, or syncing subcommand to choose the computer being targeted. The selected values are written only to `build/global/settings.json`; named profiles and `.code-profile` exports remain portable.
 
-PowerShell executable overrides, module locations, signing certificates, remoting endpoints, database client paths, SSH tunnels, and shell-specific environment adjustments are machine-local when they cannot be expressed portably.
+PowerShell executable overrides, module locations, database client paths, and shell-specific environment adjustments are machine-local when they cannot be expressed portably. Credentials, signing/private-key material, saved connections, private hosts, account IDs, and authentication state are excluded private state; do not put them in an ordinary machine definition.
 
 Database extensions may retain saved connections or authentication state outside this repository. That state must not be copied into portable component files.
 
@@ -94,7 +94,7 @@ Generate portable `.code-profile` artifacts under ignored `build/profiles/` with
 
 Separately, a profile exported from live VS Code can contain additional runtime-owned resources or machine/account state. Treat live exports as sensitive until inspected and store them privately. `ProfileComposer.ps1 capture-ui-state [<profile-id>] <export-path>` discards every resource except the opaque `globalState` and stores it under ignored `machine/local/ui-state/<profile>/`; that resource can itself contain extension or account-related state. Omitting the recipe reads only `code --status` and succeeds for one exact recipe match. `-UiStateProfile` reuses the stored data as a one-time layout seed, not a portable component source.
 
-`ProfileComposer.ps1 sync [<profile-id>] <export-path>` deliberately broadens that import path for reviewed maintenance. It validates settings, extension IDs, keybindings, and UI state, then records only recipe-specific deltas; it never copies flattened values into shared components automatically. Application settings are limited to explicit `workbench.settings.applyToAllProfiles` ownership, and keys ignored by Settings Sync are excluded as machine-owned. Portable-value validation and an isolated transaction run before tracked source replacement. The original export and stored UI seed remain private.
+`ProfileComposer.ps1 sync [<profile-id>] <export-path>` deliberately broadens that import path for reviewed maintenance. It validates settings, extension IDs, keybindings, and UI state, recursively classifies setting values, routes safe path-bearing values to the selected ignored machine definition, and records only portable recipe-specific deltas; it never copies flattened values into shared components automatically. Application settings are limited to explicit `workbench.settings.applyToAllProfiles` ownership, and keys ignored by Settings Sync are excluded from tracked global ownership. Sensitive/private values fail with redacted diagnostics. The complete routed plan is validated in one isolated transaction before source replacement. The original export and stored UI seed remain private.
 
 ## Temporary family or friend machines
 

@@ -9,6 +9,9 @@ BeforeAll {
         foreach ($directory in @('components', 'profiles', 'platform', 'machine', 'global')) {
             Copy-Item -LiteralPath (Join-Path $script:RepositoryRoot $directory) -Destination $fixture -Recurse
         }
+        Get-ChildItem -LiteralPath (Join-Path $fixture 'machine/local') -Filter '*.jsonc' -File -ErrorAction SilentlyContinue |
+            Remove-Item -Force
+        Remove-Item -LiteralPath (Join-Path $fixture 'machine/local/.default-machine') -Force -ErrorAction SilentlyContinue
         Copy-Item -LiteralPath (Join-Path $script:RepositoryRoot 'composer.jsonc') -Destination $fixture
         return $fixture
     }
@@ -31,6 +34,49 @@ BeforeAll {
         $storagePath = Join-Path $userDataPath 'globalStorage/storage.json'
         Write-TestFile $storagePath (ConvertTo-Json -InputObject ([ordered]@{ userDataProfiles = $Profiles }) -Depth 10)
         return $userDataPath
+    }
+
+    function New-MachineDefinition {
+        param(
+            [Parameter(Mandatory)][string]$RepositoryRoot,
+            [Parameter(Mandatory)][string]$Id,
+            [Parameter(Mandatory)][string]$Platform,
+            [Parameter(Mandatory)][System.Collections.IDictionary]$Settings,
+            [string]$Name = $Id
+        )
+        $path = Join-Path $RepositoryRoot "machine/local/$Id.jsonc"
+        $value = [ordered]@{
+            schemaVersion = 1
+            machine = [ordered]@{
+                id = $Id
+                name = $Name
+                platform = $Platform
+                hostnames = @()
+            }
+            settings = $Settings
+        }
+        Write-TestFile $path (ConvertTo-Json -InputObject $value -Depth 100)
+        return $path
+    }
+
+    function New-SyncExport {
+        param(
+            [Parameter(Mandatory)][string]$Path,
+            [Parameter(Mandatory)][System.Collections.IDictionary]$Settings,
+            [string]$Name = 'Python',
+            [switch]$NoUiState
+        )
+        $parameters = @{
+            DisplayName = $Name
+            SettingsJson = ConvertTo-Json -InputObject $Settings -Depth 100 -Compress
+            Extensions = @()
+            KeybindingsJson = '[]'
+            Platform = 'windows'
+        }
+        if (-not $NoUiState) { $parameters.GlobalState = '{"layout":true}' }
+        $template = New-CodeProfileTemplate @parameters
+        Write-TestFile $Path (ConvertTo-Json -InputObject $template -Depth 100)
+        return $Path
     }
 }
 
@@ -776,6 +822,14 @@ Describe 'VS Code .code-profile export' {
         (Test-ComposerRepository $fixture).errors.code | Should -Contain 'sensitive-profile-metadata'
     }
 
+    It 'fails closed on unknown export fields instead of discarding newer data' {
+        $path = Join-Path $TestDrive 'unknown-export-field.code-profile'
+        $template = New-CodeProfileTemplate -DisplayName 'Fixture' -SettingsJson '{}' -Extensions @() -KeybindingsJson '[]' -Platform windows
+        $template['futureResource'] = '{"value":true}'
+        Write-TestFile $path (ConvertTo-Json -InputObject $template -Depth 20)
+        { Test-CodeProfileTemplate $path } | Should -Throw '*unsupported metadata field*futureResource*'
+    }
+
     It 'omits UI state and rejects accidental UI-state source files' {
         $fixture = New-ComposerFixture 'export-no-ui-state'
         Invoke-ProfileComposition $fixture main -Platform windows -ExportCodeProfile | Out-Null
@@ -1124,8 +1178,9 @@ Describe 'Profile export synchronization' {
             'machine.fixture.path'
         )
         Write-TestFile (Join-Path $userDataPath 'settings.json') (ConvertTo-Json -InputObject $applicationSettings -Depth 100)
+        New-MachineDefinition -RepositoryRoot $fixture -Id test-windows -Platform windows -Settings ([ordered]@{}) | Out-Null
 
-        $result = Sync-ComposerProfileFromExport -RepositoryRoot $fixture -SourceProfileExport $sourceExport -Platform windows -VSCodeUserDataPath $userDataPath
+        $result = Sync-ComposerProfileFromExport -RepositoryRoot $fixture -SourceProfileExport $sourceExport -Platform windows -Machine test-windows -VSCodeUserDataPath $userDataPath
 
         $result.profileId | Should -BeExactly 'python'
         $result.counts.settingReplacements | Should -BeGreaterThan 0
@@ -1147,6 +1202,9 @@ Describe 'Profile export synchronization' {
         $global['workbench.settings.applyToAllProfiles'] | Should -Not -Contain 'machine.fixture.path'
         $replacementSettings = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'profiles/python.settings.replace.jsonc')))
         $replacementSettings.Contains('machine.fixture.path') | Should -BeFalse
+        $machine = Read-MachineConfiguration (Join-Path $fixture 'machine/local/test-windows.jsonc') test-windows
+        $machine.Settings['machine.fixture.path'] | Should -BeExactly 'C:\Private\tool.exe'
+        $result.counts.machineSettingsAdded | Should -Be 1
 
         Invoke-ProfileComposition $fixture python -Platform windows | Out-Null
         $composedSettings = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'build/profiles/python/settings.json')))
@@ -1177,7 +1235,7 @@ Describe 'Profile export synchronization' {
         Write-TestFile $sourceExport (ConvertTo-Json -InputObject $unsafeTemplate -Depth 100)
         $beforeGlobal = [System.IO.File]::ReadAllText((Join-Path $fixture 'global/settings.jsonc'))
         { Sync-ComposerProfileFromExport -RepositoryRoot $fixture -SourceProfileExport $sourceExport -Platform windows -SkipGlobal } |
-            Should -Throw '*failed validation*'
+            Should -Throw '*Sensitive or private setting*sync-sensitive-setting*'
         [System.IO.File]::ReadAllText((Join-Path $fixture 'global/settings.jsonc')) | Should -BeExactly $beforeGlobal
         Test-Path -LiteralPath (Join-Path $fixture 'profiles/python.settings.replace.jsonc') | Should -BeFalse
         Test-Path -LiteralPath (Join-Path $fixture 'machine/local/ui-state/python/seed.code-profile') | Should -BeFalse
@@ -1199,6 +1257,269 @@ Describe 'Profile export synchronization' {
         $output -join "`n" | Should -Match "planned sync.*recipe 'python'"
         $output -join "`n" | Should -Match 'Settings:'
         Test-Path -LiteralPath (Join-Path $fixture 'profiles/python.settings.replace.jsonc') | Should -BeFalse
+    }
+}
+
+Describe 'Sync classification, machine schema, and routed planning' {
+    It 'classifies supported path forms recursively without confusing executable names or path-like labels' {
+        $machineValues = @(
+            'C:\Users\person\tool.exe'
+            'C:/Users/person/tool.exe'
+            '\\server\share\tool.exe'
+            '/home/person/bin/tool'
+            '/Users/person/bin/tool'
+            '~/Library/Application Support/tool'
+            '%USERPROFILE%\bin\tool.exe'
+            '$HOME/bin/tool'
+            'file:///C:/Users/person/tool.exe'
+        )
+        foreach ($value in $machineValues) {
+            (Get-SettingValueClassification -SettingKey 'fixture.path' -Value $value).classification |
+                Should -BeExactly 'machine-local-path'
+        }
+        (Get-SettingValueClassification -SettingKey 'fixture.object' -Value ([ordered]@{ nested = [ordered]@{ path = '/opt/private/tool' } })).classification |
+            Should -BeExactly 'machine-local-path'
+        (Get-SettingValueClassification -SettingKey 'fixture.array' -Value @('rg', 'C:\Tools\rg.exe')).classification |
+            Should -BeExactly 'machine-local-path'
+        foreach ($value in @('rg', 'pwsh', 'publisher/extension', 'C:relative', 'namespace:value', '/error|warning/g')) {
+            (Get-SettingValueClassification -SettingKey 'fixture.value' -Value $value).classification |
+                Should -BeExactly 'portable'
+        }
+    }
+
+    It 'preserves the full VS Code JSON value domain and excludes nested private data' {
+        foreach ($value in @($null, $true, 42, 'portable', @('one', 2), ([ordered]@{ enabled = $true }))) {
+            (Get-SettingValueClassification -SettingKey 'fixture.value' -Value $value).classification |
+                Should -BeExactly 'portable'
+        }
+        $secret = Get-SettingValueClassification -SettingKey 'database.connection' -Value ([ordered]@{
+            username = 'private-user'
+            password = 'must-not-print'
+        })
+        $secret.classification | Should -BeExactly 'secret-or-private'
+        $secret.destination | Should -BeExactly 'excluded-private'
+        $secret.safeValue | Should -Not -Match 'private-user|must-not-print'
+    }
+
+    It 'validates versioned machine identity and rejects missing, unknown, newer, or mismatched schema fields' {
+        $valid = New-ComposerFixture 'machine-schema-valid'
+        New-MachineDefinition -RepositoryRoot $valid -Id main-windows -Platform windows -Settings ([ordered]@{ 'fixture.path' = 'C:\Tools\tool.exe' }) | Out-Null
+        $definition = @(Get-MachineDefinitions $valid)[0]
+        $definition.Id | Should -BeExactly 'main-windows'
+        $definition.Platform | Should -BeExactly 'windows'
+        $definition.SchemaVersion | Should -Be 1
+        (Test-ComposerRepository $valid).errors.Count | Should -Be 0
+
+        $missing = New-ComposerFixture 'machine-schema-missing-id'
+        Write-TestFile (Join-Path $missing 'machine/local/broken.jsonc') '{"schemaVersion":1,"machine":{"name":"Broken","platform":"windows"},"settings":{}}'
+        ((Test-ComposerRepository $missing).errors.message -join "`n") | Should -Match 'machine.id'
+
+        $unknown = New-ComposerFixture 'machine-schema-unknown'
+        Write-TestFile (Join-Path $unknown 'machine/local/broken.jsonc') '{"schemaVersion":1,"machine":{"id":"broken","name":"Broken","platform":"windows"},"settings":{},"future":true}'
+        ((Test-ComposerRepository $unknown).errors.message -join "`n") | Should -Match 'unknown schema field'
+
+        $newer = New-ComposerFixture 'machine-schema-newer'
+        Write-TestFile (Join-Path $newer 'machine/local/broken.jsonc') '{"schemaVersion":2,"machine":{"id":"broken","name":"Broken","platform":"windows"},"settings":{}}'
+        ((Test-ComposerRepository $newer).errors.message -join "`n") | Should -Match 'supported schemaVersion 1'
+
+        $mismatch = New-ComposerFixture 'machine-schema-id-mismatch'
+        Write-TestFile (Join-Path $mismatch 'machine/local/file-id.jsonc') '{"schemaVersion":1,"machine":{"id":"other-id","name":"Other","platform":"windows"},"settings":{}}'
+        ((Test-ComposerRepository $mismatch).errors.message -join "`n") | Should -Match 'must match filename ID'
+
+        $stale = New-ComposerFixture 'machine-schema-stale-default'
+        Write-TestFile (Join-Path $stale 'machine/local/.default-machine') 'deleted-machine'
+        (Test-ComposerRepository $stale).errors.code | Should -Contain 'stale-default-machine'
+
+        $private = New-ComposerFixture 'machine-schema-private-state'
+        New-MachineDefinition -RepositoryRoot $private -Id private-windows -Platform windows -Settings ([ordered]@{
+            'service.token' = 'must-not-live-in-machine-json'
+        }) | Out-Null
+        (Test-ComposerRepository $private).errors.code | Should -Contain 'machine-sensitive-setting'
+    }
+
+    It 'routes an explicit machine path, preserves portable changes, and is idempotent' {
+        $fixture = New-ComposerFixture 'sync-route-explicit'
+        $mainSettingsPath = Join-Path $fixture 'components/main/settings.jsonc'
+        $mainSettings = ConvertFrom-JsonC ([System.IO.File]::ReadAllText($mainSettingsPath))
+        $mainSettings['fixture.machinePath'] = 'rg'
+        Write-TestFile $mainSettingsPath (ConvertTo-Json -InputObject $mainSettings -Depth 100)
+        New-MachineDefinition -RepositoryRoot $fixture -Id main-windows -Platform windows -Settings ([ordered]@{}) | Out-Null
+        $export = New-SyncExport -Path (Join-Path $TestDrive 'route-explicit.code-profile') -Settings ([ordered]@{
+            'fixture.portable' = [ordered]@{ enabled = $true; modes = @('one', 2) }
+            'fixture.machinePath' = 'C:\Users\person\bin\tool.exe'
+        })
+
+        $preview = Sync-ComposerProfileFromExport $fixture -SourceProfileExport $export -Platform windows -Machine main-windows -SkipGlobal -DryRun
+        $result = Sync-ComposerProfileFromExport $fixture -SourceProfileExport $export -Platform windows -Machine main-windows -SkipGlobal
+        $preview.changes.action | Should -Be $result.changes.action
+        $preview.changes.path | Should -Be $result.changes.path
+        $preview.routes.action | Should -Be $result.routes.action
+        $result.machine.id | Should -BeExactly 'main-windows'
+        $result.machine.selection | Should -BeExactly 'explicit-machine'
+        $result.counts.machineSettingsAdded | Should -Be 1
+        $result.routes[0].action | Should -BeExactly 'add'
+        $result.routes[0].portableOwner | Should -BeExactly 'components/main/settings.jsonc'
+        $machine = Read-MachineConfiguration (Join-Path $fixture 'machine/local/main-windows.jsonc') main-windows
+        $machine.Settings['fixture.machinePath'] | Should -BeExactly 'C:\Users\person\bin\tool.exe'
+        $replacement = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'profiles/python.settings.replace.jsonc')))
+        $replacement['fixture.portable'].enabled | Should -BeTrue
+        $replacement.Contains('fixture.machinePath') | Should -BeFalse
+        (Get-ChildItem (Join-Path $fixture 'profiles') -File | Select-String -Pattern 'C:\\Users\\person').Count | Should -Be 0
+
+        $again = Sync-ComposerProfileFromExport $fixture -SourceProfileExport $export -Platform windows -Machine main-windows -SkipGlobal
+        $again.counts.machineSettingsRetained | Should -Be 1
+        $again.changes.Count | Should -Be 0
+        $again.uiStateUpdated | Should -BeFalse
+    }
+
+    It 'updates a different machine value and reports earlier platform ownership without leaking values' {
+        $fixture = New-ComposerFixture 'sync-route-update'
+        New-MachineDefinition -RepositoryRoot $fixture -Id main-windows -Platform windows -Settings ([ordered]@{
+            'terminal.integrated.defaultProfile.windows' = 'C:\Old\pwsh.exe'
+            'fixture.unrelated' = $true
+        }) | Out-Null
+        $export = New-SyncExport -Path (Join-Path $TestDrive 'route-update.code-profile') -Settings ([ordered]@{
+            'terminal.integrated.defaultProfile.windows' = 'C:\New\pwsh.exe'
+        })
+
+        $result = Sync-ComposerProfileFromExport $fixture -SourceProfileExport $export -Platform windows -Machine main-windows -SkipGlobal -SkipUiState
+        $result.counts.machineSettingsUpdated | Should -Be 1
+        $result.routes[0].portableOwner | Should -BeExactly 'platform/windows.jsonc'
+        ($result.routes[0] | ConvertTo-Json -Depth 20) | Should -Not -Match 'C:\\Old|C:\\New'
+        (Read-MachineConfiguration (Join-Path $fixture 'machine/local/main-windows.jsonc') main-windows).Settings['terminal.integrated.defaultProfile.windows'] |
+            Should -BeExactly 'C:\New\pwsh.exe'
+        (Read-MachineConfiguration (Join-Path $fixture 'machine/local/main-windows.jsonc') main-windows).Settings['fixture.unrelated'] |
+            Should -BeTrue
+    }
+
+    It 'resolves explicit, local-default, and unique machines in order and rejects ambiguity or platform mismatch' {
+        $fixture = New-ComposerFixture 'sync-machine-resolution'
+        New-MachineDefinition -RepositoryRoot $fixture -Id first-windows -Platform windows -Settings ([ordered]@{ 'fixture.path' = 'C:\First\tool.exe' }) | Out-Null
+        New-MachineDefinition -RepositoryRoot $fixture -Id second-windows -Platform windows -Settings ([ordered]@{ 'fixture.path' = 'C:\Second\tool.exe' }) | Out-Null
+        Write-TestFile (Join-Path $fixture 'machine/local/.default-machine') 'first-windows'
+        $export = New-SyncExport -Path (Join-Path $TestDrive 'machine-resolution.code-profile') -Settings ([ordered]@{
+            'fixture.path' = 'C:\Tools\tool.exe'
+        })
+
+        $explicit = Sync-ComposerProfileFromExport $fixture -SourceProfileExport $export -Platform windows -Machine second-windows -SkipGlobal -SkipUiState -DryRun
+        $explicit.machine.id | Should -BeExactly 'second-windows'
+        $explicit.machine.selection | Should -BeExactly 'explicit-machine'
+        $defaulted = Sync-ComposerProfileFromExport $fixture -SourceProfileExport $export -Platform windows -SkipGlobal -SkipUiState -DryRun
+        $defaulted.machine.id | Should -BeExactly 'first-windows'
+        $defaulted.machine.selection | Should -BeExactly 'local-default'
+
+        Remove-Item -LiteralPath (Join-Path $fixture 'machine/local/.default-machine') -Force
+        { Sync-ComposerProfileFromExport $fixture -SourceProfileExport $export -Platform windows -SkipGlobal -SkipUiState -DryRun } |
+            Should -Throw '*Setting: fixture.path*sync-machine-local-path*Machine target is ambiguous*Recommended command*'
+        { Sync-ComposerProfileFromExport $fixture -SourceProfileExport $export -Platform windows -Machine missing -SkipGlobal -SkipUiState -DryRun } |
+            Should -Throw '*Selected machine*does not exist*Recommended command*'
+
+        $linux = New-ComposerFixture 'sync-machine-platform-mismatch'
+        New-MachineDefinition -RepositoryRoot $linux -Id linux-box -Platform linux -Settings ([ordered]@{}) | Out-Null
+        { Sync-ComposerProfileFromExport $linux -SourceProfileExport $export -Platform windows -Machine linux-box -SkipGlobal -SkipUiState -DryRun } |
+            Should -Throw "*targets platform 'linux'*"
+
+        $unique = New-ComposerFixture 'sync-machine-unique'
+        New-MachineDefinition -RepositoryRoot $unique -Id only-windows -Platform windows -Settings ([ordered]@{}) | Out-Null
+        $automatic = Sync-ComposerProfileFromExport $unique -SourceProfileExport $export -Platform windows -SkipGlobal -SkipUiState -DryRun
+        $automatic.machine.selection | Should -BeExactly 'unique-platform-match'
+    }
+
+    It 'fails sensitive values with redacted actionable diagnostics before any write' {
+        $fixture = New-ComposerFixture 'sync-sensitive-redaction'
+        New-MachineDefinition -RepositoryRoot $fixture -Id main-windows -Platform windows -Settings ([ordered]@{}) | Out-Null
+        $export = New-SyncExport -Path (Join-Path $TestDrive 'sensitive.code-profile') -Settings ([ordered]@{
+            'service.credentials' = [ordered]@{ token = 'do-not-print-this-token-value' }
+        })
+        $before = [System.IO.File]::ReadAllText((Join-Path $fixture 'machine/local/main-windows.jsonc'))
+        $message = $null
+        try {
+            Sync-ComposerProfileFromExport $fixture -SourceProfileExport $export -Platform windows -Machine main-windows -SkipGlobal -SkipUiState | Out-Null
+        }
+        catch { $message = $_.Exception.Message }
+        $message | Should -Match 'Sensitive or private setting|sync-sensitive-setting|excluded-private'
+        $message | Should -Not -Match 'do-not-print-this-token-value'
+        [System.IO.File]::ReadAllText((Join-Path $fixture 'machine/local/main-windows.jsonc')) | Should -BeExactly $before
+        Test-Path -LiteralPath (Join-Path $fixture 'profiles/python.settings.replace.jsonc') | Should -BeFalse
+    }
+
+    It 'rolls back profile and machine files when post-commit validation fails' {
+        $fixture = New-ComposerFixture 'sync-machine-rollback'
+        New-MachineDefinition -RepositoryRoot $fixture -Id main-windows -Platform windows -Settings ([ordered]@{
+            'fixture.path' = 'C:\Old\tool.exe'
+        }) | Out-Null
+        $machinePath = Join-Path $fixture 'machine/local/main-windows.jsonc'
+        $beforeMachine = [System.IO.File]::ReadAllText($machinePath)
+        $export = New-SyncExport -Path (Join-Path $TestDrive 'rollback.code-profile') -Settings ([ordered]@{
+            'fixture.portable' = $true
+            'fixture.path' = 'C:\New\tool.exe'
+        })
+
+        InModuleScope ProfileComposer -Parameters @{ FixtureRoot = $fixture; ExportPath = $export } {
+            param($FixtureRoot, $ExportPath)
+            $script:ValidationCall = 0
+            Mock Test-ComposerRepository {
+                $script:ValidationCall++
+                $errors = [System.Collections.Generic.List[object]]::new()
+                if ($script:ValidationCall -eq 3) {
+                    $errors.Add([pscustomobject]@{ code = 'forced'; message = 'forced post-commit failure' })
+                }
+                [pscustomobject]@{
+                    errors = $errors
+                    warnings = [System.Collections.Generic.List[object]]::new()
+                    information = [System.Collections.Generic.List[object]]::new()
+                }
+            }
+            { Sync-ComposerProfileFromExport $FixtureRoot -SourceProfileExport $ExportPath -Platform windows -Machine main-windows -SkipGlobal -SkipUiState } |
+                Should -Throw '*rolled back*'
+        }
+        [System.IO.File]::ReadAllText($machinePath) | Should -BeExactly $beforeMachine
+        Test-Path -LiteralPath (Join-Path $fixture 'profiles/python.settings.replace.jsonc') | Should -BeFalse
+    }
+
+    It 'warns when portable setting ownership is duplicated across components' {
+        $fixture = New-ComposerFixture 'duplicate-portable-setting-owner'
+        Write-TestFile (Join-Path $fixture 'components/main/settings.jsonc') '{"fixture.duplicate":true}'
+        Write-TestFile (Join-Path $fixture 'components/python/settings.jsonc') '{"fixture.duplicate":false}'
+        (Test-ComposerRepository $fixture).warnings.code | Should -Contain 'cross-component-setting-ownership'
+    }
+}
+
+Describe 'Forwarding function and alias compatibility' {
+    It 'preserves platform, machine, and quoted export arguments and matches direct planning' {
+        $fixture = New-ComposerFixture 'wrapper compatibility'
+        New-MachineDefinition -RepositoryRoot $fixture -Id main-windows -Platform windows -Settings ([ordered]@{}) | Out-Null
+        $exportDirectory = Join-Path $TestDrive 'profile exports with spaces'
+        $export = New-SyncExport -Path (Join-Path $exportDirectory 'Adjusted Python.code-profile') -Settings ([ordered]@{
+            'fixture.portable' = $true
+            'fixture.path' = 'C:\Tools\tool.exe'
+        })
+        $cli = Join-Path $script:RepositoryRoot 'scripts/ProfileComposer.ps1'
+        $wrapper = Join-Path $TestDrive 'invoke-vscomp-wrapper.ps1'
+        $escapedCli = $cli.Replace("'", "''")
+        Write-TestFile $wrapper @"
+function composer {
+    & '$escapedCli' @args
+}
+Set-Alias vscomp composer
+vscomp @args
+exit `$LASTEXITCODE
+"@
+        $arguments = @('sync', $export, '-RepositoryRoot', $fixture, '-Platform', 'windows', '-Machine', 'main-windows', '-SkipGlobal', '-SkipUiState', '-DryRun')
+        $direct = @(& pwsh -NoProfile -File $cli @arguments 2>&1)
+        $directExit = $LASTEXITCODE
+        $wrapped = @(& pwsh -NoProfile -File $wrapper @arguments 2>&1)
+        $wrappedExit = $LASTEXITCODE
+
+        $directExit | Should -Be 0
+        $wrappedExit | Should -Be 0
+        ($wrapped -join "`n") | Should -BeExactly ($direct -join "`n")
+        ($wrapped -join "`n") | Should -Match 'Selected machine: main-windows'
+        ($wrapped -join "`n") | Should -Not -Match 'portable-absolute-path'
+
+        $unknown = @(& pwsh -NoProfile -File $wrapper sync $export -NoSuchOption 2>&1)
+        $LASTEXITCODE | Should -Be 1
+        $unknown -join "`n" | Should -Match "Unknown option '-NoSuchOption'"
     }
 }
 

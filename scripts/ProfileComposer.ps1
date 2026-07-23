@@ -120,20 +120,22 @@ Examples:
         'sync' {
             @'
 sync [<profile>] <private-export> [-Platform <id>] [-VSCodeUserDataPath <path>]
-     [-SkipGlobal] [-SkipUiState] [-DryRun]
+     [-Machine <id> | -MachineFile <path>] [-SkipGlobal] [-SkipUiState] [-DryRun]
   Transactionally syncs settings, extensions, keybindings, and opaque UI layout
   from a manually exported .code-profile into recipe-specific source deltas.
   When <profile> is omitted, the export name must match exactly one recipe ID
   or display name. Application settings explicitly listed by
   workbench.settings.applyToAllProfiles are synced from the selected VS Code
-  User directory; Sync-ignored machine values are excluded.
+  User directory; Sync-ignored machine values are excluded. Safe absolute paths
+  are routed into the explicitly selected, locally defaulted, or uniquely
+  resolvable machine overlay before portable validation.
 
   Flattened live resources are never guessed back into shared components.
   Review -DryRun output and the Git diff before committing.
 
 Examples:
-  ProfileComposer.ps1 sync C:\Private\Python.code-profile -Platform windows -DryRun
-  ProfileComposer.ps1 sync python-database C:\Private\Adjusted.code-profile -Platform windows
+  ProfileComposer.ps1 sync C:\Private\Python.code-profile -Platform windows -Machine main-windows -DryRun
+  ProfileComposer.ps1 sync python-database C:\Private\Adjusted.code-profile -Platform windows -Machine main-windows
   ProfileComposer.ps1 sync python C:\Private\Python.code-profile -SkipGlobal -SkipUiState -DryRun
 '@ | Write-Host
         }
@@ -540,7 +542,14 @@ try {
             } elseif ($kind -eq 'machines') {
                 $machines = @(Get-MachineDefinitions $root)
                 if ($machines.Count -eq 0) { Write-Host 'No named machine overlays found under machine/local/.' }
-                else { Write-Host 'Named machine overlays:'; foreach ($item in $machines) { Write-Host "  $($item.Id): machine/local/$($item.Id).jsonc" } }
+                else {
+                    Write-Host 'Named machine overlays:'
+                    foreach ($item in $machines) {
+                        $platform = if ($item.Platform) { $item.Platform } else { 'platform unspecified' }
+                        $schema = if ($item.Legacy) { 'legacy settings map' } else { "schema $($item.SchemaVersion)" }
+                        Write-Host "  $($item.Id): $($item.Name) [$platform; $schema] machine/local/$($item.Id).jsonc"
+                    }
+                }
             } else { throw "Unknown list target '$kind'. Use 'profiles' or 'machines'." }
         }
         'capture-ui-state' {
@@ -567,10 +576,13 @@ try {
             Write-Host "$verb UI state for '$($result.profileId)' at $($result.outputPath). Only opaque globalState is retained."
         }
         'sync' {
-            $parsed = Read-CommandOptions $CommandArguments @('DryRun', 'SkipGlobal', 'SkipUiState') @('Platform', 'RepositoryRoot', 'VSCodeUserDataPath')
+            $parsed = Read-CommandOptions $CommandArguments @('DryRun', 'SkipGlobal', 'SkipUiState') @('Platform', 'Machine', 'MachineFile', 'RepositoryRoot', 'VSCodeUserDataPath')
             if ($parsed.Options.Help) { Write-CommandHelp sync; break }
             if ($parsed.Positionals.Count -lt 1 -or $parsed.Positionals.Count -gt 2) {
                 throw 'sync requires <profile-export> for automatic matching or <profile> <profile-export> explicitly.'
+            }
+            if ($parsed.Options.ContainsKey('machine') -and $parsed.Options.ContainsKey('machinefile')) {
+                throw '-Machine and -MachineFile cannot be used together.'
             }
             $root = Get-RepositoryRootFromOptions $parsed.Options
             $parameters = @{
@@ -581,7 +593,7 @@ try {
                 SkipUiState = [bool]$parsed.Options.skipuistate
             }
             if ($parsed.Positionals.Count -eq 2) { $parameters.Profile = $parsed.Positionals[0] }
-            foreach ($key in @('platform', 'vscodeuserdatapath')) {
+            foreach ($key in @('platform', 'machine', 'machinefile', 'vscodeuserdatapath')) {
                 if ($parsed.Options.ContainsKey($key)) { $parameters[$key] = $parsed.Options[$key] }
             }
             $result = Sync-ComposerProfileFromExport @parameters
@@ -592,6 +604,14 @@ try {
             Write-Host "  Keybindings: $($result.counts.keybindingAdditions) addition(s), $($result.counts.keybindingRemovals) removal(s), exact-order replacement=$($result.counts.keybindingsReplacedForOrder)"
             Write-Host "  Global: $($result.counts.globalSettings) tracked setting(s); $($result.counts.machineOwnedGlobalSettingsSkipped) Sync-ignored machine value(s) skipped"
             Write-Host "  Ownership filters: $($result.counts.exportGlobalSettingsIgnored) global/machine setting(s) and $($result.counts.platformSettingsIgnored) platform setting(s) excluded from recipe deltas"
+            Write-Host "  Machine routing: $($result.counts.machineSettingsAdded) addition(s), $($result.counts.machineSettingsUpdated) update(s), $($result.counts.machineSettingsRetained) retained"
+            if ($result.machine) {
+                Write-Host "  Selected machine: $($result.machine.id) [$($result.machine.selection)] -> $($result.machine.path)"
+            }
+            foreach ($route in $result.routes) {
+                $owner = if ($route.portableOwner) { "; earlier owner=$($route.portableOwner)" } else { '' }
+                Write-Host "    $($route.action.ToUpperInvariant()) $($route.setting) -> $($route.destination)$owner [$($route.ruleId)]"
+            }
             Write-Host "  UI state updated: $($result.uiStateUpdated)"
         }
         { $_ -in @('rename-profile', 'rename-component', 'rename') } {

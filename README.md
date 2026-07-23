@@ -61,13 +61,13 @@ After changing a test profile, export it through the Profiles editor and preview
 
 ```powershell
 # The export name matches the Python recipe automatically.
-pwsh ./scripts/ProfileComposer.ps1 sync "C:\private\Adjusted Python.code-profile" -Platform windows -DryRun
+pwsh ./scripts/ProfileComposer.ps1 sync "C:\private\Adjusted Python.code-profile" -Platform windows -Machine main-windows -DryRun
 
 # Apply only after reviewing the plan; inspect the Git diff afterward.
-pwsh ./scripts/ProfileComposer.ps1 sync "C:\private\Adjusted Python.code-profile" -Platform windows
+pwsh ./scripts/ProfileComposer.ps1 sync "C:\private\Adjusted Python.code-profile" -Platform windows -Machine main-windows
 ```
 
-`sync` updates recipe-specific settings, extension, and keybinding deltas plus the ignored opaque UI-state seed. It also reads the built-in Default/application `settings.json` and updates only values explicitly named by `workbench.settings.applyToAllProfiles`; Sync-ignored machine values are not copied into tracked settings. Supply the recipe ID before the export path when the exported name does not match exactly one recipe. Add `-SkipGlobal` or `-SkipUiState` to omit those resources.
+`sync` classifies settings before planning. Portable changes become recipe-specific deltas; safe absolute paths route to the selected ignored machine file; secret/private resources fail with redacted diagnostics. It also reads the built-in Default/application `settings.json` and updates only values explicitly named by `workbench.settings.applyToAllProfiles`; Sync-ignored machine values are not copied into tracked settings. Supply the recipe ID before the export path when the exported name does not match exactly one recipe. Add `-SkipGlobal` or `-SkipUiState` to omit those resources.
 
 Reuse that stored layout for the same profile or as the starting layout for another profile:
 
@@ -85,6 +85,8 @@ Named profile: Main shared base
 → optional recipe-specific settings removals, recursive overrides, and exact replacements
 → optional recipe-specific extension/keybinding operations
 → platform/<platform>.jsonc
+→ selected machine-local settings in built-in Default/application settings
+→ workspace settings owned by the active repository
 
 Built-in Default/application settings: global/settings.jsonc
 → optional explicitly selected machine-local settings file
@@ -136,7 +138,7 @@ Machine overlays are deliberately excluded from named-profile settings and `.cod
 
 `ProfileComposer.ps1 capture-ui-state [<profile-id>] <export-path>` validates a manually exported `.code-profile` and stores only its opaque `globalState` resource at `machine/local/ui-state/<profile>/seed.code-profile`. When the recipe ID is omitted, the CLI reads `code --status` and accepts exactly one active profile name matching a recipe ID or display name. Zero or multiple matches fail safely. The source settings, extensions, keybindings, name, and path are not copied. `-UiStateProfile <id>` reuses a stored seed during `compose` or `compose-all`; `-UiStateFromProfile <path>` remains available for a one-off build. This is copy-on-create, not inheritance: VS Code owns each profile's UI after import, later layout changes do not propagate, and views introduced by other extensions use their defaults. Stored and generated UI-seeded files are private because `globalState` can include extension or account-related state.
 
-`ProfileComposer.ps1 sync [<profile-id>] <export-path>` is the reviewed reverse path. It consumes the export's settings, extensions, keybindings, and `globalState`, but never guesses flattened changes back into shared components. Instead, it writes validated recipe sidecars under `profiles/`; exact setting values use `.settings.replace.jsonc`, removed component settings use `.settings.remove.jsonc`, and extension/keybinding add/remove operations use their corresponding `.jsonc` sidecars. A keybinding order change is preserved through an exact recipe replacement. The private UI resource remains ignored under `machine/local/ui-state/`.
+`ProfileComposer.ps1 sync [<profile-id>] <export-path>` is the reviewed reverse path. It consumes the export's settings, extensions, keybindings, and `globalState`, but never guesses flattened changes back into shared components. It classifies nested values first, routes safe machine paths into the resolved ignored machine definition, and writes remaining validated recipe sidecars under `profiles/`; exact setting values use `.settings.replace.jsonc`, removed component settings use `.settings.remove.jsonc`, and extension/keybinding add/remove operations use their corresponding `.jsonc` sidecars. A keybinding order change is preserved through an exact recipe replacement. The private UI resource remains ignored under `machine/local/ui-state/`.
 
 ## Guided VS Code profile management
 
@@ -179,6 +181,8 @@ pwsh ./scripts/ProfileComposer.ps1 compose main -Platform windows -Machine main-
 
 Replace placeholders locally, then select the filename without `.jsonc` using `-Machine`. `-MachineFile` remains available for an exceptional explicit path. The same command generates the portable named profile and the selected computer's `build/global/settings.json`; manually merge the latter into **Preferences: Open Application Settings (JSON)**. In particular, Todo Tree's confirmed working Windows ripgrep path is machine-specific; no portable `"rg"` override is present in Main.
 
+New machine files use the versioned identity envelope documented in [Schema and ownership contract](docs/SCHEMA.md). Legacy plain settings maps remain compatible. For sync-only automatic selection, store one ignored ID in `machine/local/.default-machine`; otherwise sync accepts exactly one platform-compatible local machine and fails rather than guessing among multiple targets.
+
 ## Tests
 
 Install Pester only if needed:
@@ -197,4 +201,4 @@ pwsh -NoProfile -Command "Invoke-Pester -Path ./tests -Output Detailed -CI"
 
 Unattended installation, replacement, deletion, and export remain deferred because VS Code 1.130 exposes no supported complete profile-management CLI. The guided commands may read profile names/location IDs and `code --status`, and `vscode open` may launch an existing profile; they never write profile storage, invoke import/export automatically, install extensions, or alter Settings Sync. `sync` requires a manually exported private `.code-profile` and reads application settings only for explicit global ownership reconciliation. Settings Sync remains the primary cross-machine delivery mechanism for imported active profiles.
 
-See [Complete usage guide](docs/USAGE.md), [Composer details](docs/COMPOSER.md), [Architecture](docs/ARCHITECTURE.md), [Main-profile ownership audit](docs/audits/2026-07-22-main-profile-ownership.md), [Portability](docs/PORTABILITY.md), [Migration](docs/MIGRATION.md), and the sanitized [historical extension reference](reference/extensions/README.md).
+See [Complete usage guide](docs/USAGE.md), [Composer details](docs/COMPOSER.md), [Architecture](docs/ARCHITECTURE.md), [Schema and ownership contract](docs/SCHEMA.md), [Sync routing and schema-model audit](docs/audits/2026-07-23-sync-schema-model.md), [Main-profile ownership audit](docs/audits/2026-07-22-main-profile-ownership.md), [Portability](docs/PORTABILITY.md), [Migration](docs/MIGRATION.md), and the sanitized [historical extension reference](reference/extensions/README.md).

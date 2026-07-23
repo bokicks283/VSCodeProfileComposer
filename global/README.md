@@ -6,7 +6,7 @@ If validation reports duplicate IDs or values missing from that ownership array,
 
 Run `pwsh ./scripts/ProfileComposer.ps1 compose-global` to generate `build/global/settings.json` for review and manual application to VS Code's built-in Default profile. These settings are deliberately absent from generated named-profile settings because VS Code ignores those copies.
 
-After changing an application-owned value in VS Code, a reviewed `ProfileComposer.ps1 sync <export>` transaction reads the built-in Default `settings.json` and refreshes only keys explicitly listed by its live `workbench.settings.applyToAllProfiles`. Keys ignored by Settings Sync are treated as machine-owned and their values are excluded. Preview with `-DryRun` and inspect the Git diff.
+After changing an application-owned value in VS Code, a reviewed `ProfileComposer.ps1 sync <export>` transaction reads the built-in Default `settings.json` and refreshes only keys explicitly listed by its live `workbench.settings.applyToAllProfiles`. Keys ignored by Settings Sync are excluded from tracked global values. Safe path-bearing values present in the exported named profile are routed separately to the selected ignored machine definition; secret/private resources fail closed. Preview with `-DryRun` and inspect the Git diff.
 
 Do not put machine paths, secrets, workspace policy, or profile-specific settings here.
 

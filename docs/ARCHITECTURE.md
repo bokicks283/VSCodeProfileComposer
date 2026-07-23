@@ -13,6 +13,8 @@ Named profile: recipe components in declared order
 → optional recipe settings removals and recursive/exact overrides
 → optional recipe extension and keybinding operations
 → platform settings
+→ machine-local application settings
+→ workspace settings
 
 Built-in Default/application settings: global settings
 → explicitly selected machine-local settings
@@ -78,7 +80,7 @@ Committed Windows and Linux files contain reusable OS preferences. Windows prefe
 
 ## Machine-local overlays
 
-Ignored `machine/local/<machine-id>.jsonc` files contain absolute executable paths, SDK roots, compiler paths, credentials, database connections, module paths, remoting endpoints, and device tuning. `ProfileComposer.ps1 list-machines` shows locally available IDs; `-Machine <machine-id>` selects one for `validate`, `compose-global`, `compose`, or `compose-all`. Machine settings are composed into `build/global/settings.json`, automatically applied to all profiles, and automatically excluded from Settings Sync. They never enter a named profile or `.code-profile` export.
+Ignored `machine/local/<machine-id>.jsonc` files contain absolute executable paths, SDK roots, compiler paths, module paths, and device tuning. Credential-bearing, saved-connection, private-host, certificate, account, and authentication resources are excluded rather than treated as ordinary machine settings. New files use a versioned envelope with stable ID, display name, platform, and optional hostname metadata; legacy plain settings maps remain compatible. `ProfileComposer.ps1 list-machines` shows locally available IDs; `-Machine <machine-id>` selects one for validating, composing, or syncing commands. Machine settings are composed into `build/global/settings.json`, automatically applied to all profiles, and automatically excluded from Settings Sync. They never enter a named profile or `.code-profile` export.
 
 ## Workspace settings
 
@@ -88,7 +90,7 @@ Repositories own generated-folder exclusions, include paths, compile commands, t
 
 `scripts/ProfileComposer.ps1` is the unified command surface. It materializes reviewable artifacts under ignored `build/global/` and `build/profiles/`, lists repository definitions, captures an opaque UI-state seed, synchronizes reviewed exports into recipe deltas, performs safe source-ID/default-ownership transactions, and exposes guarded `vscode` guidance. All documented workflows use its subcommands. `Compose-Profile.ps1` and `Save-ProfileUiState.ps1` remain compatibility wrappers for existing automation only.
 
-When explicitly requested with `-ExportCodeProfile`, composition creates a manual-import `.code-profile` containing composed settings, extension identifiers, and keybindings. UI-state capture may retain one opaque `globalState` snapshot per recipe under ignored `machine/local/ui-state/`; `-UiStateProfile` reuses a stored snapshot and `-UiStateFromProfile` supports a one-off source. When the capture recipe is omitted, only `code --status` is read to resolve one exact recipe match. `sync` instead consumes a manually exported private profile, writes flattened differences only to recipe-specific sidecars, and optionally reconciles application-owned values from the built-in Default `settings.json`. It never assigns a live difference to a shared component because exports contain no source provenance. Sync-ignored machine values are excluded, and the entire repository update is staged, validated, and rollback-safe.
+When explicitly requested with `-ExportCodeProfile`, composition creates a manual-import `.code-profile` containing composed settings, extension identifiers, and keybindings. UI-state capture may retain one opaque `globalState` snapshot per recipe under ignored `machine/local/ui-state/`; `-UiStateProfile` reuses a stored snapshot and `-UiStateFromProfile` supports a one-off source. When the capture recipe is omitted, only `code --status` is read to resolve one exact recipe match. `sync` instead consumes a manually exported private profile, recursively classifies settings, routes safe machine paths before validation, writes flattened portable differences only to recipe-specific sidecars, and optionally reconciles application-owned values from the built-in Default `settings.json`. It never assigns a live difference to a shared component because exports contain no source provenance. Secret/private resources fail closed, and the entire repository update is staged, validated, and rollback-safe.
 
 Separately, `vscode list` reads names and opaque profile location IDs from VS Code's version-sensitive profile metadata, and `vscode open` invokes the supported launcher. Ordinary composition still reads no live state. No command interprets UI payloads, maintains UI inheritance, writes the private profile registry, imports/exports/deletes profiles automatically, installs extensions, or controls Settings Sync. Source components, global settings, configuration, recipes, and reviewed recipe sidecars remain canonical.
 
