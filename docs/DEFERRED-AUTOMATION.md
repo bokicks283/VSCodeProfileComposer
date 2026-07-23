@@ -25,7 +25,7 @@
 - `ProfileComposer.ps1 capture-ui-state [<profile-id>] <export-path>` can extract and retain only the opaque UI resource from a manually exported profile under ignored local data. Automatic recipe selection reads status text only and fails closed. `-UiStateProfile` reuses that copy-on-create starting point during composition. Direct live capture, layout parsing or merging, and continuing inheritance remain deferred.
 - `ProfileComposer.ps1 sync [<profile-id>] <export-path>` is the reviewed reverse path for the repository-owned resources in that export. Flattened differences remain recipe-specific unless a human deliberately promotes them into a shared component.
 - Stable profiles may be exported and stored privately.
-- Default is the shared base and already provides everyday shell-language support to every profile.
+- Main is the shared base and already provides everyday shell-language support to every profile.
 - PowerShell Development is an optional advanced profile, not a sixth required daily profile.
 - Database support is opt-in through explicit Database, SQL Server, MongoDB, Web + Database, or Python + Database recipes.
 - Database connection details remain local or employer-managed and are not materialized by this repository.
@@ -45,7 +45,7 @@ Automatic profile installation remains deferred until a supported VS Code CLI wo
 
 ## Remaining validation gate
 
-Before treating generated profiles as production defaults, manually validate Default, C++, Unreal, Web, and Python in representative workspaces and review VS Code's import preview.
+Before treating generated profiles as production defaults, manually validate Main, C++, Unreal, Web, and Python in representative workspaces and review VS Code's import preview.
 
 Validate Database, SQL Server, and MongoDB separately in disposable or non-sensitive environments before relying on them.
 

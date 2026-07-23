@@ -2,22 +2,22 @@
 
 ## Immediate core profiles
 
-1. Default
+1. Main
 2. C++
 3. Unreal Engine
 4. Web
 5. Python
 
-Default is the shared foundation for every profile and already handles everyday PowerShell, Bash/Zsh shell scripts, Windows batch files, and the user's cross-profile extensions. It intentionally excludes database tooling.
+Main is the shared foundation for every profile and already handles everyday PowerShell, Bash/Zsh shell scripts, Windows batch files, and the user's cross-profile extensions. It intentionally excludes database tooling.
 
 ## Available opt-in profiles
 
-- PowerShell Development = Default + PowerShell
-- Database = Default + Database
-- Web + Database = Default + Web + Database
-- Python + Database = Default + Python + Database
-- SQL Server = Default + Database + SQL Server
-- MongoDB = Default + Database + MongoDB
+- PowerShell Development = Main + PowerShell
+- Database = Main + Database
+- Web + Database = Main + Web + Database
+- Python + Database = Main + Python + Database
+- SQL Server = Main + Database + SQL Server
+- MongoDB = Main + Database + MongoDB
 
 Use PowerShell Development for module authoring, Command Explorer, dedicated Pester/PSScriptAnalyzer workflows, advanced debugging, administration tooling, or publishing—not for ordinary script editing.
 
@@ -25,9 +25,9 @@ Use database profiles only when database editing, querying, schema work, migrati
 
 ## Near-term compositions
 
-- Flask + Database = Default + Python + Web + future Flask + Database
-- PHP + Database = Default + future PHP + Web + Database
-- Python + PostgreSQL = Default + Python + Database + future PostgreSQL
+- Flask + Database = Main + Python + Web + future Flask + Database
+- PHP + Database = Main + future PHP + Web + Database
+- Python + PostgreSQL = Main + Python + Database + future PostgreSQL
 
 These remain planning examples until their missing components contain reviewed configuration.
 
@@ -35,7 +35,7 @@ These remain planning examples until their missing components contain reviewed c
 
 ```text
 Backend Work
-= Default
+= Main
 + Python
 + Flask
 + Database
@@ -45,7 +45,7 @@ Backend Work
 
 ```text
 Enterprise Work
-= Default
+= Main
 + C#
 + Web
 + Database
@@ -53,7 +53,7 @@ Enterprise Work
 + Azure
 ```
 
-These are composition examples only. Employer-specific settings, connections, accounts, and tools must not be added to personal Default.
+These are composition examples only. Employer-specific settings, connections, accounts, and tools must not be added to personal Main.
 
 ## Later profiles and components
 
@@ -75,7 +75,7 @@ No empty vendor component is created without real reviewed content.
 
 ## Unresolved questions
 
-- Which measurement-pending global extensions earn shared Default placement?
+- Which measurement-pending global extensions earn shared Main placement?
 - Does the Microsoft PowerShell extension create a meaningful measured shared-profile cost in representative workspaces?
 - Should ESLint and Tailwind split from Web after MVP validation?
 - Which Python formatter/linter stack should own save formatting?
@@ -91,8 +91,8 @@ No empty vendor component is created without real reviewed content.
 
 Import each generated `.code-profile` into a new, clearly named test profile and review the selected resources before creating it. Do not replace the active Default profile during initial validation.
 
-1. Default in a small mixed repository, including common shell files.
-2. Default cold-start measurements.
+1. Main in a small mixed repository, including common shell files.
+2. Main cold-start measurements.
 3. C++ in a normal native C++ repository.
 4. Unreal in the primary Unreal workspace.
 5. Web in a current Vite/React or Docusaurus repository.

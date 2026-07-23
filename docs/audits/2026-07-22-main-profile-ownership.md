@@ -51,7 +51,7 @@ enter portable or tracked sources.
 - `cSpell.autocorrect` was an unowned, portable, clearly cross-profile general
   preference. The shared component already owns the Code Spell Checker
   extension, so this audit added the setting to
-  `components/default/settings.jsonc`;
+  `components/main/settings.jsonc`;
 - `todo-tree.ripgrep.ripgrep` is the machine-path exception described above.
 
 No other unowned setting was moved. There were no ambiguous unowned values

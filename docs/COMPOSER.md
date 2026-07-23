@@ -14,10 +14,10 @@ pwsh ./scripts/ProfileComposer.ps1 validate
 pwsh ./scripts/ProfileComposer.ps1 compose-global
 pwsh ./scripts/ProfileComposer.ps1 list-profiles
 pwsh ./scripts/ProfileComposer.ps1 list-machines
-pwsh ./scripts/ProfileComposer.ps1 compose default
+pwsh ./scripts/ProfileComposer.ps1 compose main
 pwsh ./scripts/ProfileComposer.ps1 compose unreal -Platform windows -Machine windows
 pwsh ./scripts/ProfileComposer.ps1 compose-all -Platform windows -ExportCodeProfile
-pwsh ./scripts/ProfileComposer.ps1 capture-ui-state default "C:\private\Adjusted Default.code-profile"
+pwsh ./scripts/ProfileComposer.ps1 capture-ui-state main "C:\private\Adjusted Main.code-profile"
 pwsh ./scripts/ProfileComposer.ps1 sync "C:\private\Adjusted Python.code-profile" -Platform windows -DryRun
 pwsh ./scripts/ProfileComposer.ps1 vscode list
 pwsh ./scripts/ProfileComposer.ps1 vscode import python-database -Platform windows -DryRun
@@ -25,7 +25,7 @@ pwsh ./scripts/ProfileComposer.ps1 vscode replace python-database -LiveProfile "
 pwsh ./scripts/ProfileComposer.ps1 rename-profile old new -DryRun
 pwsh ./scripts/ProfileComposer.ps1 rename-component old new -DryRun
 pwsh ./scripts/ProfileComposer.ps1 default show
-pwsh ./scripts/ProfileComposer.ps1 default set default -DryRun
+pwsh ./scripts/ProfileComposer.ps1 default set main -DryRun
 ```
 
 Use `-Strict` when warnings, including duplicate extension declarations, should fail the command. Ordinary composition fails only on errors.
@@ -69,7 +69,7 @@ The recipe parser accepts the repository's narrow schema:
 ```yaml
 name: Unreal Engine
 components:
-  - default
+  - main
   - cpp
   - unreal
 ```
@@ -109,7 +109,7 @@ The optional export follows VS Code's `IUserDataProfileTemplate` JSON representa
 - `extensions`: an array of `{ "identifier": { "id": "publisher.extension" } }`; versions and local installation state are not embedded
 - `keybindings`: `{ "keybindings": "<generated keybindings.json text>", "platform": <number> }`
 
-`components/default/keybindings.jsonc` supplies the portable shared bindings inherited by every recipe. Focused commands are kept with their owning component, such as the SQL Server binding in `components/sql-server/keybindings.jsonc`. The composer does not infer or read the user's live keybindings during composition.
+`components/main/keybindings.jsonc` supplies the portable shared bindings inherited by every recipe. Focused commands are kept with their owning component, such as the SQL Server binding in `components/sql-server/keybindings.jsonc`. The composer does not infer or read the user's live keybindings during composition.
 
 The format has no identifiable schema version, so the manifest records `schemaVersion: "unversioned"` plus the VS Code version and commit used for verification. On import, VS Code reviews the resources and resolves/installs extension identifiers through its normal profile-import workflow.
 
@@ -118,7 +118,7 @@ The export has no `globalState` resource by default. Accidental component-level 
 For an explicit one-time starting layout, pass a private VS Code export:
 
 ```powershell
-pwsh ./scripts/ProfileComposer.ps1 compose-all -Platform windows -ExportCodeProfile -UiStateFromProfile "C:\private\Composer Default Layout.code-profile"
+pwsh ./scripts/ProfileComposer.ps1 compose-all -Platform windows -ExportCodeProfile -UiStateFromProfile "C:\private\Composer Main Layout.code-profile"
 ```
 
 The composer validates the source wrapper and passes only its opaque `globalState` string through unchanged. It does not copy source settings, extensions, keybindings, name, or path, and it does not interpret or merge the UI payload. The manifest records the payload hash and `seed-on-import-then-managed-by-vscode`. Generated profiles receive the same starting snapshot, after which VS Code owns each live layout independently.
@@ -126,8 +126,8 @@ The composer validates the source wrapper and passes only its opaque `globalStat
 For repeatable local use, capture the opaque resource under an ignored profile ID and reuse it:
 
 ```powershell
-pwsh ./scripts/ProfileComposer.ps1 capture-ui-state default "C:\private\Adjusted Default.code-profile"
-pwsh ./scripts/ProfileComposer.ps1 compose python-database -Platform windows -ExportCodeProfile -UiStateProfile default
+pwsh ./scripts/ProfileComposer.ps1 capture-ui-state main "C:\private\Adjusted Main.code-profile"
+pwsh ./scripts/ProfileComposer.ps1 compose python-database -Platform windows -ExportCodeProfile -UiStateProfile main
 ```
 
 The stored file contains only a generic name and `globalState`; its original path and other export resources are discarded. `-UiStateProfile` may seed the same recipe or a different target recipe. Stored UI data is local and private, not canonical component input.

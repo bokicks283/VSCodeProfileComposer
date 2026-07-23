@@ -26,7 +26,7 @@ pwsh ./scripts/ProfileComposer.ps1 validate
 pwsh ./scripts/ProfileComposer.ps1 fix global -DryRun
 
 # Compose one profile.
-pwsh ./scripts/ProfileComposer.ps1 compose default -Platform windows
+pwsh ./scripts/ProfileComposer.ps1 compose main -Platform windows
 
 # List and select private machine-local overlays by ID.
 pwsh ./scripts/ProfileComposer.ps1 list-machines
@@ -39,17 +39,17 @@ pwsh ./scripts/ProfileComposer.ps1 compose-global
 pwsh ./scripts/ProfileComposer.ps1 compose-all -Platform windows
 
 # Compose and create a file for manual import through VS Code Profiles.
-pwsh ./scripts/ProfileComposer.ps1 compose default -Platform windows -ExportCodeProfile
+pwsh ./scripts/ProfileComposer.ps1 compose main -Platform windows -ExportCodeProfile
 
 # Inspect inputs and planned output without writing build files.
-pwsh ./scripts/ProfileComposer.ps1 compose default -Platform windows -ExportCodeProfile -DryRun
+pwsh ./scripts/ProfileComposer.ps1 compose main -Platform windows -ExportCodeProfile -DryRun
 ```
 
 After arranging a profile in VS Code and exporting it manually, store only its UI state under ignored local project data:
 
 ```powershell
 # Explicit recipe ID.
-pwsh ./scripts/ProfileComposer.ps1 capture-ui-state default "C:\private\Adjusted Default.code-profile"
+pwsh ./scripts/ProfileComposer.ps1 capture-ui-state main "C:\private\Adjusted Main.code-profile"
 
 # Or omit the recipe when exactly one active VS Code profile name matches a recipe.
 pwsh ./scripts/ProfileComposer.ps1 capture-ui-state "C:\private\Adjusted Python.code-profile"
@@ -72,7 +72,7 @@ pwsh ./scripts/ProfileComposer.ps1 sync "C:\private\Adjusted Python.code-profile
 Reuse that stored layout for the same profile or as the starting layout for another profile:
 
 ```powershell
-pwsh ./scripts/ProfileComposer.ps1 compose python-database -Platform windows -Machine excalibur117-w -ExportCodeProfile -UiStateProfile default
+pwsh ./scripts/ProfileComposer.ps1 compose python-database -Platform windows -Machine excalibur117-w -ExportCodeProfile -UiStateProfile main
 ```
 
 Warnings are informational by default. Add `-Strict` to make warnings fail validation or composition.
@@ -80,7 +80,7 @@ Warnings are informational by default. Add `-Strict` to make warnings fail valid
 ## Repository model
 
 ```text
-Named profile: Default shared base
+Named profile: Main shared base
 → additional recipe components in declared order
 → optional recipe-specific settings removals, recursive overrides, and exact replacements
 → optional recipe-specific extension/keybinding operations
@@ -94,7 +94,7 @@ Later layers win. Settings objects merge recursively, while scalar values, array
 
 Workspace settings are not materialized into personal profiles. `workspace-examples/` remains project guidance only.
 
-`composer.jsonc` declares the shared default component. It starts as `default`, which remains first in every recipe, so its portable settings and extensions are present in every generated profile. Use `default show` or `default set <component> -DryRun`; setting ownership normalizes every recipe without duplicates while preserving the remaining order.
+`composer.jsonc` declares the shared default component. It currently uses `main`, which remains first in every recipe, so its portable settings and extensions are present in every generated profile. Use `default show` or `default set <component> -DryRun`; setting ownership normalizes every recipe without duplicates while preserving the remaining order.
 
 Repository IDs can be maintained without hand-editing references:
 
@@ -130,7 +130,7 @@ Repository validation checks recipes, JSONC/YAML structure, extension IDs and du
 
 ## VS Code profile export
 
-Add `-ExportCodeProfile` to `compose <profile-id>` or `compose-all`. For example, Default writes `build/profiles/default/Default.code-profile`; Unreal writes `build/profiles/unreal/Unreal-Engine.code-profile`. The export contains the fully composed settings, recipe-owned extension identifiers, and generated keybindings. VS Code handles extension acquisition during its normal import workflow—composition never installs extensions.
+Add `-ExportCodeProfile` to `compose <profile-id>` or `compose-all`. For example, Main writes `build/profiles/main/Main.code-profile`; Unreal writes `build/profiles/unreal/Unreal-Engine.code-profile`. The export contains the fully composed settings, recipe-owned extension identifiers, and generated keybindings. VS Code handles extension acquisition during its normal import workflow—composition never installs extensions.
 
 Machine overlays are deliberately excluded from named-profile settings and `.code-profile` exports. Selecting `-Machine` or `-MachineFile` instead adds those keys to `build/global/settings.json`, `workbench.settings.applyToAllProfiles`, and `settingsSync.ignoredSettings`. This makes the values effective on the selected computer without sending its paths through Settings Sync. Exports remain portable unless `-UiStateFromProfile` adds a private UI snapshot.
 
@@ -165,7 +165,7 @@ File → Preferences → Profiles
 
 By default, UI placement is not included. When an explicit UI seed is supplied, the composer passes the snapshot through without interpreting or merging it. After import, VS Code owns and syncs the resulting live UI state. Review every import preview: re-importing may create a profile or replace selected profile resources according to VS Code's current import workflow.
 
-Portable custom keybindings are canonical component inputs. `components/default/keybindings.jsonc` supplies the editor, notebook, panel, Markdown, and spelling shortcuts inherited by every recipe, including `Ctrl+Shift+S` for cSpell suggestions; focused extension commands such as SQL Server's IntelliSense-cache rebuild shortcut stay in their owning component. A reviewed sync can add, remove, or exactly order recipe-specific bindings without changing those shared sources.
+Portable custom keybindings are canonical component inputs. `components/main/keybindings.jsonc` supplies the editor, notebook, panel, Markdown, and spelling shortcuts inherited by every recipe, including `Ctrl+Shift+S` for cSpell suggestions; focused extension commands such as SQL Server's IntelliSense-cache rebuild shortcut stay in their owning component. A reviewed sync can add, remove, or exactly order recipe-specific bindings without changing those shared sources.
 
 ## Machine-local setup
 
@@ -174,10 +174,10 @@ Create one ignored file per computer. Its filename is the machine ID:
 ```powershell
 Copy-Item ./machine/windows.example.jsonc ./machine/local/main-windows.jsonc
 pwsh ./scripts/ProfileComposer.ps1 list-machines
-pwsh ./scripts/ProfileComposer.ps1 compose default -Platform windows -Machine main-windows
+pwsh ./scripts/ProfileComposer.ps1 compose main -Platform windows -Machine main-windows
 ```
 
-Replace placeholders locally, then select the filename without `.jsonc` using `-Machine`. `-MachineFile` remains available for an exceptional explicit path. The same command generates the portable named profile and the selected computer's `build/global/settings.json`; manually merge the latter into **Preferences: Open Application Settings (JSON)**. In particular, Todo Tree's confirmed working Windows ripgrep path is machine-specific; no portable `"rg"` override is present in Default.
+Replace placeholders locally, then select the filename without `.jsonc` using `-Machine`. `-MachineFile` remains available for an exceptional explicit path. The same command generates the portable named profile and the selected computer's `build/global/settings.json`; manually merge the latter into **Preferences: Open Application Settings (JSON)**. In particular, Todo Tree's confirmed working Windows ripgrep path is machine-specific; no portable `"rg"` override is present in Main.
 
 ## Tests
 

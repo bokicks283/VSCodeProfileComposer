@@ -45,19 +45,19 @@ The composer uses built-in PowerShell and .NET functionality. It does not requir
 
 | Profile ID | Display name | Components |
 | --- | --- | --- |
-| `default` | Default | Default |
-| `cpp` | C++ | Default + C++ |
-| `unreal` | Unreal Engine | Default + C++ + Unreal |
-| `web` | Web | Default + Web |
-| `python` | Python | Default + Python |
-| `powershell` | PowerShell Development | Default + PowerShell |
-| `database` | Database | Default + Database |
-| `web-database` | Web + Database | Default + Web + Database |
-| `python-database` | Python + Database | Default + Python + Database |
-| `sql-server` | SQL Server | Default + Database + SQL Server |
-| `mongodb` | MongoDB | Default + Database + MongoDB |
+| `main` | Main | Main |
+| `cpp` | C++ | Main + C++ |
+| `unreal` | Unreal Engine | Main + C++ + Unreal |
+| `web` | Web | Main + Web |
+| `python` | Python | Main + Python |
+| `powershell` | PowerShell Development | Main + PowerShell |
+| `database` | Database | Main + Database |
+| `web-database` | Web + Database | Main + Web + Database |
+| `python-database` | Python + Database | Main + Python + Database |
+| `sql-server` | SQL Server | Main + Database + SQL Server |
+| `mongodb` | MongoDB | Main + Database + MongoDB |
 
-Default is the general daily profile and the shared base for every focused profile. Its 34 extensions are therefore present in all current compositions. PowerShell Development is for advanced module, testing, analysis, debugging, publishing, or administration work. Database profiles are opt-in so database clients and connection explorers do not become part of Default.
+Main is the general daily profile and the shared base for every focused profile. Its 34 extensions are therefore present in all current compositions. PowerShell Development is for advanced module, testing, analysis, debugging, publishing, or administration work. Database profiles are opt-in so database clients and connection explorers do not become part of Main.
 
 You can also list the recipe IDs directly:
 
@@ -83,30 +83,30 @@ Run all commands from the repository root.
 
    Substitute your local machine ID, or omit `-Machine` if the computer has no private overlay. Review `build/global/settings.json`. In VS Code, run **Preferences: Open Application Settings (JSON)** and merge these values into that file. Do not replace unrelated existing settings.
 
-3. Preview the named Default build for Windows:
+3. Preview the named Main build for Windows:
 
    ```powershell
-   pwsh ./scripts/ProfileComposer.ps1 compose default -Platform windows -DryRun
+   pwsh ./scripts/ProfileComposer.ps1 compose main -Platform windows -DryRun
    ```
 
-4. Compose Default:
+4. Compose Main:
 
    ```powershell
-   pwsh ./scripts/ProfileComposer.ps1 compose default -Platform windows
+   pwsh ./scripts/ProfileComposer.ps1 compose main -Platform windows
    ```
 
-5. Inspect `build/profiles/default/`. This step does not affect VS Code.
+5. Inspect `build/profiles/main/`. This step does not affect VS Code.
 
 6. When you want a manually importable file, compose again with export enabled:
 
    ```powershell
-   pwsh ./scripts/ProfileComposer.ps1 compose default -Platform windows -ExportCodeProfile
+   pwsh ./scripts/ProfileComposer.ps1 compose main -Platform windows -ExportCodeProfile
    ```
 
-7. Import `build/profiles/default/Default.code-profile` into a new, clearly named VS Code profile. Review the import form before selecting **Create**. The guided equivalent is:
+7. Import `build/profiles/main/Main.code-profile` into a new, clearly named VS Code profile. Review the import form before selecting **Create**. The guided equivalent is:
 
    ```powershell
-   pwsh ./scripts/ProfileComposer.ps1 vscode import default -Platform windows
+   pwsh ./scripts/ProfileComposer.ps1 vscode import main -Platform windows
    ```
 
 ## Command reference
@@ -211,7 +211,7 @@ pwsh ./scripts/ProfileComposer.ps1 compose-all -Platform windows -ExportCodeProf
 Seed every generated export from a layout you already arranged and manually exported from VS Code:
 
 ```powershell
-pwsh ./scripts/ProfileComposer.ps1 compose-all -Platform windows -ExportCodeProfile -UiStateFromProfile "C:\private\Composer Default Layout.code-profile"
+pwsh ./scripts/ProfileComposer.ps1 compose-all -Platform windows -ExportCodeProfile -UiStateFromProfile "C:\private\Composer Main Layout.code-profile"
 ```
 
 `-UiStateFromProfile` requires `-ExportCodeProfile`. It never exports from or modifies the running VS Code instance.
@@ -219,7 +219,7 @@ pwsh ./scripts/ProfileComposer.ps1 compose-all -Platform windows -ExportCodeProf
 Store a manually exported layout for later reuse:
 
 ```powershell
-pwsh ./scripts/ProfileComposer.ps1 capture-ui-state default "C:\private\Adjusted Default.code-profile"
+pwsh ./scripts/ProfileComposer.ps1 capture-ui-state main "C:\private\Adjusted Main.code-profile"
 ```
 
 When exactly one active VS Code window has a profile name matching a repository recipe ID or display name, omit the recipe ID:
@@ -228,14 +228,14 @@ When exactly one active VS Code window has a profile name matching a repository 
 pwsh ./scripts/ProfileComposer.ps1 capture-ui-state "C:\private\Adjusted Python.code-profile"
 ```
 
-The command reads only `code --status` for this selection. It deduplicates the ID/name match for one recipe, but refuses zero matches, duplicate recipe display names, or different matching recipes across active windows. Supply the explicit recipe ID in those cases. The built-in Default profile usually has no name marker in status output, so explicit `default` is the reliable form.
+The command reads only `code --status` for this selection. It deduplicates the ID/name match for one recipe, but refuses zero matches, duplicate recipe display names, or different matching recipes across active windows. Supply the explicit recipe ID in those cases. The named Main profile normally matches automatically; use explicit `main` when status discovery is unavailable or ambiguous.
 
-The stored seed is `machine/local/ui-state/default/seed.code-profile`, which is ignored by Git. It contains only the export's opaque `globalState` resource and a generic local name. Preview capture without replacing a prior seed by adding `-DryRun`.
+The stored seed is `machine/local/ui-state/main/seed.code-profile`, which is ignored by Git. It contains only the export's opaque `globalState` resource and a generic local name. Preview capture without replacing a prior seed by adding `-DryRun`.
 
-Use the stored Default layout to create the urgent Python + Database profile:
+Use the stored Main layout to create the urgent Python + Database profile:
 
 ```powershell
-pwsh ./scripts/ProfileComposer.ps1 compose python-database -Platform windows -Machine excalibur117-w -ExportCodeProfile -UiStateProfile default
+pwsh ./scripts/ProfileComposer.ps1 compose python-database -Platform windows -Machine excalibur117-w -ExportCodeProfile -UiStateProfile main
 ```
 
 `-UiStateProfile` can name any recipe with a stored seed and can seed a different target recipe. To update a layout, arrange that live profile, export it manually again, rerun `capture-ui-state` for its recipe ID, and rebuild. `-UiStateProfile` and `-UiStateFromProfile` are mutually exclusive.
@@ -244,7 +244,7 @@ pwsh ./scripts/ProfileComposer.ps1 compose python-database -Platform windows -Ma
 
 ```powershell
 pwsh ./scripts/ProfileComposer.ps1 validate -Strict
-pwsh ./scripts/ProfileComposer.ps1 compose default -Platform windows -Strict
+pwsh ./scripts/ProfileComposer.ps1 compose main -Platform windows -Strict
 ```
 
 Strict mode is useful before committing source changes. Ordinary composition still reports warnings but fails only on errors.
@@ -255,7 +255,7 @@ Strict mode is useful before committing source changes. Ordinary composition sti
 
 ```powershell
 pwsh ./scripts/ProfileComposer.ps1 default show
-pwsh ./scripts/ProfileComposer.ps1 default set default -DryRun
+pwsh ./scripts/ProfileComposer.ps1 default set main -DryRun
 ```
 
 Setting a new shared default requires an existing component. The command places
@@ -371,17 +371,17 @@ Every meaningful settings replacement is recorded in `overrides.json` with its o
 
 ## Generated output
 
-For Default with export enabled, the generated directory is:
+For Main with export enabled, the generated directory is:
 
 ```text
-build/profiles/default/
+build/profiles/main/
 ├─ settings.json
 ├─ extensions.txt
 ├─ keybindings.json
 ├─ manifest.json
 ├─ overrides.json
 ├─ validation.json
-└─ Default.code-profile
+└─ Main.code-profile
 ```
 
 The six core files are always generated. The `.code-profile` file is present only when `-ExportCodeProfile` is requested.
@@ -405,9 +405,9 @@ build/global/
 Inspect a result without opening VS Code:
 
 ```powershell
-Get-Content ./build/profiles/default/manifest.json -Raw
-Get-Content ./build/profiles/default/validation.json -Raw
-Get-Content ./build/profiles/default/overrides.json -Raw
+Get-Content ./build/profiles/main/manifest.json -Raw
+Get-Content ./build/profiles/main/validation.json -Raw
+Get-Content ./build/profiles/main/overrides.json -Raw
 ```
 
 Generated output is ignored and disposable. Never edit it as source; make changes in `components/`, `profiles/`, `platform/`, or an ignored machine overlay and recompose.
@@ -424,7 +424,7 @@ Treat both the source and seeded exports as private. `globalState` can contain p
 
 ### Sync tested changes back into the repository
 
-VS Code exports the final flattened profile but does not record which component originally owned each value. The `sync` command therefore writes only recipe-specific deltas and never guesses that a change belongs in Default, Python, Database, or another shared component:
+VS Code exports the final flattened profile but does not record which component originally owned each value. The `sync` command therefore writes only recipe-specific deltas and never guesses that a change belongs in Main, Python, Database, or another shared component:
 
 ```powershell
 # In VS Code first: Profiles → profile overflow menu → Export Profile...
@@ -483,7 +483,7 @@ Official references:
 
 ## Current keybinding behavior
 
-`components/default/keybindings.jsonc` is the canonical shared set inherited by every recipe. It contains portable editor, notebook, panel, Markdown, and cSpell bindings; the current cSpell suggestion shortcut is `Ctrl+Shift+S`. Commands that require a focused extension remain in that extension's owning component; for example, `mssql.rebuildIntelliSenseCache` is in `components/sql-server/keybindings.jsonc`.
+`components/main/keybindings.jsonc` is the canonical shared set inherited by every recipe. It contains portable editor, notebook, panel, Markdown, and cSpell bindings; the current cSpell suggestion shortcut is `Ctrl+Shift+S`. Commands that require a focused extension remain in that extension's owning component; for example, `mssql.rebuildIntelliSenseCache` is in `components/sql-server/keybindings.jsonc`.
 
 The composer does not read live user keybindings during validation or composition. To retain a new customization, review it and add it to the smallest appropriate component. Preserve VS Code's explicit `-command.id` removal entries when they accompany a remapping, because removing them can restore an old default shortcut and create a conflict.
 
@@ -493,7 +493,7 @@ The sanitized [Extension Library Staging inventory](../reference/extensions/READ
 
 Do not copy the historical list wholesale into a component. It includes deliberately retired and deferred tools. When a missing capability is identified, select the smallest correct component and add only the extension that solves the current need.
 
-For the exact list in one generated profile, open `build/profiles/<id>/extensions.txt`. For the maintainable source list, read the `extensions.txt` files named by that recipe under `components/`; Default is inherited by every recipe. The 150-ID historical snapshot is the fallback comparison list if a capability from the pre-optimization setup appears to be missing. Add one reviewed ID to the smallest owning component, validate, and rebuild—there is no migration or schema change required.
+For the exact list in one generated profile, open `build/profiles/<id>/extensions.txt`. For the maintainable source list, read the `extensions.txt` files named by that recipe under `components/`; Main is inherited by every recipe. The 150-ID historical snapshot is the fallback comparison list if a capability from the pre-optimization setup appears to be missing. Add one reviewed ID to the smallest owning component, validate, and rebuild—there is no migration or schema change required.
 
 ## Settings Sync and multiple machines
 
@@ -556,7 +556,7 @@ Create or edit a component `keybindings.jsonc` whose root is an array:
 
 Files concatenate in composition order. The composer does not attempt semantic deduplication because VS Code keybinding precedence depends on ordered entries and `when` clauses.
 
-Bindings from `default` appear in every generated profile because every recipe begins with that component. Put extension-specific commands in the component that owns the extension so profiles without that extension do not receive dead shortcuts.
+Bindings from `main` appear in every generated profile because every recipe begins with that component. Put extension-specific commands in the component that owns the extension so profiles without that extension do not receive dead shortcuts.
 
 ### Add a profile recipe
 
@@ -565,7 +565,7 @@ Create `profiles/<id>.yaml` using the supported narrow schema:
 ```yaml
 name: Example Profile
 components:
-  - default
+  - main
   - web
 ```
 
@@ -635,8 +635,8 @@ For ordinary maintenance, use this repeatable sequence:
 
 ```powershell
 pwsh ./scripts/ProfileComposer.ps1 validate -Strict
-pwsh ./scripts/ProfileComposer.ps1 compose default -Platform windows -ExportCodeProfile -DryRun
-pwsh ./scripts/ProfileComposer.ps1 compose default -Platform windows -ExportCodeProfile
+pwsh ./scripts/ProfileComposer.ps1 compose main -Platform windows -ExportCodeProfile -DryRun
+pwsh ./scripts/ProfileComposer.ps1 compose main -Platform windows -ExportCodeProfile
 pwsh -NoProfile -Command "Invoke-Pester -Path ./tests -Output Detailed"
 git status --short
 ```

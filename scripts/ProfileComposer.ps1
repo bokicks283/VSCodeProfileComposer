@@ -113,7 +113,7 @@ capture-ui-state [<profile>] <private-export> [-CodeCommand <command>] [-DryRun]
   matches a repository recipe ID or display name. Zero or multiple matches fail.
 
 Examples:
-  ProfileComposer.ps1 capture-ui-state default C:\Private\Main.code-profile -DryRun
+  ProfileComposer.ps1 capture-ui-state main C:\Private\Main.code-profile -DryRun
   ProfileComposer.ps1 capture-ui-state C:\Private\Python.code-profile -DryRun
 '@ | Write-Host
         }
@@ -144,7 +144,7 @@ Examples:
             Write-Host 'rename-component <old-id> <new-id> [-DryRun]: transactionally renames the component, updates ordered recipe references, and updates composer.jsonc when needed. Example: ProfileComposer.ps1 rename-component old new -DryRun'
         }
         'default' {
-            Write-Host 'default show | default set <component> [-DryRun]: reads or transactionally changes shared-default ownership. Setting it places the component first in every recipe without duplicates. Example: ProfileComposer.ps1 default set default -DryRun'
+            Write-Host 'default show | default set <component> [-DryRun]: reads or transactionally changes shared-default ownership. Setting it places the component first in every recipe without duplicates. Example: ProfileComposer.ps1 default set main -DryRun'
         }
         'vscode' {
             @'
@@ -432,7 +432,7 @@ function Invoke-Compose {
     $parsed = Read-CommandOptions $Arguments @('DryRun', 'Strict', 'ExportCodeProfile') @('Platform', 'Machine', 'MachineFile', 'UiStateFromProfile', 'UiStateProfile', 'RepositoryRoot')
     if ($parsed.Options.Help) { Write-CommandHelp $(if ($AllProfiles) { 'compose-all' } else { 'compose' }); return }
     if ($AllProfiles -and $parsed.Positionals.Count -ne 0) { throw 'compose-all does not accept a profile ID.' }
-    if (-not $AllProfiles -and $parsed.Positionals.Count -ne 1) { throw 'compose requires exactly one profile ID. Example: ProfileComposer.ps1 compose default -Platform windows' }
+    if (-not $AllProfiles -and $parsed.Positionals.Count -ne 1) { throw 'compose requires exactly one profile ID. Example: ProfileComposer.ps1 compose main -Platform windows' }
     $root = Get-RepositoryRootFromOptions $parsed.Options
     if ($parsed.Options.ContainsKey('machine') -and $parsed.Options.ContainsKey('machinefile')) { throw '-Machine and -MachineFile cannot be used together.' }
     if (($parsed.Options.ContainsKey('uistatefromprofile') -or $parsed.Options.ContainsKey('uistateprofile')) -and -not $parsed.Options.exportcodeprofile) { throw 'UI-state seeding requires -ExportCodeProfile.' }

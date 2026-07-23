@@ -8,13 +8,13 @@ Live `.code-profile` exports are flattened and contain no component provenance. 
 
 ## Standalone usability
 
-Every focused component must work in a recipe with `default`.
+Every focused component must work in a recipe with `main`.
 
 ## Settings ownership
 
-- General editor and portable terminal behavior → Default
-- Basic PowerShell, Bash/Zsh shell-script, and Windows batch support → Default
-- Cross-profile daily-driver behavior and extensions → Default
+- General editor and portable terminal behavior → Main
+- Basic PowerShell, Bash/Zsh shell-script, and Windows batch support → Main
+- Cross-profile daily-driver behavior and extensions → Main
 - General C/C++ → C++
 - Unreal-only → Unreal
 - Advanced PowerShell development → PowerShell
@@ -27,7 +27,7 @@ Every focused component must work in a recipe with `default`.
 - Personal executable, module, SDK, or database client path → Machine
 - Repository policy, Pester/PSScriptAnalyzer rules, database schema/migration policy, and team formatting → Workspace
 
-Basic language support must not be duplicated in an advanced component. The PowerShell component may assume the Microsoft PowerShell extension is already available from Default.
+Basic language support must not be duplicated in an advanced component. The PowerShell component may assume the Microsoft PowerShell extension is already available from Main.
 
 Web and Python must not absorb database tooling. Database-enabled variants compose `database` and any required vendor component explicitly.
 
@@ -44,13 +44,13 @@ MongoDB-specific           → MongoDB
 Machine- or employer-owned → Exclude from portable components
 ```
 
-Do not duplicate database extension IDs across Database, SQL Server, MongoDB, Web, Python, and Default without a documented reason.
+Do not duplicate database extension IDs across Database, SQL Server, MongoDB, Web, Python, and Main without a documented reason.
 
-A frequently used extension may belong in Default when the user expects it across profiles and available evidence does not show a material cost. Record provisional placement and revisit it after representative measurements rather than claiming unmeasured performance.
+A frequently used extension may belong in Main when the user expects it across profiles and available evidence does not show a material cost. Record provisional placement and revisit it after representative measurements rather than claiming unmeasured performance.
 
 ## Keybinding ownership
 
-Portable editor and commands supplied by Default extensions belong in `components/default/keybindings.jsonc`. Commands supplied by focused extensions belong in the same focused component as the extension. Preserve explicit `-command.id` entries created when replacing a default binding, and keep `when` clauses so overlapping keys remain deterministic.
+Portable editor and commands supplied by shared Main extensions belong in `components/main/keybindings.jsonc`. Commands supplied by focused extensions belong in the same focused component as the extension. Preserve explicit `-command.id` entries created when replacing a default binding, and keep `when` clauses so overlapping keys remain deterministic.
 
 ## Dependencies
 

@@ -4,7 +4,7 @@
 
 Portable components contain editor preferences, language behavior, extension behavior, and executable names that can be resolved through `PATH`.
 
-Default owns portable shell-language associations and general terminal behavior so every profile works consistently across mixed repositories and machines. It does not choose the OS-specific default shell.
+Main owns portable shell-language associations and general terminal behavior so every profile works consistently across mixed repositories and machines. It does not choose the OS-specific default shell.
 
 Database components may contain safe behavior settings and extension IDs, but never live connection or authentication data.
 
@@ -23,7 +23,7 @@ The global source includes `settingsSync.ignoredSettings` for `todo-tree.ripgrep
 - Windows prefers PowerShell 7 through portable `pwsh.exe` discovery.
 - Linux defaults to Bash and exposes PowerShell only as an optional terminal profile.
 
-These terminal defaults must not be duplicated in Default or PowerShell Development.
+These terminal defaults must not be duplicated in Main or PowerShell Development.
 
 Database command-line clients, native drivers, and certificate behavior may vary by platform, but connection data still remains outside committed platform files.
 
@@ -41,7 +41,7 @@ Project behavior belongs in `.vscode/settings.json`, `.code-workspace`, or a rev
 
 Shell repositories own PSScriptAnalyzer rules, Pester configuration, module paths, test tasks, publishing commands, and team formatting policy.
 
-Database repositories own schema projects, migrations, environment selection, query conventions, test data policy, and team connection rules. Employer-specific database tooling belongs in employer-managed configuration or a local work profile, not personal Default.
+Database repositories own schema projects, migrations, environment selection, query conventions, test data policy, and team connection rules. Employer-specific database tooling belongs in employer-managed configuration or a local work profile, not personal Main.
 
 ## Secrets policy
 
@@ -73,7 +73,7 @@ Settings Sync can synchronize settings, keyboard shortcuts, snippets, tasks, UI 
 
 When adding a second machine, review **Settings Sync: Configure** even if synchronization is already enabled. If unexpected changes occur, identify the affected resource, inspect **Settings Sync: Show Synced Data**, and back up both machines before restoring or resetting anything. The machine-ownership workflow above is designed to keep Sync on while excluding local paths. The composer never controls Settings Sync.
 
-Default already includes everyday PowerShell, Bash/Zsh shell-script, and Windows batch support, and every focused recipe begins with Default. A user moving between Windows, Linux, family machines, and mixed repositories should not need a separate profile merely to edit normal scripts.
+Main already includes everyday PowerShell, Bash/Zsh shell-script, and Windows batch support, and every focused recipe begins with Main. A user moving between Windows, Linux, family machines, and mixed repositories should not need a separate profile merely to edit normal scripts.
 
 Database tooling is selected only when the active profile composes `database` or a vendor-specific database component.
 

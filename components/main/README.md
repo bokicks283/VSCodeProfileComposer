@@ -1,8 +1,8 @@
-# Default
+# Main
 
 ## Purpose
 
-Default is the shared foundation for every profile. It combines portable editor and terminal behavior with the user's general daily-driver extensions and preferences, so focused profiles add only their language, engine, or database concerns.
+Main is the shared foundation for every profile. It combines portable editor and terminal behavior with the user's general daily-driver extensions and preferences, so focused profiles add only their language, engine, or database concerns.
 
 It supports everyday editing of PowerShell, Bash/Zsh shell scripts, Windows batch files, Markdown, XML, YAML, TOML, environment files, and common repository content without requiring a profile switch.
 
@@ -29,17 +29,17 @@ components:
 
 ## Reused by
 
-Every recipe begins with `default`. Focused components add to this shared base rather than inheriting from another profile.
+Every recipe begins with `main`. Focused components add to this shared base rather than inheriting from another profile.
 
 ## Portability classification
 
 Settings and extension IDs are portable and contain no account state. Settings intentionally applied to every profile are owned by `global/settings.jsonc`, not duplicated here. The unreliable portable `todo-tree.ripgrep.ripgrep: "rg"` value is intentionally absent; machines that require it must provide a confirmed absolute path through an ignored named machine overlay.
 
-`keybindings.jsonc` is the canonical shared keybinding source. It preserves explicit removal entries alongside replacement shortcuts so VS Code does not reactivate displaced defaults. Extension-specific bindings belong here only when the owning extension is also part of Default. A reviewed `sync` may record recipe-specific keybinding operations without changing this shared source; promote them here only when every recipe should inherit them.
+`keybindings.jsonc` is the canonical shared keybinding source. It preserves explicit removal entries alongside replacement shortcuts so VS Code does not reactivate displaced defaults. Extension-specific bindings belong here only when the owning extension is also part of Main. A reviewed `sync` may record recipe-specific keybinding operations without changing this shared source; promote them here only when every recipe should inherit them.
 
 ## Platform concerns
 
-Run `ProfileComposer.ps1 compose default -Platform windows` or `ProfileComposer.ps1 compose default -Platform linux` as appropriate. Windows terminal selection belongs in `platform/windows.jsonc`; Linux terminal selection belongs in `platform/linux.jsonc`. Default does not choose an operating-system shell.
+Run `ProfileComposer.ps1 compose main -Platform windows` or `ProfileComposer.ps1 compose main -Platform linux` as appropriate. Windows terminal selection belongs in `platform/windows.jsonc`; Linux terminal selection belongs in `platform/linux.jsonc`. Main does not choose an operating-system shell.
 
 ## Machine concerns
 
@@ -53,7 +53,7 @@ Generated folders, project excludes, formatter and linter policy, PSScriptAnalyz
 
 This component deliberately favors a consistent base experience across all profiles. Measure shared extensions in representative large workspaces; move a tool into a focused component only when there is a clear ownership reason or meaningful measured cost.
 
-Database and heavy language-specific extensions remain outside Default because they are unnecessary for every profile and may add language servers, background services, connection explorers, indexing, or retained authentication state.
+Database and heavy language-specific extensions remain outside Main because they are unnecessary for every profile and may add language servers, background services, connection explorers, indexing, or retained authentication state.
 
 ## Deferred decisions
 

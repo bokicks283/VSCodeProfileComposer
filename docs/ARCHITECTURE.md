@@ -2,7 +2,7 @@
 
 ## Components and profiles
 
-A component is a focused reusable unit with portable `settings.jsonc`, an extension list, and ownership documentation. `composer.jsonc` names the shared default component; it currently points to `default`.
+A component is a focused reusable unit with portable `settings.jsonc`, an extension list, and ownership documentation. `composer.jsonc` names the shared default component; it currently points to `main`.
 
 A profile is an explicit YAML recipe. Profiles do not inherit other profiles. The composer parses the narrow current recipe schema and rejects unsupported YAML structures.
 
@@ -28,11 +28,11 @@ The global and selected machine layers are generated separately under `build/glo
 
 `build/global/settings.json` is a reviewable manual-merge artifact. The composer does not write the live Application Settings file.
 
-## Default shared base
+## Main shared base
 
 The component named by `composer.jsonc` is required exactly once and first in every recipe. Validation enforces this invariant. `ProfileComposer.ps1 default set` changes the configuration and recipe order together through a staged, rollback-safe transaction; this deliberately remains one shared-default rule rather than a general component dependency graph.
 
-Default is the current shared daily-driver foundation for common repository formats, source browsing, general terminal behavior, routine shell-language work, and the user's expected cross-profile tools.
+Main is the current shared daily-driver foundation for common repository formats, source browsing, general terminal behavior, routine shell-language work, and the user's expected cross-profile tools.
 
 It owns:
 
@@ -41,15 +41,15 @@ It owns:
 - terminal behavior that is portable and not operating-system-specific
 - common navigation and formatting commands
 
-Default therefore supports everyday `.ps1`, `.psm1`, `.psd1`, `.sh`, `.bash`, `.zsh`, `.bat`, and `.cmd` work without composing the PowerShell component.
+Main therefore supports everyday `.ps1`, `.psm1`, `.psd1`, `.sh`, `.bash`, `.zsh`, `.bat`, and `.cmd` work without composing the PowerShell component.
 
-The Microsoft PowerShell placement is provisional: available evidence shows PowerShell language/debug/command activation and prior cross-profile ownership, but no reliable activation-time measurement. Revisit it if later Default measurements show a meaningful cost.
+The Microsoft PowerShell placement is provisional: available evidence shows PowerShell language/debug/command activation and prior cross-profile ownership, but no reliable activation-time measurement. Revisit it if later Main measurements show a meaningful cost.
 
-Default deliberately excludes database clients, database language servers, connection explorers, and vendor-specific database extensions.
+Main deliberately excludes database clients, database language servers, connection explorers, and vendor-specific database extensions.
 
 ## Focused components
 
-- `default` is the shared portable and daily-driver base used by every recipe.
+- `main` is the shared portable and daily-driver base used by every recipe.
 - `cpp` owns general C/C++.
 - `unreal` owns only Unreal-specific concerns and reuses `cpp`.
 - `web` and `python` own their language/workflow behavior without database tooling.
@@ -61,11 +61,11 @@ Default deliberately excludes database clients, database language servers, conne
 ## Database composition
 
 ```text
-Database          = Default + Database
-Web + Database    = Default + Web + Database
-Python + Database = Default + Python + Database
-SQL Server        = Default + Database + SQL Server
-MongoDB           = Default + Database + MongoDB
+Database          = Main + Database
+Web + Database    = Main + Web + Database
+Python + Database = Main + Python + Database
+SQL Server        = Main + Database + SQL Server
+MongoDB           = Main + Database + MongoDB
 ```
 
 Generic and vendor-specific concerns remain separate. PostgreSQL, MySQL/MariaDB, and SQLite are planned only; no empty components are created without reviewed content.
