@@ -1,4 +1,4 @@
 name: "C++"
 components:
-  - default
+  - main
   - cpp

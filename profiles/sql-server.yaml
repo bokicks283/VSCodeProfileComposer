@@ -1,5 +1,5 @@
 name: "SQL Server"
 components:
-  - default
+  - main
   - database
   - sql-server

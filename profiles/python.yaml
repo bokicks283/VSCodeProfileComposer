@@ -1,4 +1,4 @@
 name: "Python"
 components:
-  - default
+  - main
   - python

@@ -1,5 +1,5 @@
 name: "Unreal Engine"
 components:
-  - default
+  - main
   - cpp
   - unreal

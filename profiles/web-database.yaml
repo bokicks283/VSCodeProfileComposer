@@ -1,5 +1,5 @@
 name: "Web + Database"
 components:
-  - default
+  - main
   - web
   - database

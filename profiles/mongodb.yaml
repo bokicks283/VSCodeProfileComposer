@@ -1,5 +1,5 @@
 name: "MongoDB"
 components:
-  - default
+  - main
   - database
   - mongodb

@@ -22,9 +22,9 @@ Advanced PowerShell development behavior, operating-system terminal defaults, he
 ## Standalone profile recipe
 
 ```yaml
-name: Default
+name: Main
 components:
-  - default
+  - main
 ```
 
 ## Reused by

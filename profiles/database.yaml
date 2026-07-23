@@ -1,4 +1,4 @@
 name: "Database"
 components:
-  - default
+  - main
   - database
