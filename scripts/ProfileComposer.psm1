@@ -1,6 +1,6 @@
 Set-StrictMode -Version Latest
 
-$script:ComposerVersion = '0.9.0'
+$script:ComposerVersion = '0.10.0'
 $script:ManifestVersion = 1
 $script:Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 $script:SensitivePattern = '(?i)(password|(?<!semantic)token|secret|credential|connectionstring|api[_-]?key|private[_-]?key)'
@@ -1711,6 +1711,116 @@ function Set-SharedDefaultComponent {
     }
 }
 
+function Repair-ComposerGlobalOwnership {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RepositoryRoot,
+        [switch]$DryRun
+    )
+
+    $root = [System.IO.Path]::GetFullPath($RepositoryRoot)
+    $relativePath = 'global/settings.jsonc'
+    $settingsPath = [System.IO.Path]::GetFullPath((Join-Path $root $relativePath))
+    if (-not (Test-PathWithinDirectory $settingsPath $root)) {
+        throw "Global settings path '$relativePath' escapes the repository."
+    }
+    if (-not (Test-Path -LiteralPath $settingsPath -PathType Leaf)) {
+        throw "Required global settings source '$relativePath' is missing."
+    }
+
+    $settings = Read-JsonCFile $settingsPath
+    if (-not (Test-IsDictionary $settings)) {
+        throw 'Global settings root must be an object.'
+    }
+
+    $ownershipKey = 'workbench.settings.applyToAllProfiles'
+    $ownershipListCreated = -not $settings.Contains($ownershipKey)
+    if (-not $ownershipListCreated -and $settings[$ownershipKey] -isnot [System.Array]) {
+        throw "Global setting '$ownershipKey' must be an array before it can be repaired safely."
+    }
+
+    $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    $normalized = [System.Collections.Generic.List[string]]::new()
+    $removedDuplicates = [System.Collections.Generic.List[string]]::new()
+    if (-not $ownershipListCreated) {
+        foreach ($entry in @($settings[$ownershipKey])) {
+            if ($entry -isnot [string] -or [string]::IsNullOrWhiteSpace($entry)) {
+                throw "Global setting '$ownershipKey' contains a non-string or empty entry that cannot be repaired safely."
+            }
+            $id = [string]$entry
+            if ($seen.Add($id)) {
+                $normalized.Add($id)
+            }
+            else {
+                $removedDuplicates.Add($id)
+            }
+        }
+    }
+
+    $missingValues = @($normalized | Where-Object { -not $settings.Contains($_) })
+    if ($missingValues.Count -gt 0) {
+        throw "Cannot safely repair global ownership because these listed settings have no value: $($missingValues -join ', '). Restore their values or remove the entries explicitly."
+    }
+
+    $addedSettings = [System.Collections.Generic.List[string]]::new()
+    foreach ($keyValue in $settings.Keys) {
+        $key = [string]$keyValue
+        if ($key -ceq $ownershipKey) { continue }
+        if ($seen.Add($key)) {
+            $normalized.Add($key)
+            $addedSettings.Add($key)
+        }
+    }
+
+    $changed = $ownershipListCreated -or $removedDuplicates.Count -gt 0 -or $addedSettings.Count -gt 0
+    $changes = [System.Collections.Generic.List[object]]::new()
+    if ($changed) {
+        $changes.Add([pscustomobject]@{
+            action = 'update'
+            source = $relativePath
+            target = $relativePath
+        })
+    }
+
+    if (-not $changed) {
+        return [pscustomobject][ordered]@{
+            operation = 'fix-global-ownership'
+            ownershipListCreated = $false
+            addedSettings = [string[]]@()
+            removedDuplicates = [string[]]@()
+            changes = [object[]]@()
+            dryRun = [bool]$DryRun
+        }
+    }
+
+    $stagingRoot = New-ComposerStagingRepository $root
+    try {
+        $stagedPath = Join-Path $stagingRoot $relativePath
+        $stagedSettings = Read-JsonCFile $stagedPath
+        $stagedSettings[$ownershipKey] = [string[]]$normalized.ToArray()
+        Write-Utf8File $stagedPath (ConvertTo-PrettyJson $stagedSettings)
+        Assert-StagedRepositoryValid $stagingRoot
+
+        if (-not $DryRun) {
+            Invoke-StagedRepositoryCommit $root $stagingRoot @($relativePath)
+        }
+
+        return [pscustomobject][ordered]@{
+            operation = 'fix-global-ownership'
+            ownershipListCreated = $ownershipListCreated
+            addedSettings = [string[]]$addedSettings.ToArray()
+            removedDuplicates = [string[]]$removedDuplicates.ToArray()
+            changes = [object[]]$changes.ToArray()
+            dryRun = [bool]$DryRun
+        }
+    }
+    finally {
+        if (Test-Path -LiteralPath $stagingRoot) {
+            Remove-Item -LiteralPath $stagingRoot -Recurse -Force
+        }
+    }
+}
+
 function Sync-ComposerProfileFromExport {
     [CmdletBinding()]
     param(
@@ -2521,4 +2631,4 @@ function Invoke-ProfileComposition {
     }
 }
 
-Export-ModuleMember -Function ConvertFrom-JsonC, Read-ProfileRecipe, Get-ProfileDefinitions, Get-MachineDefinitions, Get-DefaultVSCodeUserDataPath, Get-LiveVSCodeProfileDefinitions, Get-VSCodeStatusText, Resolve-ComposerProfileFromVSCodeStatus, Get-SharedDefaultComponent, Test-ComposerRepository, Merge-Settings, Merge-Extensions, Merge-Keybindings, Get-CodeProfileFileName, New-CodeProfileTemplate, Read-CodeProfileResources, Read-CodeProfileGlobalState, Get-StoredUiStateSeedPath, Save-ProfileUiStateSeed, Test-CodeProfileTemplate, Invoke-SafeDirectoryReplace, Rename-ComposerProfile, Rename-ComposerComponent, Set-SharedDefaultComponent, Sync-ComposerProfileFromExport, Invoke-GlobalSettingsComposition, Invoke-ProfileComposition
+Export-ModuleMember -Function ConvertFrom-JsonC, Read-ProfileRecipe, Get-ProfileDefinitions, Get-MachineDefinitions, Get-DefaultVSCodeUserDataPath, Get-LiveVSCodeProfileDefinitions, Get-VSCodeStatusText, Resolve-ComposerProfileFromVSCodeStatus, Get-SharedDefaultComponent, Test-ComposerRepository, Merge-Settings, Merge-Extensions, Merge-Keybindings, Get-CodeProfileFileName, New-CodeProfileTemplate, Read-CodeProfileResources, Read-CodeProfileGlobalState, Get-StoredUiStateSeedPath, Save-ProfileUiStateSeed, Test-CodeProfileTemplate, Invoke-SafeDirectoryReplace, Rename-ComposerProfile, Rename-ComposerComponent, Set-SharedDefaultComponent, Repair-ComposerGlobalOwnership, Sync-ComposerProfileFromExport, Invoke-GlobalSettingsComposition, Invoke-ProfileComposition

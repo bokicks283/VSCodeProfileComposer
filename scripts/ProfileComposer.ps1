@@ -22,6 +22,7 @@ Usage:
 Commands:
   help [command]                    Show general or command-specific help.
   validate                          Validate repository sources and ownership.
+  fix global                       Repair mechanically safe global ownership issues.
   compose <profile>                 Compose one named profile and application settings.
   compose-all                       Compose every profile and application settings.
   compose-global                    Compose built-in Default/application settings only.
@@ -57,6 +58,23 @@ Usage:
 
 Example:
   pwsh ./scripts/ProfileComposer.ps1 validate -Platform windows -Strict
+'@ | Write-Host
+        }
+        'fix' {
+            @'
+fix global [-DryRun]
+  Repairs mechanically safe ownership-list issues in global/settings.jsonc:
+  creates a missing workbench.settings.applyToAllProfiles array, removes duplicate
+  entries while preserving the first occurrence, and appends unlisted setting keys
+  in their existing file order.
+
+  The repair is staged and repository-validated before it is committed. Listed
+  settings with no value, invalid entries, and cross-layer ownership conflicts are
+  not guessed; the command fails with an actionable error instead.
+
+Examples:
+  ProfileComposer.ps1 fix global -DryRun
+  ProfileComposer.ps1 fix global
 '@ | Write-Host
         }
         'compose' {
@@ -469,6 +487,25 @@ try {
             $result = Test-ComposerRepository @parameters
             Write-ValidationSummary $result
             if ($result.errors.Count -gt 0 -or ($parsed.Options.strict -and $result.warnings.Count -gt 0)) { exit 1 }
+        }
+        'fix' {
+            $parsed = Read-CommandOptions $CommandArguments @('DryRun') @('RepositoryRoot')
+            if ($parsed.Options.Help -or $parsed.Positionals.Count -eq 0) { Write-CommandHelp fix; break }
+            if ($parsed.Positionals.Count -ne 1 -or $parsed.Positionals[0].ToLowerInvariant() -ne 'global') {
+                throw "fix currently requires the target 'global'."
+            }
+            $root = Get-RepositoryRootFromOptions $parsed.Options
+            $result = Repair-ComposerGlobalOwnership $root -DryRun:$parsed.Options.dryrun
+            Write-ChangePlan $result
+            if ($result.ownershipListCreated) {
+                Write-Host '  Created workbench.settings.applyToAllProfiles.'
+            }
+            if ($result.addedSettings.Count -gt 0) {
+                Write-Host "  Added missing ownership: $($result.addedSettings -join ', ')"
+            }
+            if ($result.removedDuplicates.Count -gt 0) {
+                Write-Host "  Removed duplicate entries: $($result.removedDuplicates -join ', ')"
+            }
         }
         'compose' { Invoke-Compose $false $CommandArguments }
         'compose-all' { Invoke-Compose $true $CommandArguments }

@@ -22,6 +22,9 @@ pwsh ./scripts/ProfileComposer.ps1 help compose
 # Validate every component and recipe.
 pwsh ./scripts/ProfileComposer.ps1 validate
 
+# Preview mechanically safe repairs to global ownership.
+pwsh ./scripts/ProfileComposer.ps1 fix global -DryRun
+
 # Compose one profile.
 pwsh ./scripts/ProfileComposer.ps1 compose default -Platform windows
 
@@ -100,7 +103,7 @@ pwsh ./scripts/ProfileComposer.ps1 rename-profile old-id new-id -DryRun
 pwsh ./scripts/ProfileComposer.ps1 rename-component old-id new-id -DryRun
 ```
 
-Sync, rename, and shared-default changes are validated in an isolated staged copy, then applied as a rollback-safe source transaction. They never rename or rewrite live VS Code profiles. Use `ProfileComposer.ps1` for all new workflows; the older `Compose-Profile.ps1` and `Save-ProfileUiState.ps1` scripts remain compatible wrappers for existing automation.
+Sync, global ownership repair, rename, and shared-default changes are validated in an isolated staged copy, then applied as a rollback-safe source transaction. `fix global` creates a missing apply-to-all array, removes duplicate IDs while preserving first occurrence, and appends unlisted global value keys; it refuses missing values and cross-layer conflicts rather than guessing. These commands never rename or rewrite live VS Code profiles. Use `ProfileComposer.ps1` for all new workflows; the older `Compose-Profile.ps1` and `Save-ProfileUiState.ps1` scripts remain compatible wrappers for existing automation.
 
 ## Output and safety
 

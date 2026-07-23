@@ -78,6 +78,62 @@ Describe 'Global settings ownership' {
         $result.errors.code | Should -Contain 'unlisted-global-setting'
     }
 
+    It 'dry-runs and transactionally repairs duplicate and unlisted global ownership entries' {
+        $fixture = New-ComposerFixture 'repair-global-ownership'
+        $path = Join-Path $fixture 'global/settings.jsonc'
+        $settings = ConvertFrom-JsonC ([System.IO.File]::ReadAllText($path))
+        $firstId = [string]$settings['workbench.settings.applyToAllProfiles'][0]
+        $settings['workbench.settings.applyToAllProfiles'] = [string[]]@(
+            $settings['workbench.settings.applyToAllProfiles']
+            $firstId
+        )
+        $settings['fixture.unlistedGlobal'] = $true
+        Write-TestFile $path (ConvertTo-Json -InputObject $settings -Depth 100)
+        $before = [System.IO.File]::ReadAllText($path)
+
+        $plan = Repair-ComposerGlobalOwnership $fixture -DryRun
+        $plan.dryRun | Should -BeTrue
+        $plan.addedSettings | Should -Be @('fixture.unlistedGlobal')
+        $plan.removedDuplicates | Should -Be @($firstId)
+        [System.IO.File]::ReadAllText($path) | Should -BeExactly $before
+
+        $result = Repair-ComposerGlobalOwnership $fixture
+        $result.changes.Count | Should -Be 1
+        $repaired = ConvertFrom-JsonC ([System.IO.File]::ReadAllText($path))
+        @($repaired['workbench.settings.applyToAllProfiles'] | Where-Object { $_ -ceq $firstId }).Count | Should -Be 1
+        $repaired['workbench.settings.applyToAllProfiles'][-1] | Should -BeExactly 'fixture.unlistedGlobal'
+        (Test-ComposerRepository $fixture).errors.Count | Should -Be 0
+    }
+
+    It 'creates a missing ownership array and refuses to guess a listed setting value' {
+        $fixture = New-ComposerFixture 'repair-missing-global-list'
+        $path = Join-Path $fixture 'global/settings.jsonc'
+        Write-TestFile $path '{ "settingsSync.ignoredSettings": [], "fixture.global": true }'
+
+        $result = Repair-ComposerGlobalOwnership $fixture
+        $result.ownershipListCreated | Should -BeTrue
+        $settings = ConvertFrom-JsonC ([System.IO.File]::ReadAllText($path))
+        $settings['workbench.settings.applyToAllProfiles'] | Should -Be @('settingsSync.ignoredSettings', 'fixture.global')
+
+        Write-TestFile $path '{ "workbench.settings.applyToAllProfiles": ["settingsSync.ignoredSettings", "missing.value"], "settingsSync.ignoredSettings": [] }'
+        $before = [System.IO.File]::ReadAllText($path)
+        { Repair-ComposerGlobalOwnership $fixture } | Should -Throw '*listed settings have no value*'
+        [System.IO.File]::ReadAllText($path) | Should -BeExactly $before
+    }
+
+    It 'leaves source unchanged when a planned ownership repair exposes a cross-layer conflict' {
+        $fixture = New-ComposerFixture 'repair-global-conflict'
+        $path = Join-Path $fixture 'global/settings.jsonc'
+        $settings = ConvertFrom-JsonC ([System.IO.File]::ReadAllText($path))
+        $settings['fixture.conflictingGlobal'] = $true
+        Write-TestFile $path (ConvertTo-Json -InputObject $settings -Depth 100)
+        Write-TestFile (Join-Path $fixture 'components/default/settings.jsonc') '{ "fixture.conflictingGlobal": false }'
+        $before = [System.IO.File]::ReadAllText($path)
+
+        { Repair-ComposerGlobalOwnership $fixture } | Should -Throw '*failed validation*global-setting-in-profile-source*'
+        [System.IO.File]::ReadAllText($path) | Should -BeExactly $before
+    }
+
     It 'generates a separate built-in Default settings artifact' {
         $fixture = New-ComposerFixture 'global-output'
         $result = Invoke-GlobalSettingsComposition $fixture
@@ -865,9 +921,13 @@ Describe 'Unified CLI and compatibility wrappers' {
         $general = @(& pwsh -NoProfile -File $cli help 2>&1)
         $LASTEXITCODE | Should -Be 0
         $general -join "`n" | Should -Match 'rename-component'
+        $general -join "`n" | Should -Match 'fix global'
         $specific = @(& pwsh -NoProfile -File $cli help compose 2>&1)
         $LASTEXITCODE | Should -Be 0
         $specific -join "`n" | Should -Match 'Python-Database|python-database'
+        $fixHelp = @(& pwsh -NoProfile -File $cli help fix 2>&1)
+        $LASTEXITCODE | Should -Be 0
+        $fixHelp -join "`n" | Should -Match 'removes duplicate'
     }
 
     It 'dispatches list, validation, and dry-run rename commands against an isolated fixture' {
@@ -887,6 +947,16 @@ Describe 'Unified CLI and compatibility wrappers' {
         $rename -join "`n" | Should -Match 'MOVE profiles/python.yaml -> profiles/python-work.yaml'
         Test-Path -LiteralPath (Join-Path $fixture 'profiles/python.yaml') | Should -BeTrue
         Test-Path -LiteralPath (Join-Path $fixture 'profiles/python-work.yaml') | Should -BeFalse
+
+        $globalPath = Join-Path $fixture 'global/settings.jsonc'
+        $globalSettings = ConvertFrom-JsonC ([System.IO.File]::ReadAllText($globalPath))
+        $globalSettings['fixture.cliUnlisted'] = $true
+        Write-TestFile $globalPath (ConvertTo-Json -InputObject $globalSettings -Depth 100)
+        $fix = @(& pwsh -NoProfile -File $cli fix global -RepositoryRoot $fixture -DryRun 2>&1)
+        $LASTEXITCODE | Should -Be 0
+        $fix -join "`n" | Should -Match 'Added missing ownership: fixture.cliUnlisted'
+        (ConvertFrom-JsonC ([System.IO.File]::ReadAllText($globalPath)))['workbench.settings.applyToAllProfiles'] |
+            Should -Not -Contain 'fixture.cliUnlisted'
     }
 
     It 'returns nonzero with an actionable error for invalid dispatch' {

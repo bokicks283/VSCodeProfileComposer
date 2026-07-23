@@ -49,6 +49,8 @@ Missing component input files are valid. Missing explicitly requested platform o
 
 `global/settings.jsonc` contains `workbench.settings.applyToAllProfiles` and exactly one value for every listed setting. Repository validation rejects duplicates, missing values, unlisted values, and declarations of globally owned settings in components, profile overrides, or platform overlays.
 
+`ProfileComposer.ps1 fix global [-DryRun]` repairs the mechanically unambiguous subset of those errors. It creates a missing ownership array, removes repeated IDs while retaining the first occurrence, and appends unlisted value keys in existing file order. It refuses invalid entries, listed keys with no value, and cross-layer ownership conflicts. The repair runs against an isolated staging repository and uses the rollback-safe source transaction. A changed file is normalized to JSON because parser comments cannot be reconstructed.
+
 `pwsh ./scripts/ProfileComposer.ps1 compose-global` safely generates:
 
 ```text
@@ -207,7 +209,7 @@ Tests require Pester 5.5 or newer and use isolated temporary repositories:
 pwsh -NoProfile -Command "Invoke-Pester -Path ./tests -Output Detailed"
 ```
 
-The suite covers recipe and JSONC parsing, validation, every merge mode, redaction, overlay order, safe replacement, failure preservation, dry run behavior, output structure, current core recipes, export schema/resources, portability metadata, hashes, filename containment, CLI dispatch and errors, compatibility wrappers, transactional source changes and rollback, guarded live-profile guidance, reviewed reverse synchronization, and safe local UI-state capture/reuse and automatic recipe selection.
+The suite covers recipe and JSONC parsing, validation, global ownership repair, every merge mode, redaction, overlay order, safe replacement, failure preservation, dry run behavior, output structure, current core recipes, export schema/resources, portability metadata, hashes, filename containment, CLI dispatch and errors, compatibility wrappers, transactional source changes and rollback, guarded live-profile guidance, reviewed reverse synchronization, and safe local UI-state capture/reuse and automatic recipe selection.
 
 ## Troubleshooting
 

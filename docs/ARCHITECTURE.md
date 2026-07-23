@@ -24,6 +24,8 @@ The global and selected machine layers are generated separately under `build/glo
 
 `global/settings.jsonc` owns settings intentionally configured through `workbench.settings.applyToAllProfiles`. VS Code stores their effective values in its built-in Default profile and ignores duplicate values in named profile settings. Repository validation requires each global value to appear exactly once in the apply-to-all list and rejects those settings from components, profile overrides, and platform overlays.
 
+`ProfileComposer.ps1 fix global` provides a deliberately narrow repair for mechanically safe list problems: create the missing list, retain the first copy of duplicate IDs, and append unlisted values. Missing values and cross-layer conflicts remain human decisions. Repairs use the same staged validation and rollback-safe commit as other source transformations.
+
 `build/global/settings.json` is a reviewable manual-merge artifact. The composer does not write the live Application Settings file.
 
 ## Default shared base
@@ -90,4 +92,4 @@ When explicitly requested with `-ExportCodeProfile`, composition creates a manua
 
 Separately, `vscode list` reads names and opaque profile location IDs from VS Code's version-sensitive profile metadata, and `vscode open` invokes the supported launcher. Ordinary composition still reads no live state. No command interprets UI payloads, maintains UI inheritance, writes the private profile registry, imports/exports/deletes profiles automatically, installs extensions, or controls Settings Sync. Source components, global settings, configuration, recipes, and reviewed recipe sidecars remain canonical.
 
-Sync, rename, and shared-default mutations are prepared and validated in an isolated staging copy. Only the affected source roots are swapped into place; a second validation runs before rollback backups are removed. A collision, I/O failure, or validation failure restores every swapped path.
+Sync, global ownership repair, rename, and shared-default mutations are prepared and validated in an isolated staging copy. Only the affected source roots are swapped into place; a second validation runs before rollback backups are removed. A collision, I/O failure, or validation failure restores every swapped path.
