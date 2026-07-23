@@ -94,7 +94,17 @@ Generate portable `.code-profile` artifacts under ignored `build/profiles/` with
 
 Separately, a profile exported from live VS Code can contain additional runtime-owned resources or machine/account state. Treat live exports as sensitive until inspected and store them privately. `ProfileComposer.ps1 capture-ui-state [<profile-id>] <export-path>` discards every resource except the opaque `globalState` and stores it under ignored `machine/local/ui-state/<profile>/`; that resource can itself contain extension or account-related state. Omitting the recipe reads only `code --status` and succeeds for one exact recipe match. `-UiStateProfile` reuses the stored data as a one-time layout seed, not a portable component source.
 
-`ProfileComposer.ps1 sync [<profile-id>] <export-path>` deliberately broadens that import path for reviewed maintenance. It validates settings, extension IDs, keybindings, and UI state, recursively classifies setting values, routes safe path-bearing values to the selected ignored machine definition, and records only portable recipe-specific deltas; it never copies flattened values into shared components automatically. Application settings are limited to explicit `workbench.settings.applyToAllProfiles` ownership, and keys ignored by Settings Sync are excluded from tracked global ownership. Sensitive/private values fail with redacted diagnostics. The complete routed plan is validated in one isolated transaction before source replacement. The original export and stored UI seed remain private.
+`ProfileComposer.ps1 sync [<profile-id>] <export-path>` deliberately broadens
+that import path for reviewed maintenance. It validates settings, extension
+IDs, keybindings, and UI state; updates unique existing owners directly;
+applies approved managed/custom routes for new items; and recursively
+classifies values before portability validation. Safe path-bearing values force
+the selected ignored machine definition. Sensitive/private values force
+exclusion and are redacted in reports. Unknown portable values require a
+grouped terminal decision or fail under `-NonInteractive`; they never default
+to profile JSON. The complete plan is validated in one isolated transaction
+before source replacement. See
+[Ownership router and repository synchronization](OWNERSHIP-ROUTER.md).
 
 ## Temporary family or friend machines
 

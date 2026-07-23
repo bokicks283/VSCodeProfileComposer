@@ -6,7 +6,7 @@ BeforeAll {
         param([Parameter(Mandatory)][string]$Name)
         $fixture = Join-Path $TestDrive $Name
         [System.IO.Directory]::CreateDirectory($fixture) | Out-Null
-        foreach ($directory in @('components', 'profiles', 'platform', 'machine', 'global')) {
+        foreach ($directory in @('components', 'profiles', 'platform', 'machine', 'global', 'config')) {
             Copy-Item -LiteralPath (Join-Path $script:RepositoryRoot $directory) -Destination $fixture -Recurse
         }
         Get-ChildItem -LiteralPath (Join-Path $fixture 'machine/local') -Filter '*.jsonc' -File -ErrorAction SilentlyContinue |
@@ -1180,18 +1180,25 @@ Describe 'Profile export synchronization' {
         Write-TestFile (Join-Path $userDataPath 'settings.json') (ConvertTo-Json -InputObject $applicationSettings -Depth 100)
         New-MachineDefinition -RepositoryRoot $fixture -Id test-windows -Platform windows -Settings ([ordered]@{}) | Out-Null
 
-        $result = Sync-ComposerProfileFromExport -RepositoryRoot $fixture -SourceProfileExport $sourceExport -Platform windows -Machine test-windows -VSCodeUserDataPath $userDataPath
+        $resolver = {
+            param($context)
+            [pscustomobject]@{
+                destination = New-OwnershipDestination component python
+                persistence = 'run'
+            }
+        }
+        $result = Sync-ComposerProfileFromExport -RepositoryRoot $fixture -SourceProfileExport $sourceExport -Platform windows -Machine test-windows -VSCodeUserDataPath $userDataPath -ResolutionProvider $resolver
 
         $result.profileId | Should -BeExactly 'python'
         $result.counts.settingReplacements | Should -BeGreaterThan 0
-        $result.counts.settingRemovals | Should -BeGreaterThan 0
+        $result.counts.settingRemovals | Should -Be 0
         $result.counts.extensionAdditions | Should -Be 1
-        $result.counts.extensionRemovals | Should -Be 1
+        $result.counts.extensionRemovals | Should -Be 0
         $result.counts.keybindingsReplacedForOrder | Should -BeTrue
         $result.counts.machineOwnedGlobalSettingsSkipped | Should -Be 1
-        Test-Path -LiteralPath (Join-Path $fixture 'profiles/python.settings.replace.jsonc') | Should -BeTrue
-        Test-Path -LiteralPath (Join-Path $fixture 'profiles/python.settings.remove.jsonc') | Should -BeTrue
-        Test-Path -LiteralPath (Join-Path $fixture 'profiles/python.extensions.jsonc') | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $fixture 'profiles/python.settings.replace.jsonc') | Should -BeFalse
+        Test-Path -LiteralPath (Join-Path $fixture 'profiles/python.settings.remove.jsonc') | Should -BeFalse
+        Test-Path -LiteralPath (Join-Path $fixture 'profiles/python.extensions.jsonc') | Should -BeFalse
         Test-Path -LiteralPath (Join-Path $fixture 'profiles/python.keybindings.jsonc') | Should -BeTrue
         Test-Path -LiteralPath (Join-Path $fixture 'machine/local/ui-state/python/seed.code-profile') | Should -BeTrue
 
@@ -1200,19 +1207,20 @@ Describe 'Profile export synchronization' {
         $global['sync.fixture.global'] | Should -Be 42
         $global.Contains('machine.fixture.path') | Should -BeFalse
         $global['workbench.settings.applyToAllProfiles'] | Should -Not -Contain 'machine.fixture.path'
-        $replacementSettings = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'profiles/python.settings.replace.jsonc')))
-        $replacementSettings.Contains('machine.fixture.path') | Should -BeFalse
+        $pythonSettings = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'components/python/settings.jsonc')))
+        $pythonSettings['sync.fixture.setting'].enabled | Should -BeTrue
+        $pythonSettings.Contains('machine.fixture.path') | Should -BeFalse
         $machine = Read-MachineConfiguration (Join-Path $fixture 'machine/local/test-windows.jsonc') test-windows
         $machine.Settings['machine.fixture.path'] | Should -BeExactly 'C:\Private\tool.exe'
         $result.counts.machineSettingsAdded | Should -Be 1
 
         Invoke-ProfileComposition $fixture python -Platform windows | Out-Null
         $composedSettings = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'build/profiles/python/settings.json')))
-        $composedSettings.Contains($removedSetting) | Should -BeFalse
+        $composedSettings.Contains($removedSetting) | Should -BeTrue
         $composedSettings['sync.fixture.setting'].enabled | Should -BeTrue
         $composedExtensions = [System.IO.File]::ReadAllLines((Join-Path $fixture 'build/profiles/python/extensions.txt'))
         $composedExtensions | Should -Contain 'sample.synced-extension'
-        $composedExtensions | Should -Not -Contain $removedExtension
+        $composedExtensions | Should -Contain $removedExtension
         $composedKeybindings = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'build/profiles/python/keybindings.json')))
         @($composedKeybindings | ForEach-Object { $_ | ConvertTo-Json -Depth 100 -Compress }) |
             Should -Be @($liveKeybindings | ForEach-Object { $_ | ConvertTo-Json -Depth 100 -Compress })
@@ -1225,7 +1233,11 @@ Describe 'Profile export synchronization' {
         $sourceExport = Join-Path $TestDrive 'sync-safety.code-profile'
         Write-TestFile $sourceExport (ConvertTo-Json -InputObject $template -Depth 100)
 
-        $plan = Sync-ComposerProfileFromExport -RepositoryRoot $fixture -SourceProfileExport $sourceExport -Platform windows -SkipGlobal -DryRun
+        $resolver = {
+            param($context)
+            [pscustomobject]@{ destination = New-OwnershipDestination component python; persistence = 'run' }
+        }
+        $plan = Sync-ComposerProfileFromExport -RepositoryRoot $fixture -SourceProfileExport $sourceExport -Platform windows -SkipGlobal -DryRun -ResolutionProvider $resolver
         $plan.profileId | Should -BeExactly 'python'
         $plan.dryRun | Should -BeTrue
         Test-Path -LiteralPath (Join-Path $fixture 'profiles/python.settings.replace.jsonc') | Should -BeFalse
@@ -1234,8 +1246,8 @@ Describe 'Profile export synchronization' {
         $unsafeTemplate = New-CodeProfileTemplate -DisplayName 'Python' -SettingsJson '{"service.apiToken":"do-not-track-this-secret-value"}' -Extensions @() -KeybindingsJson '[]' -Platform windows -GlobalState '{"layout":true}'
         Write-TestFile $sourceExport (ConvertTo-Json -InputObject $unsafeTemplate -Depth 100)
         $beforeGlobal = [System.IO.File]::ReadAllText((Join-Path $fixture 'global/settings.jsonc'))
-        { Sync-ComposerProfileFromExport -RepositoryRoot $fixture -SourceProfileExport $sourceExport -Platform windows -SkipGlobal } |
-            Should -Throw '*Sensitive or private setting*sync-sensitive-setting*'
+        $excluded = Sync-ComposerProfileFromExport -RepositoryRoot $fixture -SourceProfileExport $sourceExport -Platform windows -SkipGlobal -SkipUiState -NonInteractive
+        $excluded.counts.excluded | Should -Be 1
         [System.IO.File]::ReadAllText((Join-Path $fixture 'global/settings.jsonc')) | Should -BeExactly $beforeGlobal
         Test-Path -LiteralPath (Join-Path $fixture 'profiles/python.settings.replace.jsonc') | Should -BeFalse
         Test-Path -LiteralPath (Join-Path $fixture 'machine/local/ui-state/python/seed.code-profile') | Should -BeFalse
@@ -1243,7 +1255,7 @@ Describe 'Profile export synchronization' {
 
     It 'dispatches sync through the unified CLI and requires UI state unless explicitly skipped' {
         $fixture = New-ComposerFixture 'sync-profile-cli'
-        $template = New-CodeProfileTemplate -DisplayName 'Python' -SettingsJson '{"sync.fixture.cli":true}' -Extensions @() -KeybindingsJson '[]' -Platform windows
+        $template = New-CodeProfileTemplate -DisplayName 'Python' -SettingsJson '{"python.fixture.cli":true}' -Extensions @() -KeybindingsJson '[]' -Platform windows
         $sourceExport = Join-Path $TestDrive 'sync-cli.code-profile'
         Write-TestFile $sourceExport (ConvertTo-Json -InputObject $template -Depth 100)
         $cli = Join-Path $script:RepositoryRoot 'scripts/ProfileComposer.ps1'
@@ -1255,7 +1267,7 @@ Describe 'Profile export synchronization' {
         $output = @(& pwsh -NoProfile -File $cli sync $sourceExport -RepositoryRoot $fixture -Platform windows -SkipGlobal -SkipUiState -DryRun 2>&1)
         $LASTEXITCODE | Should -Be 0
         $output -join "`n" | Should -Match "planned sync.*recipe 'python'"
-        $output -join "`n" | Should -Match 'Settings:'
+        $output -join "`n" | Should -Match 'Settings routed:'
         Test-Path -LiteralPath (Join-Path $fixture 'profiles/python.settings.replace.jsonc') | Should -BeFalse
     }
 }
@@ -1349,24 +1361,28 @@ Describe 'Sync classification, machine schema, and routed planning' {
             'fixture.machinePath' = 'C:\Users\person\bin\tool.exe'
         })
 
-        $preview = Sync-ComposerProfileFromExport $fixture -SourceProfileExport $export -Platform windows -Machine main-windows -SkipGlobal -DryRun
-        $result = Sync-ComposerProfileFromExport $fixture -SourceProfileExport $export -Platform windows -Machine main-windows -SkipGlobal
+        $resolver = {
+            param($context)
+            [pscustomobject]@{ destination = New-OwnershipDestination component main; persistence = 'run' }
+        }
+        $preview = Sync-ComposerProfileFromExport $fixture -SourceProfileExport $export -Platform windows -Machine main-windows -SkipGlobal -DryRun -ResolutionProvider $resolver
+        $result = Sync-ComposerProfileFromExport $fixture -SourceProfileExport $export -Platform windows -Machine main-windows -SkipGlobal -ResolutionProvider $resolver
         $preview.changes.action | Should -Be $result.changes.action
         $preview.changes.path | Should -Be $result.changes.path
-        $preview.routes.action | Should -Be $result.routes.action
+        $preview.routes.destination | Should -Be $result.routes.destination
         $result.machine.id | Should -BeExactly 'main-windows'
         $result.machine.selection | Should -BeExactly 'explicit-machine'
         $result.counts.machineSettingsAdded | Should -Be 1
-        $result.routes[0].action | Should -BeExactly 'add'
-        $result.routes[0].portableOwner | Should -BeExactly 'components/main/settings.jsonc'
+        ($result.routes | Where-Object item -eq 'fixture.machinePath').classification | Should -BeExactly 'machine-local-path'
+        ($result.routes | Where-Object item -eq 'fixture.machinePath').destination | Should -BeExactly 'machine'
         $machine = Read-MachineConfiguration (Join-Path $fixture 'machine/local/main-windows.jsonc') main-windows
         $machine.Settings['fixture.machinePath'] | Should -BeExactly 'C:\Users\person\bin\tool.exe'
-        $replacement = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'profiles/python.settings.replace.jsonc')))
-        $replacement['fixture.portable'].enabled | Should -BeTrue
-        $replacement.Contains('fixture.machinePath') | Should -BeFalse
+        $updatedMain = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'components/main/settings.jsonc')))
+        $updatedMain['fixture.portable'].enabled | Should -BeTrue
+        $updatedMain.Contains('fixture.machinePath') | Should -BeFalse
         (Get-ChildItem (Join-Path $fixture 'profiles') -File | Select-String -Pattern 'C:\\Users\\person').Count | Should -Be 0
 
-        $again = Sync-ComposerProfileFromExport $fixture -SourceProfileExport $export -Platform windows -Machine main-windows -SkipGlobal
+        $again = Sync-ComposerProfileFromExport $fixture -SourceProfileExport $export -Platform windows -Machine main-windows -SkipGlobal -ResolutionProvider $resolver
         $again.counts.machineSettingsRetained | Should -Be 1
         $again.changes.Count | Should -Be 0
         $again.uiStateUpdated | Should -BeFalse
@@ -1384,10 +1400,13 @@ Describe 'Sync classification, machine schema, and routed planning' {
 
         $result = Sync-ComposerProfileFromExport $fixture -SourceProfileExport $export -Platform windows -Machine main-windows -SkipGlobal -SkipUiState
         $result.counts.machineSettingsUpdated | Should -Be 1
-        $result.routes[0].portableOwner | Should -BeExactly 'platform/windows.jsonc'
+        $result.routes[0].destination | Should -BeExactly 'machine'
+        @($result.routes[0].candidates | Where-Object source -eq 'existing').owner.path | Should -BeExactly 'platform/windows.jsonc'
         ($result.routes[0] | ConvertTo-Json -Depth 20) | Should -Not -Match 'C:\\Old|C:\\New'
         (Read-MachineConfiguration (Join-Path $fixture 'machine/local/main-windows.jsonc') main-windows).Settings['terminal.integrated.defaultProfile.windows'] |
             Should -BeExactly 'C:\New\pwsh.exe'
+        (ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'platform/windows.jsonc')))).Contains('terminal.integrated.defaultProfile.windows') |
+            Should -BeFalse
         (Read-MachineConfiguration (Join-Path $fixture 'machine/local/main-windows.jsonc') main-windows).Settings['fixture.unrelated'] |
             Should -BeTrue
     }
@@ -1410,9 +1429,9 @@ Describe 'Sync classification, machine schema, and routed planning' {
 
         Remove-Item -LiteralPath (Join-Path $fixture 'machine/local/.default-machine') -Force
         { Sync-ComposerProfileFromExport $fixture -SourceProfileExport $export -Platform windows -SkipGlobal -SkipUiState -DryRun } |
-            Should -Throw '*Setting: fixture.path*sync-machine-local-path*Machine target is ambiguous*Recommended command*'
+            Should -Throw '*Machine-owned items require a resolvable target*fixture.path*Machine target is ambiguous*'
         { Sync-ComposerProfileFromExport $fixture -SourceProfileExport $export -Platform windows -Machine missing -SkipGlobal -SkipUiState -DryRun } |
-            Should -Throw '*Selected machine*does not exist*Recommended command*'
+            Should -Throw '*Selected machine*does not exist*Retry with*'
 
         $linux = New-ComposerFixture 'sync-machine-platform-mismatch'
         New-MachineDefinition -RepositoryRoot $linux -Id linux-box -Platform linux -Settings ([ordered]@{}) | Out-Null
@@ -1425,20 +1444,17 @@ Describe 'Sync classification, machine schema, and routed planning' {
         $automatic.machine.selection | Should -BeExactly 'unique-platform-match'
     }
 
-    It 'fails sensitive values with redacted actionable diagnostics before any write' {
+    It 'forces sensitive values to exclusion without writing their value' {
         $fixture = New-ComposerFixture 'sync-sensitive-redaction'
         New-MachineDefinition -RepositoryRoot $fixture -Id main-windows -Platform windows -Settings ([ordered]@{}) | Out-Null
         $export = New-SyncExport -Path (Join-Path $TestDrive 'sensitive.code-profile') -Settings ([ordered]@{
             'service.credentials' = [ordered]@{ token = 'do-not-print-this-token-value' }
         })
         $before = [System.IO.File]::ReadAllText((Join-Path $fixture 'machine/local/main-windows.jsonc'))
-        $message = $null
-        try {
-            Sync-ComposerProfileFromExport $fixture -SourceProfileExport $export -Platform windows -Machine main-windows -SkipGlobal -SkipUiState | Out-Null
-        }
-        catch { $message = $_.Exception.Message }
-        $message | Should -Match 'Sensitive or private setting|sync-sensitive-setting|excluded-private'
-        $message | Should -Not -Match 'do-not-print-this-token-value'
+        $result = Sync-ComposerProfileFromExport $fixture -SourceProfileExport $export -Platform windows -Machine main-windows -SkipGlobal -SkipUiState
+        $result.counts.excluded | Should -Be 1
+        ($result.routes | ConvertTo-Json -Depth 20) | Should -Not -Match 'do-not-print-this-token-value'
+        $result.routes[0].ruleId | Should -BeExactly 'security-classification'
         [System.IO.File]::ReadAllText((Join-Path $fixture 'machine/local/main-windows.jsonc')) | Should -BeExactly $before
         Test-Path -LiteralPath (Join-Path $fixture 'profiles/python.settings.replace.jsonc') | Should -BeFalse
     }
@@ -1470,7 +1486,11 @@ Describe 'Sync classification, machine schema, and routed planning' {
                     information = [System.Collections.Generic.List[object]]::new()
                 }
             }
-            { Sync-ComposerProfileFromExport $FixtureRoot -SourceProfileExport $ExportPath -Platform windows -Machine main-windows -SkipGlobal -SkipUiState } |
+            $resolver = {
+                param($context)
+                [pscustomobject]@{ destination = New-OwnershipDestination component main; persistence = 'run' }
+            }
+            { Sync-ComposerProfileFromExport $FixtureRoot -SourceProfileExport $ExportPath -Platform windows -Machine main-windows -SkipGlobal -SkipUiState -ResolutionProvider $resolver } |
                 Should -Throw '*rolled back*'
         }
         [System.IO.File]::ReadAllText($machinePath) | Should -BeExactly $beforeMachine
@@ -1485,13 +1505,237 @@ Describe 'Sync classification, machine schema, and routed planning' {
     }
 }
 
+Describe 'Managed ownership router and advanced sync planning' {
+    It 'applies exact setting, exact extension, and prefix routes to typed owners' {
+        $fixture = New-ComposerFixture 'router-exact-prefix'
+        $routes = @(
+            New-OwnershipRoute exact-setting setting exact 'fixture.component' (New-OwnershipDestination component main) repository-policy approved 'Component fixture.'
+            New-OwnershipRoute exact-extension extension exact 'sample.router-extension' (New-OwnershipDestination component python) repository-policy approved 'Extension fixture.'
+            New-OwnershipRoute prefix-platform setting prefix 'fixture.platform.' (New-OwnershipDestination platform windows) repository-policy approved 'Platform fixture.'
+        )
+        foreach ($route in $routes) { Add-ManagedOwnershipRoute $fixture $route | Out-Null }
+        $export = New-SyncExport -Path (Join-Path $TestDrive 'router-exact-prefix.code-profile') -Settings ([ordered]@{
+            'fixture.component' = $true
+            'fixture.platform.mode' = 'portable'
+        })
+        $template = ConvertFrom-JsonC ([System.IO.File]::ReadAllText($export))
+        $template.extensions = ConvertTo-Json -Compress -Depth 20 @([ordered]@{ identifier = [ordered]@{ id = 'sample.router-extension' } })
+        Write-TestFile $export (ConvertTo-Json $template -Depth 100)
+
+        $result = Sync-ComposerProfileFromExport $fixture -SourceProfileExport $export -Platform windows -SkipGlobal -SkipUiState -NonInteractive
+        $mainSettings = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'components/main/settings.jsonc')))
+        $platformSettings = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'platform/windows.jsonc')))
+        $mainSettings['fixture.component'] | Should -BeTrue
+        $platformSettings['fixture.platform.mode'] | Should -BeExactly 'portable'
+        [System.IO.File]::ReadAllText((Join-Path $fixture 'components/python/extensions.txt')) | Should -Match 'sample.router-extension'
+        $result.routes.destination | Should -Contain 'component/main'
+        $result.routes.destination | Should -Contain 'platform/windows'
+        $result.routes.destination | Should -Contain 'component/python'
+    }
+
+    It 'supports explicit profile and exclude destinations without a profile fallback' {
+        $fixture = New-ComposerFixture 'router-profile-exclude'
+        Add-ManagedOwnershipRoute $fixture (New-OwnershipRoute profile-exact setting exact 'fixture.profileOnly' (New-OwnershipDestination profile python) user-confirmed approved 'Explicit profile-only choice.') | Out-Null
+        Add-ManagedOwnershipRoute $fixture (New-OwnershipRoute excluded-exact setting exact 'fixture.volatile' (New-OwnershipDestination exclude) repository-policy approved 'Volatile state is excluded.') | Out-Null
+        $export = New-SyncExport -Path (Join-Path $TestDrive 'router-profile-exclude.code-profile') -Settings ([ordered]@{
+            'fixture.profileOnly' = 7
+            'fixture.volatile' = 'discard'
+        })
+        $result = Sync-ComposerProfileFromExport $fixture -SourceProfileExport $export -Platform windows -SkipGlobal -SkipUiState -NonInteractive
+        $profileSettings = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'profiles/python.settings.replace.jsonc')))
+        $profileSettings['fixture.profileOnly'] | Should -Be 7
+        $result.counts.excluded | Should -Be 1
+        Get-ChildItem (Join-Path $fixture 'profiles') -File | Select-String -Pattern 'discard' | Should -BeNullOrEmpty
+    }
+
+    It 'ignores disabled routes and treats provisional routes only as suggestions' {
+        $fixture = New-ComposerFixture 'router-status'
+        Add-ManagedOwnershipRoute $fixture (New-OwnershipRoute disabled setting exact 'fixture.disabled' (New-OwnershipDestination component main) repository-policy disabled 'Disabled fixture.') | Out-Null
+        Add-ManagedOwnershipRoute $fixture (New-OwnershipRoute provisional setting exact 'fixture.provisional' (New-OwnershipDestination component main) inferred provisional 'Provisional fixture.') | Out-Null
+        $export = New-SyncExport -Path (Join-Path $TestDrive 'router-status.code-profile') -Settings ([ordered]@{
+            'fixture.disabled' = 1
+            'fixture.provisional' = 2
+        })
+        { Sync-ComposerProfileFromExport $fixture -SourceProfileExport $export -Platform windows -SkipGlobal -SkipUiState -NonInteractive } |
+            Should -Throw '*Unresolved ownership*fixture.disabled*fixture.provisional*'
+    }
+
+    It 'prevents duplicate insertions and leaves a valid router unchanged after failure' {
+        $fixture = New-ComposerFixture 'router-duplicate-atomic'
+        $route = New-OwnershipRoute duplicate-fixture setting exact 'fixture.once' (New-OwnershipDestination component main) user-confirmed approved 'One route.'
+        Add-ManagedOwnershipRoute $fixture $route | Out-Null
+        $path = Join-Path $fixture 'config/ownership-router.jsonc'
+        $before = [System.IO.File]::ReadAllText($path)
+        { Add-ManagedOwnershipRoute $fixture $route } | Should -Throw '*already exists*'
+        [System.IO.File]::ReadAllText($path) | Should -BeExactly $before
+    }
+
+    It 'uses custom Supplement, Override, and Isolated modes without mutating the managed router' {
+        $fixture = New-ComposerFixture 'router-custom-modes'
+        Add-ManagedOwnershipRoute $fixture (New-OwnershipRoute managed-custom setting exact 'fixture.custom' (New-OwnershipDestination component main) repository-policy approved 'Managed destination.') | Out-Null
+        $customPath = Join-Path $TestDrive 'custom-router.yaml'
+        Write-TestFile $customPath @'
+schemaVersion: 1
+routes:
+  - id: custom-exact
+    kind: setting
+    match:
+      type: exact
+      value: "fixture.custom"
+    destination:
+      type: component
+      name: python
+    source: custom-file
+    status: approved
+    reason: "Temporary custom destination."
+'@
+        $export = New-SyncExport -Path (Join-Path $TestDrive 'router-custom.code-profile') -Settings ([ordered]@{ 'fixture.custom' = 9 })
+        $beforeRouter = [System.IO.File]::ReadAllText((Join-Path $fixture 'config/ownership-router.jsonc'))
+        foreach ($mode in @('Supplement', 'Override', 'Isolated')) {
+            $copy = New-ComposerFixture "router-custom-$mode"
+            Copy-Item -LiteralPath (Join-Path $fixture 'config/ownership-router.jsonc') -Destination (Join-Path $copy 'config/ownership-router.jsonc') -Force
+            $result = Sync-ComposerProfileFromExport $copy -SourceProfileExport $export -Platform windows -SkipGlobal -SkipUiState -NonInteractive -RoutingFile $customPath -RoutingMode $mode
+            $pythonSettings = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $copy 'components/python/settings.jsonc')))
+            $pythonSettings['fixture.custom'] | Should -Be 9
+        }
+        [System.IO.File]::ReadAllText((Join-Path $fixture 'config/ownership-router.jsonc')) | Should -BeExactly $beforeRouter
+    }
+
+    It 'exports unresolved ownership in non-interactive mode without partial repository writes' {
+        $fixture = New-ComposerFixture 'router-unresolved-export'
+        $export = New-SyncExport -Path (Join-Path $TestDrive 'router-unresolved.code-profile') -Settings ([ordered]@{ 'unknown.owner' = $true })
+        $starter = Join-Path $TestDrive 'unresolved-routing.yaml'
+        $before = [System.IO.File]::ReadAllText((Join-Path $fixture 'components/main/settings.jsonc'))
+        { Sync-ComposerProfileFromExport $fixture -SourceProfileExport $export -Platform windows -SkipGlobal -SkipUiState -NonInteractive -WriteUnresolved $starter } |
+            Should -Throw '*Unresolved ownership*'
+        Test-Path $starter | Should -BeTrue
+        [System.IO.File]::ReadAllText($starter) | Should -Match 'status: provisional'
+        [System.IO.File]::ReadAllText((Join-Path $fixture 'components/main/settings.jsonc')) | Should -BeExactly $before
+    }
+
+    It 'groups interactive decisions and persists only explicitly approved routes' {
+        $fixture = New-ComposerFixture 'router-interactive'
+        $export = New-SyncExport -Path (Join-Path $TestDrive 'router-interactive.code-profile') -Settings ([ordered]@{
+            'custom.first' = 1
+            'custom.second' = 2
+        })
+        $script:routerGroupCalls = 0
+        $provider = {
+            param($context)
+            $script:routerGroupCalls++
+            $context.items.Count | Should -Be 2
+            [pscustomobject]@{
+                destination = New-OwnershipDestination component main
+                persistence = 'prefix'
+                confirmBroadRule = $true
+            }
+        }
+        Sync-ComposerProfileFromExport $fixture -SourceProfileExport $export -Platform windows -SkipGlobal -SkipUiState -ResolutionProvider $provider | Out-Null
+        $script:routerGroupCalls | Should -Be 1
+        $router = Get-ManagedOwnershipRouter $fixture
+        @($router.routes | Where-Object id -eq 'user-setting-custom-rule').Count | Should -Be 1
+        $mainSettings = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'components/main/settings.jsonc')))
+        $mainSettings['custom.second'] | Should -Be 2
+    }
+
+    It 'allows selected items in one group to use different destinations and persistence' {
+        $fixture = New-ComposerFixture 'router-interactive-individual'
+        $export = New-SyncExport -Path (Join-Path $TestDrive 'router-interactive-individual.code-profile') -Settings ([ordered]@{
+            'custom.first' = 1
+            'custom.second' = 2
+        })
+        $provider = {
+            param($context)
+            [pscustomobject]@{
+                decisions = [object[]]@(
+                    [pscustomobject]@{
+                        kind = 'setting'
+                        item = 'custom.first'
+                        destination = New-OwnershipDestination component main
+                        persistence = 'exact'
+                    }
+                    [pscustomobject]@{
+                        kind = 'setting'
+                        item = 'custom.second'
+                        destination = New-OwnershipDestination component python
+                        persistence = 'run'
+                    }
+                )
+            }
+        }
+        Sync-ComposerProfileFromExport $fixture -SourceProfileExport $export -Platform windows -SkipGlobal -SkipUiState -ResolutionProvider $provider | Out-Null
+        (ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'components/main/settings.jsonc'))))['custom.first'] | Should -Be 1
+        (ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'components/python/settings.jsonc'))))['custom.second'] | Should -Be 2
+        $router = Get-ManagedOwnershipRouter $fixture
+        @($router.routes | Where-Object id -eq 'user-setting-custom.first').Count | Should -Be 1
+        @($router.routes | Where-Object id -eq 'user-setting-custom.second').Count | Should -Be 0
+    }
+
+    It 'does not persist this-run-only or ordinary dry-run decisions' {
+        $fixture = New-ComposerFixture 'router-interactive-ephemeral'
+        $export = New-SyncExport -Path (Join-Path $TestDrive 'router-ephemeral.code-profile') -Settings ([ordered]@{ 'ephemeral.setting' = 1 })
+        $path = Join-Path $fixture 'config/ownership-router.jsonc'
+        $before = [System.IO.File]::ReadAllText($path)
+        $runProvider = { param($context) [pscustomobject]@{ destination = New-OwnershipDestination component main; persistence = 'run' } }
+        Sync-ComposerProfileFromExport $fixture -SourceProfileExport $export -Platform windows -SkipGlobal -SkipUiState -ResolutionProvider $runProvider | Out-Null
+        [System.IO.File]::ReadAllText($path) | Should -BeExactly $before
+
+        $dryFixture = New-ComposerFixture 'router-interactive-dry'
+        $dryPath = Join-Path $dryFixture 'config/ownership-router.jsonc'
+        $dryBefore = [System.IO.File]::ReadAllText($dryPath)
+        $exactProvider = { param($context) [pscustomobject]@{ destination = New-OwnershipDestination component main; persistence = 'exact' } }
+        Sync-ComposerProfileFromExport $dryFixture -SourceProfileExport $export -Platform windows -SkipGlobal -SkipUiState -ResolutionProvider $exactProvider -DryRun | Out-Null
+        [System.IO.File]::ReadAllText($dryPath) | Should -BeExactly $dryBefore
+    }
+
+    It 'explains precedence and audits unsafe or conflicting router state' {
+        $fixture = New-ComposerFixture 'router-explain-audit'
+        $report = Explain-OwnershipRoute $fixture 'python.analysis.typeCheckingMode' -Kind setting -Platform windows
+        $report.destination | Should -BeExactly 'component/python'
+        $report.winner.id | Should -BeExactly 'existing-repository-owner'
+        $report.candidates.id | Should -Contain 'python-settings'
+        $audit = Invoke-OwnershipRouterAudit $fixture -Platform windows
+        $audit.errors.Count | Should -Be 0
+        $audit.warnings.code | Should -Contain 'router-stale-pattern'
+        $audit.information.code | Should -Contain 'router-shadowed-by-owner'
+
+        Add-ManagedOwnershipRoute $fixture (New-OwnershipRoute impossible-machine-extension extension exact 'fixture.machine-extension' (New-OwnershipDestination machine) user-confirmed approved 'Invalid composability fixture.') | Out-Null
+        (Invoke-OwnershipRouterAudit $fixture -Platform windows).errors.code | Should -Contain 'router-uncomposable-extension'
+    }
+
+    It 'detects duplicate exact repository ownership as a blocking sync conflict' {
+        $fixture = New-ComposerFixture 'router-duplicate-owner'
+        $main = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'components/main/settings.jsonc')))
+        $python = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'components/python/settings.jsonc')))
+        $main['fixture.duplicateOwner'] = 1
+        $python['fixture.duplicateOwner'] = 2
+        Write-TestFile (Join-Path $fixture 'components/main/settings.jsonc') (ConvertTo-Json $main -Depth 100)
+        Write-TestFile (Join-Path $fixture 'components/python/settings.jsonc') (ConvertTo-Json $python -Depth 100)
+        $export = New-SyncExport -Path (Join-Path $TestDrive 'duplicate-owner.code-profile') -Settings ([ordered]@{ 'fixture.duplicateOwner' = 3 })
+        { Sync-ComposerProfileFromExport $fixture -SourceProfileExport $export -Platform windows -SkipGlobal -SkipUiState -NonInteractive } |
+            Should -Throw '*Ownership conflict*components/main/settings.jsonc*components/python/settings.jsonc*'
+        (Invoke-OwnershipRouterAudit $fixture -Platform windows).errors.code | Should -Contain 'router-duplicate-ownership'
+    }
+
+    It 'audits and archives legacy sync sidecars only with explicit confirmation' {
+        $fixture = New-ComposerFixture 'router-legacy-migration'
+        Write-TestFile (Join-Path $fixture 'profiles/python.settings.replace.jsonc') '{"fixture.legacy":true}'
+        $audit = Archive-LegacySyncSidecars $fixture
+        $audit.confirmationRequired | Should -BeTrue
+        Test-Path (Join-Path $fixture 'profiles/python.settings.replace.jsonc') | Should -BeTrue
+        Archive-LegacySyncSidecars $fixture -ConfirmArchive -BackupName reviewed-legacy | Out-Null
+        Test-Path (Join-Path $fixture 'profiles/python.settings.replace.jsonc') | Should -BeFalse
+        Test-Path (Join-Path $fixture 'migration-backups/reviewed-legacy/python.settings.replace.jsonc') | Should -BeTrue
+    }
+}
+
 Describe 'Forwarding function and alias compatibility' {
     It 'preserves platform, machine, and quoted export arguments and matches direct planning' {
         $fixture = New-ComposerFixture 'wrapper compatibility'
         New-MachineDefinition -RepositoryRoot $fixture -Id main-windows -Platform windows -Settings ([ordered]@{}) | Out-Null
         $exportDirectory = Join-Path $TestDrive 'profile exports with spaces'
         $export = New-SyncExport -Path (Join-Path $exportDirectory 'Adjusted Python.code-profile') -Settings ([ordered]@{
-            'fixture.portable' = $true
+            'python.fixture.portable' = $true
             'fixture.path' = 'C:\Tools\tool.exe'
         })
         $cli = Join-Path $script:RepositoryRoot 'scripts/ProfileComposer.ps1'
@@ -1520,6 +1764,49 @@ exit `$LASTEXITCODE
         $unknown = @(& pwsh -NoProfile -File $wrapper sync $export -NoSuchOption 2>&1)
         $LASTEXITCODE | Should -Be 1
         $unknown -join "`n" | Should -Match "Unknown option '-NoSuchOption'"
+    }
+}
+
+Describe 'Router help, documentation consistency, and headless guarantees' {
+    It 'exposes every public router and migration help topic through the unified CLI' {
+        $cli = Join-Path $script:RepositoryRoot 'scripts/ProfileComposer.ps1'
+        foreach ($topic in @(
+            @('sync'),
+            @('route'),
+            @('route', 'list'),
+            @('route', 'show'),
+            @('route', 'explain'),
+            @('route', 'audit'),
+            @('route', 'add-setting'),
+            @('route', 'add-extension'),
+            @('route', 'add-prefix'),
+            @('route', 'add-publisher'),
+            @('route', 'remove'),
+            @('route', 'enable'),
+            @('route', 'disable'),
+            @('route', 'import'),
+            @('migrate')
+        )) {
+            $output = @(& pwsh -NoProfile -NonInteractive -File $cli help @topic 2>&1)
+            $LASTEXITCODE | Should -Be 0
+            ($output -join "`n").Length | Should -BeGreaterThan 20
+        }
+    }
+
+    It 'validates command, parameter, enum, schema, and Markdown-link consistency headlessly' {
+        $validator = Join-Path $script:RepositoryRoot 'scripts/Test-Documentation.ps1'
+        $output = @(& pwsh -NoProfile -NonInteractive -File $validator -RepositoryRoot $script:RepositoryRoot 2>&1)
+        $LASTEXITCODE | Should -Be 0
+        $output -join "`n" | Should -Match 'Documentation validation passed'
+    }
+
+    It 'keeps new router and documentation paths free of GUI launch mechanisms' {
+        $content = @(
+            [System.IO.File]::ReadAllText((Join-Path $script:RepositoryRoot 'scripts/OwnershipRouter.ps1'))
+            [System.IO.File]::ReadAllText((Join-Path $script:RepositoryRoot 'scripts/Test-Documentation.ps1'))
+        ) -join "`n"
+        $content | Should -Not -Match '(?i)Start-Process|\bcode(?:\.cmd)?\b|ProcessStartInfo|UseShellExecute'
+        $content | Should -Not -Match '(?i)--watch|showdialog|openbrowser|explorer\.exe'
     }
 }
 

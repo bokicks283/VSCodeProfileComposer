@@ -30,7 +30,13 @@ pwsh ./scripts/ProfileComposer.ps1 compose unreal -Platform windows -Machine mai
 
 The filename without `.jsonc` is the `-Machine` ID. This makes the intended target explicit and records it in the manifest. `-MachineFile` remains an explicit-path escape hatch; do not use both switches together.
 
-`sync` accepts the same `-Machine` syntax. When a reviewed export contains a safe absolute path, it excludes that key from portable recipe changes and adds, updates, or retains it in the selected machine file. Without an explicit selection, sync checks ignored `machine/local/.default-machine` and then accepts one unique platform-compatible definition. Configure the local default without committing identity:
+`sync` accepts the same `-Machine` syntax. When a reviewed export contains a
+safe absolute path, classification overrides portable routes, moves ownership
+when necessary, and adds, updates, or retains the value in the selected
+machine file. Without an explicit selection, sync checks ignored
+`machine/local/.default-machine` and then accepts one unique
+platform-compatible definition. Configure the local default without committing
+identity:
 
 ```powershell
 Set-Content ./machine/local/.default-machine 'main-windows'

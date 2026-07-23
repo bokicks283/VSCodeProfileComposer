@@ -27,14 +27,17 @@ for reverse synchronization.
 - repeat sync is idempotent, and preview/apply use one planner;
 - forwarding-function and alias invocation is covered by tests.
 
-## Model boundaries retained deliberately
+## Superseded boundary and managed-router follow-up
 
 - Workspace settings are not imported from a user-profile export because that
   export contains no workspace provenance.
 - Secret and private resources are excluded, not stored in ordinary machine
   JSONC.
-- Profile exports still cannot identify the original shared component for a
-  portable value, so sync continues to create recipe-specific deltas.
+- Profile exports do not carry component provenance, but the repository can
+  discover exact existing owners. The later managed-router implementation now
+  updates those owners directly and requires an approved route or grouped
+  decision for genuinely new values. Recipe-local ownership is explicit, not a
+  fallback.
 - Machine schema 1 supports durable ID, display name, platform, and optional
   hostname metadata. Rename/delete lifecycle commands and stale-host
   reconciliation are not implemented.
@@ -49,5 +52,5 @@ for reverse synchronization.
   file. Unchanged files retain their original bytes; changed sync-managed files
   are normalized JSON.
 
-These boundaries are explicit follow-up issues rather than silently inferred
-behavior.
+The canonical current behavior is documented in
+[Ownership router and repository synchronization](../OWNERSHIP-ROUTER.md).

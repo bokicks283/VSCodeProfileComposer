@@ -143,12 +143,18 @@ pwsh ./scripts/ProfileComposer.ps1 sync "C:\private\Adjusted Python.code-profile
 pwsh ./scripts/ProfileComposer.ps1 sync "C:\private\Adjusted Python.code-profile" -Platform windows -Machine main-windows
 ```
 
-The export name automatically selects one exact recipe ID or display name. The explicit form is `sync <recipe> <export>`. The command recursively classifies every setting before constructing tracked changes. Safe absolute and home-derived paths route to a machine target; secret, connection, account, certificate, private-host, and authentication resources fail with redacted diagnostics. The command then validates the final routed plan and synchronizes:
+The export name automatically selects one exact recipe ID or display name. The
+explicit form is `sync <recipe> <export>`. The command indexes existing owners,
+applies the managed/custom router, and recursively classifies every value
+before constructing changes. Safe absolute and home-derived paths force the
+machine owner; secret, connection, account, certificate, private-host, and
+authentication resources force exclusion with redacted reporting. It then
+validates the final routed plan and synchronizes:
 
-- changed or added profile settings as exact recipe replacements;
-- component settings absent from the export as recipe removals;
-- extension additions and removals relative to the recipe's components;
-- keybinding additions/removals, or an exact recipe replacement when ordering changed;
+- existing component/platform/machine/profile settings directly;
+- new settings and extensions through approved routes or grouped decisions;
+- explicit profile-only settings through profile sidecars;
+- additive/reordered keybindings without inferring shared removals;
 - the opaque `globalState` resource under ignored `machine/local/ui-state/<recipe>/`;
 - built-in Default/application values named by the live `workbench.settings.applyToAllProfiles` list.
 
@@ -160,7 +166,17 @@ Global reconciliation rewrites `global/settings.jsonc` as normalized JSON becaus
 
 Keys already owned by the selected `-Platform` overlay are excluded from recipe deltas. Change reusable OS behavior in `platform/<id>.jsonc`; the sync summary reports how many platform-owned settings were filtered.
 
-Exports are flattened and contain no component provenance. Sync therefore never edits shared components. It writes recipe sidecars, the selected ignored machine definition, global settings, and the ignored UI seed in one staging repository; only changed paths are swapped. A validation or commit failure rolls every path back. Repeating the same sync produces retain routes and no source changes. The command never edits the source export, live profile storage, installed extensions, or Settings Sync state. Task or snippet resources are rejected because the repository does not own them.
+Exports are flattened, so unowned items require an explicit route or decision.
+They are not assumed to be profile-local. Existing exact repository ownership
+is concrete provenance and is updated directly. The selected owners, managed
+router persistence, global settings, and ignored UI seed share one staging
+repository; only changed roots are swapped. A validation or commit failure
+rolls every path back. Repeating the same sync reports no changes. Absence from
+one export never deletes shared settings or extensions.
+
+See [Ownership router and repository synchronization](OWNERSHIP-ROUTER.md) for
+custom modes, non-interactive unresolved export, route commands, audit/explain,
+and detailed exit behavior.
 
 Portable export:
 

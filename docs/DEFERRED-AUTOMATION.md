@@ -14,7 +14,14 @@
 - A conservative read-only `Main` profile ownership audit is recorded under `docs/audits/`.
 - The `vscode` command group can list profile names/opaque IDs read-only, open a verified existing profile with `code --profile`, compose guided import/replacement packages, and verify deletion targets without writing live storage.
 - `capture-ui-state` can infer its recipe only when `code --status` yields exactly one recipe ID/display-name match; ambiguous or absent matches require an explicit recipe.
-- `sync [<recipe>] <export>` transactionally reconciles a reviewed manual export into recipe-specific settings, extension, and keybinding deltas plus an ignored UI-state seed. It classifies nested values before planning, routes safe paths into a resolved ignored machine definition, rejects sensitive/private resources, and can reconcile explicit apply-to-all application settings while excluding Sync-ignored values from tracked global ownership.
+- `sync [<recipe>] <export>` transactionally reconciles a reviewed manual
+  export into its unique existing owners or approved managed/custom routes,
+  plus an ignored UI-state seed. It groups unresolved ownership in the
+  terminal, supports deterministic non-interactive failure/export, routes safe
+  paths into a resolved ignored machine definition, excludes sensitive/private
+  resources, and can reconcile explicit apply-to-all application settings.
+- `route` lists, explains, audits, safely updates, disables/enables/removes, and
+  explicitly imports schema-1 ownership routes.
 
 ## Current delivery state
 
@@ -36,7 +43,8 @@
 - verify that database-enabled exports contain no saved connections or authentication state
 - provide an opt-in, redacted general comparison report for arbitrary live profiles (the one-time `Main` audit is complete)
 - automatically export the current profile without a manual Profiles-editor export
-- infer or promote flattened live changes into shared components
+- infer an owner for unapproved flattened live changes (the grouped resolver
+  requires confirmation)
 - synchronize snippets, tasks, MCP definitions, or other resource classes not owned by the current repository schema
 - provide GUI management
 - integrate with Unreal Tool Suite

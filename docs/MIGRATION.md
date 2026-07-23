@@ -145,7 +145,31 @@ Optionally put that ID in ignored `machine/local/.default-machine`.
 
 Reverse synchronization now classifies imported values before tracked changes
 are constructed. Safe path-bearing settings move into the selected ignored
-machine file; credential/private resources fail closed; remaining flattened
-settings continue to become recipe-specific deltas. This fixes the earlier
-failure where a routed machine value was first written into a staged portable
-replacement and only then rejected by `portable-absolute-path`.
+machine file; credential/private resources are excluded; remaining values
+update unique existing owners or require an approved managed/custom route.
+Unknown values no longer become recipe-specific deltas by default.
+
+## Managed-router migration
+
+The canonical schema-1 router is `config/ownership-router.jsonc`. The migration
+preserved the three profile sidecars created by the pre-router Main sync under
+`migration-backups/legacy-sync-2026-07-23/` and removed them from active
+`profiles/` ownership:
+
+- the MSSQL keybinding was already owned by
+  `components/sql-server/keybindings.jsonc`;
+- the cSpell removal had been inferred only from absence in one export;
+- `workbench.editorAssociations` had been sent to the old profile fallback
+  without an explicit owner.
+
+Future legacy sidecars can be reviewed and archived headlessly:
+
+```powershell
+vscomp migrate legacy-sync
+vscomp migrate legacy-sync -ConfirmArchive -BackupName legacy-sync-review -DryRun
+vscomp migrate legacy-sync -ConfirmArchive -BackupName legacy-sync-review
+```
+
+Archiving is confirmation-gated, backup-first, staged, validated, and
+rollback-safe. Backups are not composed. Retained values must be reintroduced
+through exact existing ownership or an explicit approved route.

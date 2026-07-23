@@ -1,6 +1,6 @@
 Set-StrictMode -Version Latest
 
-$script:ComposerVersion = '0.11.0'
+$script:ComposerVersion = '0.12.0'
 $script:ManifestVersion = 1
 $script:MachineSchemaVersion = 1
 $script:Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
@@ -11,6 +11,8 @@ $script:CodeProfileSchema = 'vscode-user-data-profile-template'
 $script:CodeProfileSchemaVersion = 'unversioned'
 $script:CodeProfileVerifiedVersion = '1.129.1'
 $script:CodeProfileVerifiedCommit = '8a7abeba6e03ea3af87bfbce9a1b7e48fed567b8'
+
+. (Join-Path $PSScriptRoot 'OwnershipRouter.ps1')
 
 function New-OrderedMap {
     return [System.Collections.Specialized.OrderedDictionary]::new([System.StringComparer]::Ordinal)
@@ -1130,6 +1132,16 @@ function Test-ComposerRepository {
         }
         catch { Add-ValidationItem $result errors 'invalid-jsonc' $_.Exception.Message $source }
     }
+    if (Test-Path -LiteralPath $platformRoot -PathType Container) {
+        foreach ($path in (Get-ChildItem -LiteralPath $platformRoot -Filter '*.extensions.txt' -File)) {
+            $source = Get-RelativeDisplayPath $root $path.FullName
+            foreach ($entry in (Read-ExtensionFile $path.FullName)) {
+                if ($entry.Id -notmatch '^[A-Za-z0-9][A-Za-z0-9-]*\.[A-Za-z0-9][A-Za-z0-9._-]*$') {
+                    Add-ValidationItem $result errors 'invalid-extension-id' "Invalid extension ID '$($entry.Id)' at line $($entry.Line)." $source
+                }
+            }
+        }
+    }
 
     $machineCandidates = [System.Collections.Generic.List[string]]::new()
     $machineLocalRoot = Join-Path $root 'machine/local'
@@ -1211,6 +1223,22 @@ function Test-ComposerRepository {
             }
         }
         catch { Add-ValidationItem $result warnings 'git-check-failed' 'Could not verify whether machine-local files are tracked by Git.' }
+    }
+
+    $routerPath = Get-ManagedOwnershipRouterPath $root
+    if (-not (Test-Path -LiteralPath $routerPath -PathType Leaf)) {
+        Add-ValidationItem $result errors 'missing-ownership-router' "Required managed router 'config/ownership-router.jsonc' is missing." 'config/ownership-router.jsonc'
+    }
+    else {
+        try {
+            $routerValidation = Test-OwnershipRouterDocument -Document (Read-OwnershipRouterFile $routerPath) -RepositoryRoot $root -Source 'config/ownership-router.jsonc'
+            foreach ($item in $routerValidation.errors) { $result.errors.Add($item) }
+            foreach ($item in $routerValidation.warnings) { $result.warnings.Add($item) }
+            foreach ($item in $routerValidation.information) { $result.information.Add($item) }
+        }
+        catch {
+            Add-ValidationItem $result errors 'invalid-ownership-router' $_.Exception.Message 'config/ownership-router.jsonc'
+        }
     }
 
     Add-ValidationItem $result information 'validation-summary' "Validated $($componentIds.Count) components and $($profileIds.Count) profile recipes."
@@ -1780,7 +1808,7 @@ function New-ComposerStagingRepository {
     $stagingRoot = Join-Path ([System.IO.Path]::GetTempPath()) "VSCodeProfileComposer.$([guid]::NewGuid().ToString('N'))"
     [System.IO.Directory]::CreateDirectory($stagingRoot) | Out-Null
     try {
-        foreach ($directory in @('components', 'profiles', 'global', 'platform', 'machine')) {
+        foreach ($directory in @('components', 'profiles', 'global', 'platform', 'machine', 'config', 'migration-backups')) {
             $source = Join-Path $root $directory
             if (Test-Path -LiteralPath $source -PathType Container) {
                 Copy-Item -LiteralPath $source -Destination (Join-Path $stagingRoot $directory) -Recurse -Force
@@ -2159,6 +2187,486 @@ function Repair-ComposerGlobalOwnership {
     }
 }
 
+function Add-OwnershipIndexEntry {
+    param(
+        [Parameter(Mandatory)][hashtable]$Index,
+        [Parameter(Mandatory)][string]$Kind,
+        [Parameter(Mandatory)][string]$Item,
+        [Parameter(Mandatory)]$Destination,
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Layer
+    )
+
+    $key = "$Kind|$($Item.ToLowerInvariant())"
+    if (-not $Index.ContainsKey($key)) { $Index[$key] = [System.Collections.Generic.List[object]]::new() }
+    $Index[$key].Add([pscustomobject][ordered]@{
+        kind = $Kind
+        item = $Item
+        destination = $Destination
+        path = $Path
+        layer = $Layer
+    })
+}
+
+function Get-RepositoryOwnershipIndex {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RepositoryRoot,
+        [string]$Platform,
+        [string]$MachinePath,
+        [string]$Profile
+    )
+
+    $root = [System.IO.Path]::GetFullPath($RepositoryRoot)
+    $index = [hashtable]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($directory in (Get-ChildItem -LiteralPath (Join-Path $root 'components') -Directory | Sort-Object Name)) {
+        $destination = New-OwnershipDestination component $directory.Name
+        $settingsPath = Join-Path $directory.FullName 'settings.jsonc'
+        if (Test-Path -LiteralPath $settingsPath -PathType Leaf) {
+            foreach ($key in (Read-JsonCFile $settingsPath).Keys) {
+                Add-OwnershipIndexEntry $index setting ([string]$key) $destination (Get-RelativeDisplayPath $root $settingsPath) component
+            }
+        }
+        $extensionsPath = Join-Path $directory.FullName 'extensions.txt'
+        if (Test-Path -LiteralPath $extensionsPath -PathType Leaf) {
+            foreach ($entry in (Read-ExtensionFile $extensionsPath)) {
+                Add-OwnershipIndexEntry $index extension $entry.Id $destination (Get-RelativeDisplayPath $root $extensionsPath) component
+            }
+        }
+    }
+
+    if ($Platform) {
+        $destination = New-OwnershipDestination platform $Platform
+        $settingsPath = Join-Path $root "platform/$Platform.jsonc"
+        if (Test-Path -LiteralPath $settingsPath -PathType Leaf) {
+            foreach ($key in (Read-JsonCFile $settingsPath).Keys) {
+                Add-OwnershipIndexEntry $index setting ([string]$key) $destination (Get-RelativeDisplayPath $root $settingsPath) platform
+            }
+        }
+        $extensionsPath = Join-Path $root "platform/$Platform.extensions.txt"
+        if (Test-Path -LiteralPath $extensionsPath -PathType Leaf) {
+            foreach ($entry in (Read-ExtensionFile $extensionsPath)) {
+                Add-OwnershipIndexEntry $index extension $entry.Id $destination (Get-RelativeDisplayPath $root $extensionsPath) platform
+            }
+        }
+    }
+
+    if ($MachinePath) {
+        $configuration = Read-MachineConfiguration $MachinePath ([System.IO.Path]::GetFileNameWithoutExtension($MachinePath))
+        $destination = New-OwnershipDestination machine
+        foreach ($key in $configuration.Settings.Keys) {
+            Add-OwnershipIndexEntry $index setting ([string]$key) $destination (Get-RelativeDisplayPath $root $MachinePath) machine
+        }
+    }
+
+    if ($Profile) {
+        $destination = New-OwnershipDestination profile $Profile
+        foreach ($suffix in @('settings.jsonc', 'settings.replace.jsonc')) {
+            $path = Join-Path $root "profiles/$Profile.$suffix"
+            if (Test-Path -LiteralPath $path -PathType Leaf) {
+                foreach ($key in (Read-JsonCFile $path).Keys) {
+                    Add-OwnershipIndexEntry $index setting ([string]$key) $destination (Get-RelativeDisplayPath $root $path) profile
+                }
+            }
+        }
+        $extensionsPath = Join-Path $root "profiles/$Profile.extensions.jsonc"
+        if (Test-Path -LiteralPath $extensionsPath -PathType Leaf) {
+            $operations = Read-ProfileExtensionOperations $extensionsPath
+            foreach ($id in $operations.Add) {
+                Add-OwnershipIndexEntry $index extension $id $destination (Get-RelativeDisplayPath $root $extensionsPath) profile
+            }
+        }
+    }
+    return $index
+}
+
+function Get-OwnershipIndexOwners {
+    param(
+        [Parameter(Mandatory)][hashtable]$Index,
+        [Parameter(Mandatory)][string]$Kind,
+        [Parameter(Mandatory)][string]$Item
+    )
+    $key = "$Kind|$($Item.ToLowerInvariant())"
+    if (-not $Index.ContainsKey($key)) { return @() }
+    return [object[]]$Index[$key].ToArray()
+}
+
+function Get-RoutedDestinationPath {
+    param(
+        [Parameter(Mandatory)][string]$RepositoryRoot,
+        [Parameter(Mandatory)][string]$Kind,
+        [Parameter(Mandatory)]$Destination,
+        [string]$MachinePath,
+        [string]$ExistingPath
+    )
+
+    if ($ExistingPath) { return [System.IO.Path]::GetFullPath((Join-Path $RepositoryRoot $ExistingPath)) }
+    $type = [string]$Destination.type
+    $name = if ($Destination.Contains('name')) { [string]$Destination.name } else { $null }
+    switch ("$Kind|$type") {
+        'setting|component' { return Join-Path $RepositoryRoot "components/$name/settings.jsonc" }
+        'setting|platform' { return Join-Path $RepositoryRoot "platform/$name.jsonc" }
+        'setting|machine' { return $MachinePath }
+        'setting|profile' { return Join-Path $RepositoryRoot "profiles/$name.settings.replace.jsonc" }
+        'extension|component' { return Join-Path $RepositoryRoot "components/$name/extensions.txt" }
+        'extension|platform' { return Join-Path $RepositoryRoot "platform/$name.extensions.txt" }
+        'extension|profile' { return Join-Path $RepositoryRoot "profiles/$name.extensions.jsonc" }
+        'extension|machine' { throw 'Machine-owned extensions are not composable by the current VS Code profile artifact. Route the extension to a component, platform, profile, or exclude it.' }
+        default { return $null }
+    }
+}
+
+function Remove-PreviousOwnership {
+    param(
+        [Parameter(Mandatory)][string]$StagingRoot,
+        [Parameter(Mandatory)]$Resolution,
+        [Parameter(Mandatory)][AllowEmptyCollection()][System.Collections.Generic.List[object]]$Changes,
+        [Parameter(Mandatory)][hashtable]$ChangedRoots
+    )
+
+    $existingCandidates = @($Resolution.candidates | Where-Object source -eq 'existing')
+    if ($existingCandidates.Count -ne 1) { return }
+    $owner = $existingCandidates[0].owner
+    if ((Get-OwnershipDestinationLabel $owner.destination) -ieq (Get-OwnershipDestinationLabel $Resolution.destination)) { return }
+    $stagedPath = Join-Path $StagingRoot $owner.path
+    if (-not (Test-Path -LiteralPath $stagedPath -PathType Leaf)) { return }
+    if ($Resolution.kind -eq 'setting') {
+        $map = Read-JsonCFile $stagedPath
+        if ($map.Contains($Resolution.item)) {
+            $map.Remove($Resolution.item)
+            Write-Utf8File $stagedPath (ConvertTo-PrettyJson $map)
+        }
+    }
+    elseif ($owner.destination.type -eq 'profile') {
+        $operations = Read-ProfileExtensionOperations $stagedPath
+        $add = @($operations.Add | Where-Object { $_ -ine $Resolution.item })
+        if ($add.Count -eq 0 -and $operations.Remove.Count -eq 0) {
+            Remove-Item -LiteralPath $stagedPath -Force
+        }
+        else {
+            Write-Utf8File $stagedPath (ConvertTo-PrettyJson ([ordered]@{ add = [string[]]$add; remove = [string[]]$operations.Remove }))
+        }
+    }
+    else {
+        $ids = @((Read-ExtensionFile $stagedPath) | ForEach-Object Id | Where-Object { $_ -ine $Resolution.item })
+        Write-Utf8File $stagedPath $(if ($ids.Count -gt 0) { ($ids -join "`n") + "`n" } else { '' })
+    }
+    $Changes.Add([pscustomobject]@{ action = 'move-from'; path = $owner.path; item = $Resolution.item; owner = (Get-OwnershipDestinationLabel $owner.destination) })
+    $ChangedRoots[(($owner.path -split '/')[0])] = $true
+}
+
+function Set-RoutedSettingValue {
+    param(
+        [Parameter(Mandatory)][string]$StagingRoot,
+        [Parameter(Mandatory)][string]$RepositoryRoot,
+        [Parameter(Mandatory)]$Resolution,
+        [Parameter(Mandatory)][AllowNull()]$Value,
+        [Parameter(Mandatory)][AllowEmptyCollection()][System.Collections.Generic.List[object]]$Changes,
+        [Parameter(Mandatory)][hashtable]$ChangedRoots,
+        $ResolvedMachine
+    )
+
+    $existingOwner = if ($Resolution.winner -and $Resolution.winner.PSObject.Properties.Name -contains 'owner') { $Resolution.winner.owner } else { $null }
+    $machinePath = if ($ResolvedMachine) { $ResolvedMachine.Path } else { $null }
+    $originalPath = Get-RoutedDestinationPath $RepositoryRoot setting $Resolution.destination -MachinePath $machinePath -ExistingPath $(if ($existingOwner) { $existingOwner.path } else { $null })
+    if (-not $originalPath) { return }
+    $relative = Get-RelativeDisplayPath $RepositoryRoot $originalPath
+    $stagedPath = Join-Path $StagingRoot $relative
+
+    if ($Resolution.destination.type -eq 'machine') {
+        $configuration = Read-MachineConfiguration $stagedPath $ResolvedMachine.Id
+        $same = $configuration.Settings.Contains($Resolution.item) -and (Test-ValuesEqual $configuration.Settings[$Resolution.item] $Value)
+        if (-not $same) {
+            $exists = $configuration.Settings.Contains($Resolution.item)
+            $configuration.Settings[$Resolution.item] = Copy-ComposerValue $Value
+            Write-MachineConfiguration $stagedPath $configuration
+            $Changes.Add([pscustomobject]@{ action = if ($exists) { 'update' } else { 'create' }; path = $relative; item = $Resolution.item; owner = 'machine' })
+            $ChangedRoots[$relative] = $true
+        }
+        return
+    }
+
+    $map = if (Test-Path -LiteralPath $stagedPath -PathType Leaf) { Read-JsonCFile $stagedPath } else { New-OrderedMap }
+    $same = $map.Contains($Resolution.item) -and (Test-ValuesEqual $map[$Resolution.item] $Value)
+    if (-not $same) {
+        $exists = $map.Contains($Resolution.item)
+        $map[$Resolution.item] = Copy-ComposerValue $Value
+        Write-Utf8File $stagedPath (ConvertTo-PrettyJson $map)
+        $Changes.Add([pscustomobject]@{ action = if ($exists) { 'update' } else { 'create' }; path = $relative; item = $Resolution.item; owner = (Get-OwnershipDestinationLabel $Resolution.destination) })
+        $rootName = ($relative -split '/')[0]
+        $ChangedRoots[$rootName] = $true
+    }
+}
+
+function Set-RoutedExtensionValue {
+    param(
+        [Parameter(Mandatory)][string]$StagingRoot,
+        [Parameter(Mandatory)][string]$RepositoryRoot,
+        [Parameter(Mandatory)]$Resolution,
+        [Parameter(Mandatory)][AllowEmptyCollection()][System.Collections.Generic.List[object]]$Changes,
+        [Parameter(Mandatory)][hashtable]$ChangedRoots
+    )
+
+    $existingOwner = if ($Resolution.winner -and $Resolution.winner.PSObject.Properties.Name -contains 'owner') { $Resolution.winner.owner } else { $null }
+    $originalPath = Get-RoutedDestinationPath $RepositoryRoot extension $Resolution.destination -ExistingPath $(if ($existingOwner) { $existingOwner.path } else { $null })
+    if (-not $originalPath) { return }
+    $relative = Get-RelativeDisplayPath $RepositoryRoot $originalPath
+    $stagedPath = Join-Path $StagingRoot $relative
+    if ($Resolution.destination.type -eq 'profile') {
+        $operations = if (Test-Path -LiteralPath $stagedPath -PathType Leaf) {
+            Read-ProfileExtensionOperations $stagedPath
+        }
+        else { [pscustomobject]@{ Add = @(); Remove = @() } }
+        $set = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        foreach ($id in $operations.Add) { $set.Add($id) | Out-Null }
+        if ($set.Add($Resolution.item)) {
+            $remove = @($operations.Remove | Where-Object { $_ -ine $Resolution.item })
+            Write-Utf8File $stagedPath (ConvertTo-PrettyJson ([ordered]@{ add = [string[]]@($operations.Add + $Resolution.item); remove = [string[]]$remove }))
+            $Changes.Add([pscustomobject]@{ action = 'create'; path = $relative; item = $Resolution.item; owner = (Get-OwnershipDestinationLabel $Resolution.destination) })
+            $ChangedRoots['profiles'] = $true
+        }
+        return
+    }
+
+    $ids = [System.Collections.Generic.List[string]]::new()
+    $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    if (Test-Path -LiteralPath $stagedPath -PathType Leaf) {
+        foreach ($entry in (Read-ExtensionFile $stagedPath)) {
+            if ($seen.Add($entry.Id)) { $ids.Add($entry.Id) }
+        }
+    }
+    if ($seen.Add($Resolution.item)) {
+        $ids.Add($Resolution.item)
+        Write-Utf8File $stagedPath (($ids.ToArray() -join "`n") + "`n")
+        $Changes.Add([pscustomobject]@{ action = 'create'; path = $relative; item = $Resolution.item; owner = (Get-OwnershipDestinationLabel $Resolution.destination) })
+        $ChangedRoots[(($relative -split '/')[0])] = $true
+    }
+}
+
+function Get-UnresolvedOwnershipGroups {
+    param([Parameter(Mandatory)][object[]]$Items)
+
+    return @($Items | Group-Object {
+        $value = [string]$_.item
+        $prefix = ($value -split '\.', 2)[0]
+        if ([string]::IsNullOrWhiteSpace($prefix)) { 'other' } else { $prefix.ToLowerInvariant() }
+    } | Sort-Object Name | ForEach-Object {
+        [pscustomobject]@{
+            name = $_.Name
+            items = [object[]]@($_.Group | Sort-Object item)
+        }
+    })
+}
+
+function ConvertFrom-InteractiveDestination {
+    param(
+        [Parameter(Mandatory)][string]$Text,
+        [Parameter(Mandatory)][string]$Profile
+    )
+
+    $value = $Text.Trim()
+    if ($value -ieq 'machine') { return New-OwnershipDestination machine }
+    if ($value -ieq 'exclude') { return New-OwnershipDestination exclude }
+    if ($value -ieq 'unresolved') { return New-OwnershipDestination unresolved }
+    if ($value -match '^(?i)(component|platform|profile)/([A-Za-z0-9][A-Za-z0-9._-]*)$') {
+        return New-OwnershipDestination $Matches[1].ToLowerInvariant() $Matches[2]
+    }
+    if ($value -ieq 'profile') { return New-OwnershipDestination profile $Profile }
+    throw "Invalid destination '$Text'. Use component/<name>, platform/<name>, machine, profile/<name>, exclude, or unresolved."
+}
+
+function Resolve-OwnershipInteractively {
+    param(
+        [Parameter(Mandatory)][object[]]$Items,
+        [Parameter(Mandatory)][string]$Profile,
+        [scriptblock]$ResolutionProvider,
+        $ManagedRouter,
+        [hashtable]$OwnershipIndex,
+        [string]$RepositoryRoot,
+        [switch]$DryRun
+    )
+
+    $decisions = [System.Collections.Generic.List[object]]::new()
+    $savedRoutes = [System.Collections.Generic.List[object]]::new()
+    if (-not $ResolutionProvider) {
+        Write-Host "$($Items.Count) item(s) require ownership decisions."
+        Write-Host '[R] Resolve interactively'
+        Write-Host '[E] Export unresolved routing file'
+        Write-Host '[A] Abort'
+        $initialChoice = Read-Host 'Choice [R/E/A]'
+        if ($initialChoice -match '^(?i)e$') {
+            $defaultPath = if ($RepositoryRoot) { Join-Path $RepositoryRoot 'unresolved-routes.jsonc' } else { 'unresolved-routes.jsonc' }
+            $requestedPath = Read-Host "Output path [$defaultPath]"
+            $outputPath = if ([string]::IsNullOrWhiteSpace($requestedPath)) { $defaultPath } else { $requestedPath }
+            Write-OwnershipRouterFile $outputPath (ConvertTo-UnresolvedRouterDocument $Items)
+            throw "Unresolved routes were written to '$outputPath'. Review the file and retry with -RoutingFile."
+        }
+        if ($initialChoice -notmatch '^(?i)r$') { throw 'Interactive ownership resolution was aborted.' }
+    }
+
+    foreach ($group in (Get-UnresolvedOwnershipGroups $Items)) {
+        $repositoryMatches = [System.Collections.Generic.List[string]]::new()
+        if ($OwnershipIndex) {
+            foreach ($indexKey in $OwnershipIndex.Keys) {
+                $parts = [string]$indexKey -split '\|', 2
+                if ($parts.Count -eq 2 -and $parts[1].StartsWith("$($group.name).", [System.StringComparison]::OrdinalIgnoreCase)) {
+                    $repositoryMatches.Add($parts[1])
+                }
+            }
+        }
+        $overlappingRoutes = [System.Collections.Generic.List[string]]::new()
+        if ($ManagedRouter) {
+            foreach ($route in @($ManagedRouter.routes)) {
+                if ($route.status -ne 'approved' -or $route.match.type -notin @('prefix', 'publisher')) { continue }
+                $proposed = if ($route.kind -eq 'extension') { $group.name } else { "$($group.name)." }
+                $existing = [string]$route.match.value
+                if ($proposed.StartsWith($existing, [System.StringComparison]::OrdinalIgnoreCase) -or
+                    $existing.StartsWith($proposed, [System.StringComparison]::OrdinalIgnoreCase)) {
+                    $overlappingRoutes.Add([string]$route.id)
+                }
+            }
+        }
+        $context = [pscustomobject]@{
+            group = $group.name
+            items = $group.items
+            suggestedDestination = if ($group.name -in @('python', 'eslint')) {
+                New-OwnershipDestination component $(if ($group.name -eq 'python') { 'python' } else { 'web' })
+            }
+            else { $null }
+            matchingRepositoryItems = [string[]]@($repositoryMatches | Sort-Object -Unique)
+            overlappingRouteIds = [string[]]@($overlappingRoutes | Sort-Object -Unique)
+            dryRun = [bool]$DryRun
+        }
+        if ($ResolutionProvider) {
+            $answer = & $ResolutionProvider $context
+        }
+        else {
+            Write-Host ''
+            Write-Host "Group: $($group.name) ($($group.items.Count) item(s))"
+            foreach ($item in $group.items) { Write-Host "  $($item.kind): $($item.item)" }
+            if ($context.suggestedDestination) {
+                Write-Host "Suggestion: $(Get-OwnershipDestinationLabel $context.suggestedDestination) (namespace association; confirmation required)"
+            }
+            Write-Host '[G] Apply one destination to the whole group'
+            Write-Host '[I] Route items individually'
+            if ($context.suggestedDestination) { Write-Host '[A] Accept the suggested destination' }
+            Write-Host '[S] Skip and leave unresolved'
+            $scope = Read-Host 'Choice [G/I/A/S]'
+            if ($scope -match '^(?i)i$') {
+                $individual = [System.Collections.Generic.List[object]]::new()
+                foreach ($item in $group.items) {
+                    $destinationText = Read-Host "Destination for $($item.item) [component/<name>|platform/<name>|machine|profile/<name>|exclude|unresolved]"
+                    $persistence = Read-Host 'Persistence [run|exact]'
+                    if ($persistence -notmatch '^(?i)(run|exact)$') { throw "Invalid individual persistence '$persistence'." }
+                    $individual.Add([pscustomobject]@{
+                        kind = $item.kind
+                        item = $item.item
+                        destination = ConvertFrom-InteractiveDestination $destinationText $Profile
+                        persistence = $persistence
+                    })
+                }
+                $answer = [pscustomobject]@{ decisions = [object[]]$individual.ToArray() }
+            }
+            else {
+                $destination = if ($scope -match '^(?i)a$' -and $context.suggestedDestination) {
+                    $context.suggestedDestination
+                }
+                elseif ($scope -match '^(?i)s$') {
+                    New-OwnershipDestination unresolved
+                }
+                elseif ($scope -match '^(?i)g$') {
+                    $destinationText = Read-Host 'Destination [component/<name>|platform/<name>|machine|profile/<name>|exclude|unresolved]'
+                    ConvertFrom-InteractiveDestination $destinationText $Profile
+                }
+                else { throw "Invalid group choice '$scope'." }
+                $persistence = if ($scope -match '^(?i)s$') { 'run' } else { Read-Host 'Persistence [run|exact|prefix]' }
+                $answer = [pscustomobject]@{
+                    destination = $destination
+                    persistence = $persistence
+                    confirmBroadRule = $false
+                }
+            }
+            if ($answer.PSObject.Properties.Name -contains 'persistence' -and $answer.persistence -ieq 'prefix') {
+                Write-Host "Proposed prefix: $($group.name)."
+                Write-Host 'Imported items currently matched:'
+                foreach ($item in $group.items) { Write-Host "  $($item.item)" }
+                Write-Host 'Existing repository items that would also match:'
+                if ($context.matchingRepositoryItems.Count -eq 0) { Write-Host '  (none)' }
+                else { foreach ($item in $context.matchingRepositoryItems) { Write-Host "  $item" } }
+                Write-Host 'Overlapping approved routes:'
+                if ($context.overlappingRouteIds.Count -eq 0) { Write-Host '  (none)' }
+                else { foreach ($routeId in $context.overlappingRouteIds) { Write-Host "  $routeId" } }
+                $answer.confirmBroadRule = (Read-Host 'Save this approved broad rule? [y/N]') -match '^(?i)y(es)?$'
+            }
+        }
+
+        if (-not $answer) { throw "Interactive resolution aborted for group '$($group.name)'." }
+        $answerEntries = [System.Collections.Generic.List[object]]::new()
+        if ($answer.PSObject.Properties.Name -contains 'decisions') {
+            foreach ($entry in @($answer.decisions)) {
+                if (-not $entry.destination -or [string]::IsNullOrWhiteSpace([string]$entry.item)) {
+                    throw "An individual decision for group '$($group.name)' is incomplete."
+                }
+                $matchingItem = @($group.items | Where-Object {
+                    $_.item -ieq [string]$entry.item -and
+                    (-not ($entry.PSObject.Properties.Name -contains 'kind') -or $_.kind -ieq [string]$entry.kind)
+                })
+                if ($matchingItem.Count -ne 1) { throw "Individual decision item '$($entry.item)' does not uniquely identify an item in group '$($group.name)'." }
+                $answerEntries.Add([pscustomobject]@{
+                    item = $matchingItem[0]
+                    destination = $entry.destination
+                    persistence = if ($entry.PSObject.Properties.Name -contains 'persistence') { [string]$entry.persistence } else { 'run' }
+                })
+            }
+            if ($answerEntries.Count -ne $group.items.Count) {
+                throw "Individual decisions for group '$($group.name)' must cover every item or explicitly route it to unresolved."
+            }
+        }
+        else {
+            if (-not ($answer.PSObject.Properties.Name -contains 'destination') -or -not $answer.destination) {
+                throw "Interactive resolution aborted for group '$($group.name)'."
+            }
+            foreach ($item in $group.items) {
+                $answerEntries.Add([pscustomobject]@{
+                    item = $item
+                    destination = $answer.destination
+                    persistence = if ($answer.PSObject.Properties.Name -contains 'persistence') { [string]$answer.persistence } else { 'run' }
+                })
+            }
+        }
+
+        foreach ($entry in $answerEntries) {
+            $item = $entry.item
+            $decisions.Add([pscustomobject]@{ kind = $item.kind; item = $item.item; destination = $entry.destination })
+            if ($entry.persistence -ieq 'exact') {
+                $id = "user-$($item.kind)-$(([string]$item.item).ToLowerInvariant() -replace '[^a-z0-9._-]', '-')"
+                $savedRoutes.Add((New-OwnershipRoute $id $item.kind exact $item.item $entry.destination user-confirmed approved 'Confirmed during interactive synchronization.'))
+            }
+            elseif ($entry.persistence -notin @('run', 'prefix')) {
+                throw "Invalid persistence '$($entry.persistence)' for '$($item.item)'."
+            }
+        }
+
+        $prefixEntries = @($answerEntries | Where-Object persistence -ieq 'prefix')
+        if ($prefixEntries.Count -gt 0) {
+            if ($prefixEntries.Count -ne $group.items.Count) { throw "A broad route must apply to the whole '$($group.name)' group." }
+            if (-not ($answer.PSObject.Properties.Name -contains 'confirmBroadRule') -or -not $answer.confirmBroadRule) {
+                throw "Broad route for '$($group.name)' was not confirmed."
+            }
+            $destinations = @($prefixEntries | ForEach-Object { Get-OwnershipDestinationLabel $_.destination } | Select-Object -Unique)
+            if ($destinations.Count -ne 1) { throw "A broad route for '$($group.name)' requires one destination." }
+            $kinds = @($group.items | ForEach-Object kind | Select-Object -Unique)
+            foreach ($kind in $kinds) {
+                $matchType = if ($kind -eq 'extension') { 'publisher' } else { 'prefix' }
+                $matchValue = if ($kind -eq 'extension') { $group.name } else { "$($group.name)." }
+                $id = "user-$kind-$($group.name)-rule"
+                $savedRoutes.Add((New-OwnershipRoute $id $kind $matchType $matchValue $prefixEntries[0].destination user-confirmed approved 'Confirmed broad rule during interactive synchronization.'))
+            }
+        }
+    }
+    return [pscustomobject]@{ decisions = [object[]]$decisions.ToArray(); routes = [object[]]$savedRoutes.ToArray() }
+}
+
 function New-SyncSettingDiagnostic {
     param(
         [Parameter(Mandatory)][string]$Heading,
@@ -2205,6 +2713,12 @@ function Sync-ComposerProfileFromExport {
         [string]$Machine,
         [string]$MachineFile,
         [string]$VSCodeUserDataPath,
+        [string]$RoutingFile,
+        [ValidateSet('Supplement', 'Override', 'Isolated')][string]$RoutingMode = 'Supplement',
+        [switch]$NonInteractive,
+        [string]$WriteUnresolved,
+        [scriptblock]$ResolutionProvider,
+        [switch]$PersistDryRunDecisions,
         [switch]$SkipGlobal,
         [switch]$SkipUiState,
         [switch]$DryRun
@@ -2252,36 +2766,15 @@ function Sync-ComposerProfileFromExport {
 
     $profileId = $definition.Id
     $recipe = Read-ProfileRecipe $definition.Path
-    $componentSettings = New-OrderedMap
-    $componentSettingSources = [hashtable]::new([System.StringComparer]::Ordinal)
-    $componentOverrides = [System.Collections.Generic.List[object]]::new()
-    $extensionFiles = [System.Collections.Generic.List[object]]::new()
     $keybindingFiles = [System.Collections.Generic.List[object]]::new()
     foreach ($component in $recipe.Components) {
         $componentPath = Join-Path $root "components/$component"
-        $settingsPath = Join-Path $componentPath 'settings.jsonc'
-        if (Test-Path -LiteralPath $settingsPath -PathType Leaf) {
-            $incoming = Read-JsonCFile $settingsPath
-            Merge-Settings $componentSettings $incoming (Get-RelativeDisplayPath $root $settingsPath) $componentSettingSources $componentOverrides | Out-Null
-        }
-        foreach ($spec in @(
-            @{ Name = 'extensions.txt'; Target = $extensionFiles },
-            @{ Name = 'keybindings.jsonc'; Target = $keybindingFiles }
-        )) {
-            $path = Join-Path $componentPath $spec.Name
-            if (Test-Path -LiteralPath $path -PathType Leaf) {
-                $spec.Target.Add([pscustomobject]@{ Path = $path; Source = (Get-RelativeDisplayPath $root $path) })
-            }
+        $path = Join-Path $componentPath 'keybindings.jsonc'
+        if (Test-Path -LiteralPath $path -PathType Leaf) {
+            $keybindingFiles.Add([pscustomobject]@{ Path = $path; Source = (Get-RelativeDisplayPath $root $path) })
         }
     }
-    $componentExtensions = @(Merge-Extensions $extensionFiles.ToArray())
     $componentKeybindings = @((Merge-Keybindings $keybindingFiles.ToArray()).Items)
-
-    $platformSettingIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
-    if ($Platform) {
-        $platformSettings = Read-JsonCFile (Join-Path $root "platform/$Platform.jsonc")
-        foreach ($key in $platformSettings.Keys) { $platformSettingIds.Add([string]$key) | Out-Null }
-    }
 
     $trackedGlobal = Read-JsonCFile (Join-Path $root 'global/settings.jsonc')
     $globalSettingIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
@@ -2344,144 +2837,118 @@ function Sync-ComposerProfileFromExport {
         foreach ($id in $filteredGlobalIds) { $newGlobal[$id] = Copy-ComposerValue $applicationSettings[$id] }
     }
 
-    $settingClassifications = [ordered]@{}
-    $machineRoutedSettingIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
-    $machineRoutedValues = New-OrderedMap
-    foreach ($keyValue in $resources.Settings.Keys) {
-        $key = [string]$keyValue
-        $classification = Get-SettingValueClassification -SettingKey $key -Value $resources.Settings[$key]
-        $settingClassifications[$key] = $classification
-        $ownerPath = "/$(ConvertTo-JsonPointerSegment $key)"
-        $owner = if ($componentSettingSources.ContainsKey($ownerPath)) {
-            [string]$componentSettingSources[$ownerPath]
-        }
-        elseif ($platformSettingIds.Contains($key)) {
-            "platform/$Platform.jsonc"
-        }
-        elseif ($globalSettingIds.Contains($key)) {
-            'global/settings.jsonc'
-        }
-        else { $null }
-        if ($classification.classification -eq 'secret-or-private') {
-            $rerun = "vscomp sync `"$sourcePath`"$(if ($Platform) { " -Platform $Platform" }) -DryRun"
-            $diagnostic = New-SyncSettingDiagnostic `
-                -Heading 'Sensitive or private setting cannot be synchronized automatically:' `
-                -SettingKey $key `
-                -SourcePath $sourcePath `
-                -Classification $classification `
-                -Platform $Platform `
-                -Owner $owner `
-                -Reason 'Credential-bearing and private-resource settings are excluded rather than routed into ordinary machine files.' `
-                -RecommendedCommand $rerun
-            throw $diagnostic
-        }
-        if ($classification.destination -eq 'machine-local') {
-            $machineRoutedSettingIds.Add($key) | Out-Null
-            $machineRoutedValues[$key] = Copy-ComposerValue $resources.Settings[$key]
+    $managedRouterPath = Get-ManagedOwnershipRouterPath $root
+    $managedRouter = Read-OwnershipRouterFile $managedRouterPath
+    $managedValidation = Test-OwnershipRouterDocument $managedRouter -RepositoryRoot $root -Source 'config/ownership-router.jsonc'
+    if ($managedValidation.errors.Count -gt 0) {
+        throw "Managed ownership router is invalid: $(@($managedValidation.errors | ForEach-Object message) -join '; ')"
+    }
+    $customRouter = $null
+    if ($RoutingFile) {
+        $routingPath = if ([System.IO.Path]::IsPathRooted($RoutingFile)) { $RoutingFile } else { Join-Path $root $RoutingFile }
+        $customRouter = Read-OwnershipRouterFile $routingPath
+        $customValidation = Test-OwnershipRouterDocument $customRouter -RepositoryRoot $root -Source (Get-RelativeDisplayPath $root $routingPath) -Custom
+        if ($customValidation.errors.Count -gt 0) {
+            throw "Custom ownership router is invalid: $(@($customValidation.errors | ForEach-Object message) -join '; ')"
         }
     }
 
+    $ownershipIndex = Get-RepositoryOwnershipIndex -RepositoryRoot $root -Platform $Platform -Profile $profileId
+    $resolutions = [System.Collections.Generic.List[object]]::new()
+    $unresolved = [System.Collections.Generic.List[object]]::new()
+    $globalSettingsIgnored = 0
+    foreach ($keyValue in $resources.Settings.Keys) {
+        $key = [string]$keyValue
+        if ($globalSettingIds.Contains($key) -or $machineOwnedSettingIds.Contains($key)) {
+            $globalSettingsIgnored++
+            continue
+        }
+        $resolution = Resolve-OwnershipItem -Kind setting -Item $key -Value $resources.Settings[$key] `
+            -ExistingOwners (Get-OwnershipIndexOwners $ownershipIndex setting $key) `
+            -ManagedRouter $managedRouter -CustomRouter $customRouter -RoutingMode $RoutingMode
+        if ($resolution.resolved) { $resolutions.Add($resolution) } else { $unresolved.Add($resolution) }
+    }
+    foreach ($keyValue in $machineOwnedSettingIds) {
+        $key = [string]$keyValue
+        $value = Copy-ComposerValue $applicationSettings[$key]
+        $resources.Settings[$key] = $value
+        $resolution = Resolve-OwnershipItem -Kind setting -Item $key -Value $value `
+            -ExistingOwners (Get-OwnershipIndexOwners $ownershipIndex setting $key) `
+            -ManagedRouter $managedRouter -CustomRouter $customRouter -RoutingMode $RoutingMode `
+            -ExplicitDestination (New-OwnershipDestination machine)
+        if ($resolution.resolved) { $resolutions.Add($resolution) } else { $unresolved.Add($resolution) }
+    }
+    foreach ($id in $resources.Extensions) {
+        $resolution = Resolve-OwnershipItem -Kind extension -Item $id -Value $null `
+            -ExistingOwners (Get-OwnershipIndexOwners $ownershipIndex extension $id) `
+            -ManagedRouter $managedRouter -CustomRouter $customRouter -RoutingMode $RoutingMode
+        if ($resolution.resolved) { $resolutions.Add($resolution) } else { $unresolved.Add($resolution) }
+    }
+
+    $interactiveRoutes = [object[]]@()
+    if ($unresolved.Count -gt 0) {
+        if ($WriteUnresolved) {
+            $unresolvedPath = if ([System.IO.Path]::IsPathRooted($WriteUnresolved)) { $WriteUnresolved } else { Join-Path $root $WriteUnresolved }
+            $unresolvedDocument = ConvertTo-UnresolvedRouterDocument $unresolved.ToArray()
+            $unresolvedValidation = Test-OwnershipRouterDocument $unresolvedDocument -RepositoryRoot $root -Source $unresolvedPath -Custom
+            if ($unresolvedValidation.errors.Count -gt 0) { throw "Could not generate unresolved router: $(@($unresolvedValidation.errors.message) -join '; ')" }
+            Write-OwnershipRouterFile $unresolvedPath $unresolvedDocument
+        }
+        $effectiveNonInteractive = $NonInteractive -or (-not $ResolutionProvider -and [Console]::IsInputRedirected)
+        if ($effectiveNonInteractive) {
+            $items = @($unresolved | ForEach-Object { "$($_.kind):$($_.item)" }) -join ', '
+            throw "Unresolved ownership remains in non-interactive mode: $items$(if ($WriteUnresolved) { ". Review '$WriteUnresolved' and retry with -RoutingFile." })"
+        }
+        $interactive = Resolve-OwnershipInteractively -Items $unresolved.ToArray() -Profile $profileId `
+            -ResolutionProvider $ResolutionProvider -ManagedRouter $managedRouter `
+            -OwnershipIndex $ownershipIndex -RepositoryRoot $root -DryRun:$DryRun
+        $decisionMap = @{}
+        foreach ($decision in $interactive.decisions) { $decisionMap["$($decision.kind)|$($decision.item.ToLowerInvariant())"] = $decision.destination }
+        foreach ($item in $unresolved) {
+            $destination = $decisionMap["$($item.kind)|$($item.item.ToLowerInvariant())"]
+            if (-not $destination -or $destination.type -eq 'unresolved') {
+                throw "Ownership remains unresolved for $($item.kind) '$($item.item)'."
+            }
+            $value = if ($item.kind -eq 'setting') { $resources.Settings[$item.item] } else { $null }
+            $resolutions.Add((Resolve-OwnershipItem -Kind $item.kind -Item $item.item -Value $value `
+                -ExistingOwners (Get-OwnershipIndexOwners $ownershipIndex $item.kind $item.item) `
+                -ManagedRouter $managedRouter -CustomRouter $customRouter -RoutingMode $RoutingMode -ExplicitDestination $destination))
+        }
+        $interactiveRoutes = $interactive.routes
+        if ($interactiveRoutes.Count -gt 0) {
+            $combined = [System.Collections.Generic.List[object]]::new()
+            foreach ($route in $managedRouter.routes) { $combined.Add($route) }
+            foreach ($route in $interactiveRoutes) {
+                if (@($combined | Where-Object id -ieq $route.id).Count -gt 0) {
+                    throw "Interactive route ID '$($route.id)' already exists; no router changes were written."
+                }
+                $combined.Add($route)
+            }
+            $managedRouter['routes'] = [object[]]$combined.ToArray()
+            $combinedValidation = Test-OwnershipRouterDocument $managedRouter -RepositoryRoot $root -Source 'config/ownership-router.jsonc'
+            if ($combinedValidation.errors.Count -gt 0) {
+                throw "Interactive router update is invalid: $(@($combinedValidation.errors.message) -join '; ')"
+            }
+        }
+    }
+
+    $needsMachine = @($resolutions | Where-Object { $_.destination.type -eq 'machine' }).Count -gt 0
     $resolvedSyncMachine = $null
-    $machineRoutes = [System.Collections.Generic.List[object]]::new()
-    $machineFileChanged = $false
     $machineRelativePath = $null
-    if ($machineRoutedSettingIds.Count -gt 0) {
+    if ($needsMachine -or $Machine -or $MachineFile) {
         try {
             $resolvedSyncMachine = Resolve-SyncMachine -RepositoryRoot $root -Platform $Platform -Machine $Machine -MachineFile $MachineFile
         }
         catch {
-            $firstKey = [string]@($machineRoutedValues.Keys)[0]
-            $classification = $settingClassifications[$firstKey]
-            $ownerPath = "/$(ConvertTo-JsonPointerSegment $firstKey)"
-            $owner = if ($componentSettingSources.ContainsKey($ownerPath)) { [string]$componentSettingSources[$ownerPath] } else { $null }
-            $commandPlatform = if ($Platform) { $Platform } else { '<platform>' }
-            $diagnostic = New-SyncSettingDiagnostic `
-                -Heading 'Machine-local setting detected, but the target machine could not be resolved:' `
-                -SettingKey $firstKey `
-                -SourcePath $sourcePath `
-                -Classification $classification `
-                -Platform $Platform `
-                -Owner $owner `
-                -Reason $_.Exception.Message `
-                -RecommendedCommand "vscomp sync `"$sourcePath`" -Platform $commandPlatform -Machine <machine-id>"
-            throw $diagnostic
+            $affected = @($resolutions | Where-Object { $_.destination.type -eq 'machine' } | ForEach-Object item) -join ', '
+            throw "Machine-owned items require a resolvable target ($affected). $($_.Exception.Message) Retry with: vscomp sync `"$sourcePath`" -Platform $(if ($Platform) { $Platform } else { '<platform>' }) -Machine <machine-id>"
         }
         $machineLocalRoot = [System.IO.Path]::GetFullPath((Join-Path $root 'machine/local'))
         if (-not (Test-PathWithinDirectory $resolvedSyncMachine.Path $machineLocalRoot)) {
-            throw 'Sync machine routing requires a target under machine/local so it can participate in the repository transaction. Use -Machine <id>.'
+            throw 'Sync machine routing requires a target under machine/local. Use -Machine <id>.'
         }
         $machineRelativePath = Get-RelativeDisplayPath $root $resolvedSyncMachine.Path
-        foreach ($keyValue in $machineRoutedValues.Keys) {
-            $key = [string]$keyValue
-            $settingsMap = $resolvedSyncMachine.Configuration.Settings
-            $exists = $settingsMap.Contains($key)
-            $identical = $exists -and (Test-ValuesEqual $settingsMap[$key] $machineRoutedValues[$key])
-            $action = if ($identical) { 'retain' } elseif ($exists) { 'update' } else { 'add' }
-            $ownerPath = "/$(ConvertTo-JsonPointerSegment $key)"
-            $portableOwner = if ($componentSettingSources.ContainsKey($ownerPath)) {
-                [string]$componentSettingSources[$ownerPath]
-            }
-            elseif ($platformSettingIds.Contains($key)) { "platform/$Platform.jsonc" }
-            else { $null }
-            $machineRoutes.Add([pscustomobject][ordered]@{
-                setting = $key
-                classification = 'machine-local-path'
-                destination = $machineRelativePath
-                machineId = $resolvedSyncMachine.Id
-                selection = $resolvedSyncMachine.Selection
-                action = $action
-                portableOwner = $portableOwner
-                previousValue = if ($exists) { '[REDACTED: machine-local-path]' } else { $null }
-                newValue = '[REDACTED: machine-local-path]'
-                ruleId = 'sync-machine-local-path'
-            })
-            if (-not $identical) {
-                $settingsMap[$key] = Copy-ComposerValue $machineRoutedValues[$key]
-                $machineFileChanged = $true
-            }
-        }
     }
-    elseif ($Machine -or $MachineFile) {
-        $resolvedSyncMachine = Resolve-SyncMachine -RepositoryRoot $root -Platform $Platform -Machine $Machine -MachineFile $MachineFile
-    }
-
-    $settingsReplacements = New-OrderedMap
-    $settingsRemovals = [System.Collections.Generic.List[string]]::new()
-    $globalSettingsIgnored = 0
-    $platformSettingsIgnored = 0
-    foreach ($key in $componentSettings.Keys) {
-        if ($globalSettingIds.Contains([string]$key) -or
-            $machineOwnedSettingIds.Contains([string]$key) -or
-            $platformSettingIds.Contains([string]$key)) { continue }
-        if (-not $resources.Settings.Contains($key)) { $settingsRemovals.Add([string]$key) }
-    }
-    foreach ($key in $resources.Settings.Keys) {
-        if ($machineRoutedSettingIds.Contains([string]$key)) {
-            continue
-        }
-        if ($machineOwnedSettingIds.Contains([string]$key)) {
-            $globalSettingsIgnored++
-            continue
-        }
-        if ($globalSettingIds.Contains([string]$key)) {
-            $globalSettingsIgnored++
-            continue
-        }
-        if ($platformSettingIds.Contains([string]$key)) {
-            $platformSettingsIgnored++
-            continue
-        }
-        if (-not $componentSettings.Contains($key) -or -not (Test-ValuesEqual $componentSettings[$key] $resources.Settings[$key])) {
-            $settingsReplacements[[string]$key] = Copy-ComposerValue $resources.Settings[$key]
-        }
-    }
-
-    $componentExtensionSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($id in $componentExtensions) { $componentExtensionSet.Add($id) | Out-Null }
-    $liveExtensionSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    foreach ($id in $resources.Extensions) { $liveExtensionSet.Add($id) | Out-Null }
-    $extensionAdditions = @($resources.Extensions | Where-Object { -not $componentExtensionSet.Contains($_) })
-    $extensionRemovals = @($componentExtensions | Where-Object { -not $liveExtensionSet.Contains($_) })
 
     $componentKeybindingSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
     foreach ($item in $componentKeybindings) { $componentKeybindingSet.Add((Get-CanonicalComposerValue $item)) | Out-Null }
@@ -2498,66 +2965,42 @@ function Sync-ComposerProfileFromExport {
     $replaceKeybindings = $predictedOrder -cne $liveOrder
 
     $changes = [System.Collections.Generic.List[object]]::new()
-    $profilesChanged = $false
+    $changedRoots = @{}
     $globalChanged = $false
     $uiStateChanged = $false
     $stagingRoot = New-ComposerStagingRepository $root
     try {
-        $stagedProfiles = Join-Path $stagingRoot 'profiles'
-        $legacyOverridePath = Join-Path $stagedProfiles "$profileId.settings.jsonc"
-        if (Test-Path -LiteralPath $legacyOverridePath -PathType Leaf) {
-            Remove-Item -LiteralPath $legacyOverridePath -Force
-            $changes.Add([pscustomobject]@{ action = 'remove'; path = "profiles/$profileId.settings.jsonc" })
-            $profilesChanged = $true
+        foreach ($resolution in $resolutions) {
+            if ($resolution.destination.type -in @('exclude', 'unresolved')) { continue }
+            Remove-PreviousOwnership -StagingRoot $stagingRoot -Resolution $resolution -Changes $changes -ChangedRoots $changedRoots
+            if ($resolution.kind -eq 'setting') {
+                Set-RoutedSettingValue -StagingRoot $stagingRoot -RepositoryRoot $root -Resolution $resolution `
+                    -Value $resources.Settings[$resolution.item] -Changes $changes -ChangedRoots $changedRoots -ResolvedMachine $resolvedSyncMachine
+            }
+            else {
+                Set-RoutedExtensionValue -StagingRoot $stagingRoot -RepositoryRoot $root -Resolution $resolution `
+                    -Changes $changes -ChangedRoots $changedRoots
+            }
         }
-
-        $resourcePlans = @(
-            @{
-                Path = Join-Path $stagedProfiles "$profileId.settings.replace.jsonc"
-                Relative = "profiles/$profileId.settings.replace.jsonc"
-                Present = $settingsReplacements.Count -gt 0
-                Value = $settingsReplacements
-            },
-            @{
-                Path = Join-Path $stagedProfiles "$profileId.settings.remove.jsonc"
-                Relative = "profiles/$profileId.settings.remove.jsonc"
-                Present = $settingsRemovals.Count -gt 0
-                Value = [string[]]$settingsRemovals.ToArray()
-            },
-            @{
-                Path = Join-Path $stagedProfiles "$profileId.extensions.jsonc"
-                Relative = "profiles/$profileId.extensions.jsonc"
-                Present = ($extensionAdditions.Count + $extensionRemovals.Count) -gt 0
-                Value = [ordered]@{ add = [string[]]$extensionAdditions; remove = [string[]]$extensionRemovals }
-            },
-            @{
-                Path = Join-Path $stagedProfiles "$profileId.keybindings.jsonc"
-                Relative = "profiles/$profileId.keybindings.jsonc"
-                Present = ($resources.Keybindings.Count -gt 0 -or $componentKeybindings.Count -gt 0) -and
-                    ($replaceKeybindings -or ($keybindingAdditions.Count + $keybindingRemovals.Count) -gt 0)
-                Value = if ($replaceKeybindings) {
-                    [ordered]@{ replace = [object[]]$resources.Keybindings }
-                }
-                else {
-                    [ordered]@{ add = [object[]]$keybindingAdditions; remove = [object[]]$keybindingRemovals }
-                }
+        if (($resources.Keybindings.Count -gt 0 -or $componentKeybindings.Count -gt 0) -and
+            ($replaceKeybindings -or $keybindingAdditions.Count -gt 0)) {
+            $keybindingPath = Join-Path $stagingRoot "profiles/$profileId.keybindings.jsonc"
+            $value = if ($replaceKeybindings) {
+                [ordered]@{ replace = [object[]]$resources.Keybindings }
             }
-        )
-        foreach ($plan in $resourcePlans) {
-            $existed = Test-Path -LiteralPath $plan.Path -PathType Leaf
-            if ($plan.Present) {
-                $same = $existed -and (Test-ValuesEqual (Read-JsonCFile $plan.Path) $plan.Value)
-                if (-not $same) {
-                    Write-Utf8File $plan.Path (ConvertTo-PrettyJson $plan.Value)
-                    $changes.Add([pscustomobject]@{ action = if ($existed) { 'update' } else { 'create' }; path = $plan.Relative })
-                    $profilesChanged = $true
-                }
+            else { [ordered]@{ add = [object[]]$keybindingAdditions; remove = [object[]]@() } }
+            $same = (Test-Path -LiteralPath $keybindingPath -PathType Leaf) -and (Test-ValuesEqual (Read-JsonCFile $keybindingPath) $value)
+            if (-not $same) {
+                Write-Utf8File $keybindingPath (ConvertTo-PrettyJson $value)
+                $changes.Add([pscustomobject]@{ action = 'update'; path = "profiles/$profileId.keybindings.jsonc"; item = 'keybindings'; owner = "profile/$profileId" })
+                $changedRoots['profiles'] = $true
             }
-            elseif ($existed) {
-                Remove-Item -LiteralPath $plan.Path -Force
-                $changes.Add([pscustomobject]@{ action = 'remove'; path = $plan.Relative })
-                $profilesChanged = $true
-            }
+        }
+        if ($interactiveRoutes.Count -gt 0 -and (-not $DryRun -or $PersistDryRunDecisions)) {
+            $stagedRouterPath = Get-ManagedOwnershipRouterPath $stagingRoot
+            Write-OwnershipRouterFile $stagedRouterPath $managedRouter
+            $changes.Add([pscustomobject]@{ action = 'update'; path = 'config/ownership-router.jsonc'; item = 'interactive routes'; owner = 'managed-router' })
+            $changedRoots['config'] = $true
         }
 
         if (-not $SkipGlobal) {
@@ -2566,6 +3009,7 @@ function Sync-ComposerProfileFromExport {
                 Write-Utf8File $stagedGlobalPath (ConvertTo-PrettyJson $newGlobal)
                 $changes.Add([pscustomobject]@{ action = 'update'; path = 'global/settings.jsonc' })
                 $globalChanged = $true
+                $changedRoots['global'] = $true
             }
         }
         if (-not $SkipUiState) {
@@ -2581,26 +3025,21 @@ function Sync-ComposerProfileFromExport {
             if (-not $sameUiState) {
                 Write-Utf8File $uiPath (ConvertTo-PrettyJson $seed)
                 Read-CodeProfileGlobalState $uiPath | Out-Null
-                $changes.Add([pscustomobject]@{ action = if ($sameUiState) { 'update' } elseif (Test-Path -LiteralPath (Join-Path $root "machine/local/ui-state/$profileId/seed.code-profile")) { 'update' } else { 'create' }; path = "machine/local/ui-state/$profileId/seed.code-profile" })
+                $changes.Add([pscustomobject]@{ action = if (Test-Path -LiteralPath (Join-Path $root "machine/local/ui-state/$profileId/seed.code-profile")) { 'update' } else { 'create' }; path = "machine/local/ui-state/$profileId/seed.code-profile" })
                 $uiStateChanged = $true
+                $changedRoots['machine/local/ui-state'] = $true
             }
-        }
-        if ($machineFileChanged) {
-            $stagedMachinePath = Join-Path $stagingRoot $machineRelativePath
-            Write-MachineConfiguration -Path $stagedMachinePath -Configuration $resolvedSyncMachine.Configuration
-            $changes.Add([pscustomobject]@{ action = 'update'; path = $machineRelativePath })
         }
 
         Assert-StagedRepositoryValid $stagingRoot
         if (-not $DryRun) {
-            $commitPaths = [System.Collections.Generic.List[string]]::new()
-            if ($profilesChanged) { $commitPaths.Add('profiles') }
-            if ($globalChanged) { $commitPaths.Add('global') }
-            if ($uiStateChanged) { $commitPaths.Add('machine/local/ui-state') }
-            if ($machineFileChanged) { $commitPaths.Add($machineRelativePath) }
+            $commitPaths = [string[]]@($changedRoots.Keys | Sort-Object)
             if ($commitPaths.Count -gt 0) {
-                Invoke-StagedRepositoryCommit $root $stagingRoot $commitPaths.ToArray()
+                Invoke-StagedRepositoryCommit $root $stagingRoot $commitPaths
             }
+        }
+        elseif ($PersistDryRunDecisions -and $interactiveRoutes.Count -gt 0) {
+            Invoke-StagedRepositoryCommit $root $stagingRoot @('config')
         }
     }
     finally {
@@ -2613,7 +3052,21 @@ function Sync-ComposerProfileFromExport {
         displayName = $recipe.Name
         exportName = $resources.Name
         changes = [object[]]$changes.ToArray()
-        routes = [object[]]$machineRoutes.ToArray()
+        routes = [object[]]@($resolutions | ForEach-Object {
+            $routeResolution = $_
+            [pscustomobject][ordered]@{
+                kind = $routeResolution.kind
+                item = $routeResolution.item
+                destination = Get-OwnershipDestinationLabel $routeResolution.destination
+                ruleId = $routeResolution.winner.id
+                precedence = $routeResolution.winner.precedence
+                classification = if ($routeResolution.classification) { $routeResolution.classification.classification } else { 'extension' }
+                changed = @($changes | Where-Object {
+                    $_.PSObject.Properties.Name -contains 'item' -and $_.item -eq $routeResolution.item
+                }).Count -gt 0
+                candidates = $routeResolution.candidates
+            }
+        })
         machine = if ($resolvedSyncMachine) {
             [pscustomobject][ordered]@{
                 id = $resolvedSyncMachine.Id
@@ -2625,24 +3078,357 @@ function Sync-ComposerProfileFromExport {
         }
         else { $null }
         counts = [pscustomobject][ordered]@{
-            settingReplacements = $settingsReplacements.Count
-            settingRemovals = $settingsRemovals.Count
-            extensionAdditions = $extensionAdditions.Count
-            extensionRemovals = $extensionRemovals.Count
+            settingsRouted = @($resolutions | Where-Object kind -eq 'setting').Count
+            extensionsRouted = @($resolutions | Where-Object { $_.kind -eq 'extension' }).Count
+            excluded = @($resolutions | Where-Object { $_.destination.type -eq 'exclude' }).Count
+            unresolved = 0
+            settingReplacements = @($changes | Where-Object {
+                $_.PSObject.Properties.Name -contains 'item' -and
+                $_.item -and
+                $_.item -ne 'keybindings' -and
+                $_.path -match '(settings|components|platform|machine)'
+            }).Count
+            settingRemovals = 0
+            extensionAdditions = @($changes | Where-Object { $_.path -match 'extensions' }).Count
+            extensionRemovals = 0
             keybindingAdditions = $keybindingAdditions.Count
-            keybindingRemovals = $keybindingRemovals.Count
+            keybindingRemovals = 0
             keybindingsReplacedForOrder = [bool]$replaceKeybindings
             globalSettings = if ($SkipGlobal) { 0 } else { $newGlobal.Count - 1 }
             machineOwnedGlobalSettingsSkipped = $machineOwnedGlobalCount
             exportGlobalSettingsIgnored = $globalSettingsIgnored
-            platformSettingsIgnored = $platformSettingsIgnored
-            machineSettingsRouted = $machineRoutes.Count
-            machineSettingsAdded = @($machineRoutes | Where-Object action -eq 'add').Count
-            machineSettingsUpdated = @($machineRoutes | Where-Object action -eq 'update').Count
-            machineSettingsRetained = @($machineRoutes | Where-Object action -eq 'retain').Count
+            platformSettingsIgnored = 0
+            machineSettingsRouted = @($resolutions | Where-Object { $_.destination.type -eq 'machine' }).Count
+            machineSettingsAdded = @($changes | Where-Object {
+                $_.PSObject.Properties.Name -contains 'owner' -and $_.owner -eq 'machine' -and $_.action -eq 'create'
+            }).Count
+            machineSettingsUpdated = @($changes | Where-Object {
+                $_.PSObject.Properties.Name -contains 'owner' -and $_.owner -eq 'machine' -and $_.action -eq 'update'
+            }).Count
+            machineSettingsRetained = @($resolutions | Where-Object { $_.destination.type -eq 'machine' }).Count - @($changes | Where-Object {
+                $_.PSObject.Properties.Name -contains 'owner' -and $_.owner -eq 'machine'
+            }).Count
         }
         uiStateUpdated = $uiStateChanged
         dryRun = [bool]$DryRun
+    }
+}
+
+function Get-ManagedOwnershipRouter {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$RepositoryRoot)
+    return Read-OwnershipRouterFile (Get-ManagedOwnershipRouterPath $RepositoryRoot)
+}
+
+function Set-ManagedOwnershipRouter {
+    param(
+        [Parameter(Mandatory)][string]$RepositoryRoot,
+        [Parameter(Mandatory)]$Document,
+        [switch]$DryRun
+    )
+
+    $root = [System.IO.Path]::GetFullPath($RepositoryRoot)
+    $validation = Test-OwnershipRouterDocument $Document -RepositoryRoot $root -Source 'config/ownership-router.jsonc'
+    if ($validation.errors.Count -gt 0) {
+        throw "Router update rejected: $(@($validation.errors.message) -join '; ')"
+    }
+    $current = Get-ManagedOwnershipRouter $root
+    if (Test-ValuesEqual $current $Document) {
+        return [pscustomobject]@{ operation = 'router-update'; changes = @(); dryRun = [bool]$DryRun }
+    }
+    $stagingRoot = New-ComposerStagingRepository $root
+    try {
+        Write-OwnershipRouterFile (Get-ManagedOwnershipRouterPath $stagingRoot) $Document
+        Assert-StagedRepositoryValid $stagingRoot
+        if (-not $DryRun) { Invoke-StagedRepositoryCommit $root $stagingRoot @('config') }
+    }
+    finally {
+        if (Test-Path -LiteralPath $stagingRoot) { Remove-Item -LiteralPath $stagingRoot -Recurse -Force }
+    }
+    return [pscustomobject]@{
+        operation = 'router-update'
+        changes = @([pscustomobject]@{ action = 'update'; path = 'config/ownership-router.jsonc' })
+        dryRun = [bool]$DryRun
+    }
+}
+
+function Add-ManagedOwnershipRoute {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RepositoryRoot,
+        [Parameter(Mandatory)]$Route,
+        [switch]$DryRun
+    )
+
+    $document = Get-ManagedOwnershipRouter $RepositoryRoot
+    if (@($document.routes | Where-Object id -ieq $Route.id).Count -gt 0) {
+        throw "Route ID '$($Route.id)' already exists."
+    }
+    $sameMatch = @($document.routes | Where-Object {
+        $_.kind -ieq $Route.kind -and $_.match.type -ieq $Route.match.type -and $_.match.value -ieq $Route.match.value
+    })
+    if ($sameMatch.Count -gt 0) {
+        throw "A route already exists for $($Route.kind) $($Route.match.type) '$($Route.match.value)': $(@($sameMatch.id) -join ', ')."
+    }
+    $document['routes'] = [object[]]@($document.routes + $Route)
+    return Set-ManagedOwnershipRouter $RepositoryRoot $document -DryRun:$DryRun
+}
+
+function Set-ManagedOwnershipRouteStatus {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RepositoryRoot,
+        [Parameter(Mandatory)][string]$RouteId,
+        [Parameter(Mandatory)][ValidateSet('approved', 'provisional', 'disabled')][string]$Status,
+        [switch]$DryRun
+    )
+
+    $document = Get-ManagedOwnershipRouter $RepositoryRoot
+    $matches = @($document.routes | Where-Object id -ieq $RouteId)
+    if ($matches.Count -ne 1) { throw "Route '$RouteId' was not found or is ambiguous." }
+    $matches[0]['status'] = $Status
+    return Set-ManagedOwnershipRouter $RepositoryRoot $document -DryRun:$DryRun
+}
+
+function Remove-ManagedOwnershipRoute {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RepositoryRoot,
+        [Parameter(Mandatory)][string]$RouteId,
+        [switch]$DryRun
+    )
+
+    $document = Get-ManagedOwnershipRouter $RepositoryRoot
+    $remaining = @($document.routes | Where-Object id -ine $RouteId)
+    if ($remaining.Count -eq $document.routes.Count) { throw "Route '$RouteId' was not found." }
+    $document['routes'] = [object[]]$remaining
+    return Set-ManagedOwnershipRouter $RepositoryRoot $document -DryRun:$DryRun
+}
+
+function Import-ManagedOwnershipRoutes {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RepositoryRoot,
+        [Parameter(Mandatory)][string]$Path,
+        [switch]$DryRun
+    )
+
+    $root = [System.IO.Path]::GetFullPath($RepositoryRoot)
+    $resolvedPath = if ([System.IO.Path]::IsPathRooted($Path)) { $Path } else { Join-Path $root $Path }
+    $custom = Read-OwnershipRouterFile $resolvedPath
+    $customValidation = Test-OwnershipRouterDocument $custom -RepositoryRoot $root -Source $resolvedPath -Custom
+    if ($customValidation.errors.Count -gt 0) { throw "Custom route import rejected: $(@($customValidation.errors.message) -join '; ')" }
+    $managed = Get-ManagedOwnershipRouter $root
+    $ids = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $signatures = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($route in $managed.routes) {
+        $ids.Add([string]$route.id) | Out-Null
+        $signatures.Add("$($route.kind)|$($route.match.type)|$($route.match.value)") | Out-Null
+    }
+    $combined = [System.Collections.Generic.List[object]]::new()
+    foreach ($route in $managed.routes) { $combined.Add($route) }
+    foreach ($route in $custom.routes) {
+        $signature = "$($route.kind)|$($route.match.type)|$($route.match.value)"
+        if (-not $ids.Add([string]$route.id)) { throw "Imported route ID '$($route.id)' already exists." }
+        if (-not $signatures.Add($signature)) { throw "Imported route match '$signature' already exists." }
+        $copy = Copy-ComposerValue $route
+        $copy['source'] = 'custom-file'
+        $combined.Add($copy)
+    }
+    $managed['routes'] = [object[]]$combined.ToArray()
+    return Set-ManagedOwnershipRouter $root $managed -DryRun:$DryRun
+}
+
+function Invoke-OwnershipRouterAudit {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RepositoryRoot,
+        [string]$RoutingFile,
+        [string]$Platform
+    )
+
+    $root = [System.IO.Path]::GetFullPath($RepositoryRoot)
+    $path = if ($RoutingFile) {
+        if ([System.IO.Path]::IsPathRooted($RoutingFile)) { $RoutingFile } else { Join-Path $root $RoutingFile }
+    }
+    else { Get-ManagedOwnershipRouterPath $root }
+    $document = Read-OwnershipRouterFile $path
+    $result = Test-OwnershipRouterDocument $document -RepositoryRoot $root -Source (Get-RelativeDisplayPath $root $path) -Custom:$([bool]$RoutingFile)
+    $index = Get-RepositoryOwnershipIndex -RepositoryRoot $root -Platform $Platform
+    $routerDisplayPath = Get-RelativeDisplayPath $root $path
+    foreach ($indexKey in $index.Keys) {
+        $owners = @($index[$indexKey].ToArray())
+        if ($owners.Count -gt 1) {
+            $parts = [string]$indexKey -split '\|', 2
+            $ownerPaths = @($owners | ForEach-Object path) -join ', '
+            Add-ValidationItem $result errors 'router-duplicate-ownership' "Repository $($parts[0]) '$($parts[1])' has multiple exact owners: $ownerPaths." $routerDisplayPath
+        }
+    }
+    $repositoryItems = @($index.Keys | ForEach-Object {
+        $parts = [string]$_ -split '\|', 2
+        [pscustomobject]@{ kind = $parts[0]; item = $parts[1] }
+    })
+    foreach ($route in @($document.routes)) {
+        $currentMatches = @($repositoryItems | Where-Object {
+            Test-OwnershipRouteMatch $route $_.kind $_.item
+        })
+        if ($currentMatches.Count -eq 0) {
+            $level = if ($route.match.type -eq 'exact') { 'information' } else { 'warnings' }
+            $diagnosticCode = if ($route.match.type -eq 'exact') { 'router-orphan-exact' } else { 'router-stale-pattern' }
+            Add-ValidationItem $result $level $diagnosticCode "Route '$($route.id)' matches no current repository-owned item for the selected audit scope; retain it only if it intentionally targets future imports." $routerDisplayPath
+        }
+        if ($route.kind -eq 'extension' -and $route.destination.type -eq 'machine') {
+            Add-ValidationItem $result errors 'router-uncomposable-extension' "Route '$($route.id)' sends an extension to machine ownership, which the current profile artifact cannot compose." $routerDisplayPath
+        }
+    }
+    foreach ($route in @($document.routes | Where-Object { $_.match.type -eq 'exact' })) {
+        $owners = @(Get-OwnershipIndexOwners $index $route.kind $route.match.value)
+        if ($owners.Count -gt 0) {
+            $destinations = @($owners | ForEach-Object { Get-OwnershipDestinationLabel $_.destination } | Select-Object -Unique)
+            $routeDestination = Get-OwnershipDestinationLabel $route.destination
+            if ($destinations -inotcontains $routeDestination) {
+                Add-ValidationItem $result warnings 'router-disagrees-with-owner' "Route '$($route.id)' targets '$routeDestination', but existing ownership is $($destinations -join ', ')." $routerDisplayPath
+            }
+            else {
+                Add-ValidationItem $result information 'router-shadowed-by-owner' "Route '$($route.id)' agrees with exact ownership and is normally shadowed by it." $routerDisplayPath
+            }
+        }
+        if ($route.kind -eq 'setting' -and $owners.Count -eq 1) {
+            $ownerPath = Join-Path $root $owners[0].path
+            if (Test-Path -LiteralPath $ownerPath -PathType Leaf -and $ownerPath -match '\.jsonc?$') {
+                $settings = Read-JsonCFile $ownerPath
+                if (Test-IsDictionary $settings -and $settings.Contains($route.match.value)) {
+                    $classification = Get-SettingValueClassification $route.match.value $settings[$route.match.value]
+                    if ($classification.classification -eq 'machine-local-path' -and $route.destination.type -in @('component', 'platform', 'profile')) {
+                        Add-ValidationItem $result errors 'router-machine-to-portable' "Route '$($route.id)' sends a machine-local value to a portable destination." $routerDisplayPath
+                    }
+                    if ($classification.classification -eq 'secret-or-private' -and $route.destination.type -ne 'exclude') {
+                        Add-ValidationItem $result errors 'router-sensitive-to-storage' "Route '$($route.id)' sends sensitive/private state to repository storage." $routerDisplayPath
+                    }
+                }
+            }
+        }
+    }
+    return $result
+}
+
+function Explain-OwnershipRoute {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RepositoryRoot,
+        [Parameter(Mandatory)][string]$Item,
+        [ValidateSet('setting', 'extension')][string]$Kind,
+        [string]$Platform,
+        [string]$RoutingFile,
+        [ValidateSet('Supplement', 'Override', 'Isolated')][string]$RoutingMode = 'Supplement',
+        [AllowNull()]$Value
+    )
+
+    $root = [System.IO.Path]::GetFullPath($RepositoryRoot)
+    $managed = Get-ManagedOwnershipRouter $root
+    $custom = if ($RoutingFile) {
+        $path = if ([System.IO.Path]::IsPathRooted($RoutingFile)) { $RoutingFile } else { Join-Path $root $RoutingFile }
+        Read-OwnershipRouterFile $path
+    }
+    else { $null }
+    $index = Get-RepositoryOwnershipIndex -RepositoryRoot $root -Platform $Platform
+    if (-not $Kind) {
+        $Kind = if (@(Get-OwnershipIndexOwners $index extension $Item).Count -gt 0 -or $Item -match '^[^.]+\.[^.]+$' -and $Item -notmatch '(?i)^(editor|workbench|terminal|files|window)\.') { 'extension' } else { 'setting' }
+    }
+    $owners = @(Get-OwnershipIndexOwners $index $Kind $Item)
+    if ($Kind -eq 'setting' -and $null -eq $Value -and $owners.Count -eq 1) {
+        $ownerPath = Join-Path $root $owners[0].path
+        if ($ownerPath -match '\.jsonc?$') {
+            $map = Read-JsonCFile $ownerPath
+            if (Test-IsDictionary $map -and $map.Contains($Item)) { $Value = $map[$Item] }
+        }
+    }
+    $resolution = Resolve-OwnershipItem -Kind $Kind -Item $Item -Value $Value -ExistingOwners $owners `
+        -ManagedRouter $managed -CustomRouter $custom -RoutingMode $RoutingMode
+    $destinationPath = if ($resolution.resolved -and $resolution.destination.type -notin @('machine', 'exclude')) {
+        Get-RelativeDisplayPath $root (Get-RoutedDestinationPath $root $Kind $resolution.destination)
+    }
+    else { $null }
+    return [pscustomobject][ordered]@{
+        item = $Item
+        kind = $Kind
+        candidates = $resolution.candidates
+        winner = $resolution.winner
+        destination = Get-OwnershipDestinationLabel $resolution.destination
+        destinationFile = $destinationPath
+        existingOwnership = $owners
+        classification = if ($resolution.classification) { $resolution.classification.classification } else { 'extension' }
+        validation = if ($resolution.destination.type -eq 'unresolved') { 'unresolved' } else { 'passed' }
+    }
+}
+
+function Archive-LegacySyncSidecars {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RepositoryRoot,
+        [string]$BackupName = 'legacy-sync-manual',
+        [switch]$ConfirmArchive,
+        [switch]$DryRun
+    )
+
+    $root = [System.IO.Path]::GetFullPath($RepositoryRoot)
+    if (-not (Test-ComposerId $BackupName)) { throw "Invalid migration backup name '$BackupName'." }
+    $profileRoot = Join-Path $root 'profiles'
+    $sidecars = @(Get-ChildItem -LiteralPath $profileRoot -File | Where-Object {
+        $_.Name -match '\.(settings(\.replace|\.remove)?|extensions|keybindings)\.jsonc$'
+    } | Sort-Object Name)
+    $changes = [System.Collections.Generic.List[object]]::new()
+    foreach ($file in $sidecars) {
+        $changes.Add([pscustomobject]@{
+            action = if ($ConfirmArchive) { 'archive' } else { 'candidate' }
+            source = "profiles/$($file.Name)"
+            target = "migration-backups/$BackupName/$($file.Name)"
+        })
+    }
+    if (-not $ConfirmArchive -or $sidecars.Count -eq 0) {
+        return [pscustomobject]@{
+            operation = 'archive-legacy-sync-sidecars'
+            changes = [object[]]$changes.ToArray()
+            dryRun = $true
+            confirmationRequired = $sidecars.Count -gt 0
+        }
+    }
+
+    $stagingRoot = New-ComposerStagingRepository $root
+    try {
+        $backupRoot = Join-Path $stagingRoot "migration-backups/$BackupName"
+        [System.IO.Directory]::CreateDirectory($backupRoot) | Out-Null
+        foreach ($file in $sidecars) {
+            $stagedSource = Join-Path $stagingRoot "profiles/$($file.Name)"
+            $stagedBackup = Join-Path $backupRoot $file.Name
+            if (Test-Path -LiteralPath $stagedBackup -PathType Leaf) {
+                if ([System.IO.File]::ReadAllText($stagedBackup) -cne [System.IO.File]::ReadAllText($stagedSource)) {
+                    throw "Migration backup collision at 'migration-backups/$BackupName/$($file.Name)'. Choose another -BackupName."
+                }
+                Remove-Item -LiteralPath $stagedSource -Force
+            }
+            else {
+                Move-Item -LiteralPath $stagedSource -Destination $stagedBackup
+            }
+        }
+        Write-Utf8File (Join-Path $backupRoot 'README.md') @"
+# Archived legacy sync sidecars
+
+These files were archived by ``vscomp migrate legacy-sync``. They are not
+composed. Review each item and reintroduce it only through an explicit owner or
+approved route.
+"@
+        Assert-StagedRepositoryValid $stagingRoot
+        if (-not $DryRun) { Invoke-StagedRepositoryCommit $root $stagingRoot @('profiles', 'migration-backups') }
+    }
+    finally {
+        if (Test-Path -LiteralPath $stagingRoot) { Remove-Item -LiteralPath $stagingRoot -Recurse -Force }
+    }
+    return [pscustomobject]@{
+        operation = 'archive-legacy-sync-sidecars'
+        changes = [object[]]$changes.ToArray()
+        dryRun = [bool]$DryRun
+        confirmationRequired = $false
     }
 }
 
@@ -2882,6 +3668,12 @@ function Invoke-ProfileComposition {
         $source = Get-RelativeDisplayPath $root $platformPath
         $platformRecord = [pscustomobject]@{ Path = $platformPath; Source = $source }
         $inputFiles.Add([pscustomobject]@{ type = 'platform-settings'; path = $source })
+        $platformExtensionsPath = Join-Path $root "platform/$Platform.extensions.txt"
+        if (Test-Path -LiteralPath $platformExtensionsPath -PathType Leaf) {
+            $extensionSource = Get-RelativeDisplayPath $root $platformExtensionsPath
+            $extensionFiles.Add([pscustomobject]@{ Path = $platformExtensionsPath; Source = $extensionSource })
+            $inputFiles.Add([pscustomobject]@{ type = 'platform-extensions'; path = $extensionSource })
+        }
     }
     $resolvedMachine = Resolve-MachinePath -RepositoryRoot $root -Machine $Machine -MachineFile $MachineFile
     $machineId = if ($Machine) { $Machine } elseif ($resolvedMachine) { [System.IO.Path]::GetFileNameWithoutExtension($resolvedMachine) } else { $null }
@@ -3157,4 +3949,4 @@ function Invoke-ProfileComposition {
     }
 }
 
-Export-ModuleMember -Function ConvertFrom-JsonC, Read-ProfileRecipe, Get-ProfileDefinitions, Get-MachineDefinitions, Read-MachineConfiguration, Get-LocalDefaultMachine, Get-SettingValueClassification, Get-DefaultVSCodeUserDataPath, Get-LiveVSCodeProfileDefinitions, Get-VSCodeStatusText, Resolve-ComposerProfileFromVSCodeStatus, Get-SharedDefaultComponent, Test-ComposerRepository, Merge-Settings, Merge-Extensions, Merge-Keybindings, Get-CodeProfileFileName, New-CodeProfileTemplate, Read-CodeProfileResources, Read-CodeProfileGlobalState, Get-StoredUiStateSeedPath, Save-ProfileUiStateSeed, Test-CodeProfileTemplate, Invoke-SafeDirectoryReplace, Rename-ComposerProfile, Rename-ComposerComponent, Set-SharedDefaultComponent, Repair-ComposerGlobalOwnership, Sync-ComposerProfileFromExport, Invoke-GlobalSettingsComposition, Invoke-ProfileComposition
+Export-ModuleMember -Function ConvertFrom-JsonC, Read-ProfileRecipe, Get-ProfileDefinitions, Get-MachineDefinitions, Read-MachineConfiguration, Get-LocalDefaultMachine, Get-SettingValueClassification, Get-DefaultVSCodeUserDataPath, Get-LiveVSCodeProfileDefinitions, Get-VSCodeStatusText, Resolve-ComposerProfileFromVSCodeStatus, Get-SharedDefaultComponent, Test-ComposerRepository, Merge-Settings, Merge-Extensions, Merge-Keybindings, Get-CodeProfileFileName, New-CodeProfileTemplate, Read-CodeProfileResources, Read-CodeProfileGlobalState, Get-StoredUiStateSeedPath, Save-ProfileUiStateSeed, Test-CodeProfileTemplate, Invoke-SafeDirectoryReplace, Rename-ComposerProfile, Rename-ComposerComponent, Set-SharedDefaultComponent, Repair-ComposerGlobalOwnership, Sync-ComposerProfileFromExport, New-OwnershipDestination, New-OwnershipRoute, Get-OwnershipDestinationLabel, Get-ManagedOwnershipRouter, Add-ManagedOwnershipRoute, Set-ManagedOwnershipRouteStatus, Remove-ManagedOwnershipRoute, Import-ManagedOwnershipRoutes, Invoke-OwnershipRouterAudit, Explain-OwnershipRoute, Archive-LegacySyncSidecars, Invoke-GlobalSettingsComposition, Invoke-ProfileComposition

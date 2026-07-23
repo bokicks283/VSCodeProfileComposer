@@ -4,7 +4,11 @@
 
 A setting or extension belongs in the smallest reusable component that fully explains why it exists. Larger profiles reference that component rather than copying it.
 
-Live `.code-profile` exports are flattened and contain no component provenance. The `sync` command therefore records tested differences as recipe-specific sidecars. Promote a synchronized setting, extension, or keybinding into a shared component only after deciding that every recipe using that component should inherit it; then remove the redundant recipe operation and validate all affected recipes.
+Live `.code-profile` exports are flattened, but known repository values already
+have exact owners. `sync` updates those owners directly. New items require an
+approved route or grouped decision; choose the smallest reusable component
+only when every recipe using it should inherit the item. Profile-local
+sidecars are an explicit rare destination, never the fallback.
 
 ## Standalone usability
 

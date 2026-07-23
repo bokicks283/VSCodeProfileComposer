@@ -7,7 +7,8 @@ These files contain reusable OS-specific preferences without usernames, personal
 
 Pass the matching ID to `ProfileComposer.ps1 compose` or `ProfileComposer.ps1 compose-all` with `-Platform windows` or `-Platform linux`. Machine-specific values apply afterward and belong under ignored `machine/local/`.
 
-`ProfileComposer.ps1 sync` uses the same platform ID to exclude already owned
-platform keys from recipe deltas and to resolve a compatible machine
-definition. An explicitly selected schema-1 machine whose `machine.platform`
-does not match fails rather than routing across platforms.
+`ProfileComposer.ps1 sync` uses the same platform ID to discover and update
+existing platform owners, resolve `platform/<id>` routes, include optional
+`platform/<id>.extensions.txt`, and select a compatible machine definition.
+An explicitly selected schema-1 machine whose `machine.platform` does not
+match fails rather than routing across platforms.

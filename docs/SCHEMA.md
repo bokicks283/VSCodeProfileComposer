@@ -23,10 +23,10 @@ and are removed from named-profile output.
 
 The composer represents component membership explicitly in profile YAML.
 Platform ownership is explicit by file, and machine ownership is explicit in a
-selected machine definition. Workspace settings and excluded private state are
-classification outcomes, not composable source layers in the current schema.
-The composer does not infer workspace provenance from a flattened user-profile
-export.
+selected machine definition. New imported ownership is represented by the
+versioned managed router in `config/ownership-router.jsonc`; custom JSONC/YAML
+files use the same schema. Workspace settings and excluded private state are
+classification outcomes, not composable source layers.
 
 VS Code setting values retain the complete JSON domain: string, number,
 boolean, object, array, or null. Arrays and nested objects are inspected
@@ -119,24 +119,61 @@ sensitive values are redacted.
 
 - Global ownership conflicting with a component, recipe, or platform is an
   error.
+- Sync requires one unique exact repository owner. Multiple component,
+  platform, machine, or explicit profile owners are a blocking ownership
+  conflict.
 - A machine/platform mismatch is an error.
 - Multiple compatible automatic machine targets are ambiguous and fail.
 - Explicit machine selection permits the same setting key on different
   machines; the selected machine owns the routed value.
 - A machine value may intentionally override an earlier portable or platform
   value. The route report records that earlier owner.
-- Duplicate portable component ownership emits
-  `cross-component-setting-ownership` for human review. Recipe order still
-  determines the current value because the format does not yet carry an
-  explicit per-setting override declaration.
+- Repository-wide validation warns about duplicate portable component
+  ownership so existing compositions remain inspectable; synchronization
+  refuses to choose between those owners.
+
+## Ownership router schema 1
+
+The router root contains only `schemaVersion` and `routes`. Each route requires
+`id`, `kind`, `match`, `destination`, `source`, `status`, and `reason`.
+
+```jsonc
+{
+  "schemaVersion": 1,
+  "routes": [
+    {
+      "id": "eslint-settings",
+      "kind": "setting",
+      "match": { "type": "prefix", "value": "eslint." },
+      "destination": { "type": "component", "name": "web" },
+      "source": "repository-policy",
+      "status": "approved",
+      "reason": "Portable ESLint behavior belongs to Web."
+    }
+  ]
+}
+```
+
+Kinds are `setting` and `extension`. Match types are `exact`, `prefix`, and
+extension-only `publisher`. Destination types are `component`, `platform`,
+`machine`, `profile`, `exclude`, and `unresolved`. Component/platform/profile
+destinations require a valid repository name; the other destinations may not
+embed a name.
+
+Provenance values are `repository-policy`, `user-confirmed`, `custom-file`,
+`inferred`, and `migration`. Status values are `approved`, `provisional`, and
+`disabled`.
+
+See [Ownership router and repository synchronization](OWNERSHIP-ROUTER.md) for
+precedence and custom-mode semantics.
 
 ## Preview, apply, and compatibility
 
-Dry run and apply call the same sync planner. The planner builds recipe,
+Dry run and apply call the same sync planner. The planner builds owner, router,
 global, machine, and UI-state changes in one staging repository, validates the
 complete routed state, and then swaps only changed paths. Post-write validation
-failure rolls back every swapped path. Repeating the same sync produces retain
-routes and no source changes.
+failure rolls back every swapped path. Repeating the same sync produces no
+source changes.
 
 The VS Code `.code-profile` template remains an unversioned external format
 verified against the version recorded in generated manifests. Unknown outer

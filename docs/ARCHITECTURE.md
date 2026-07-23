@@ -90,8 +90,27 @@ Repositories own generated-folder exclusions, include paths, compile commands, t
 
 `scripts/ProfileComposer.ps1` is the unified command surface. It materializes reviewable artifacts under ignored `build/global/` and `build/profiles/`, lists repository definitions, captures an opaque UI-state seed, synchronizes reviewed exports into recipe deltas, performs safe source-ID/default-ownership transactions, and exposes guarded `vscode` guidance. All documented workflows use its subcommands. `Compose-Profile.ps1` and `Save-ProfileUiState.ps1` remain compatibility wrappers for existing automation only.
 
-When explicitly requested with `-ExportCodeProfile`, composition creates a manual-import `.code-profile` containing composed settings, extension identifiers, and keybindings. UI-state capture may retain one opaque `globalState` snapshot per recipe under ignored `machine/local/ui-state/`; `-UiStateProfile` reuses a stored snapshot and `-UiStateFromProfile` supports a one-off source. When the capture recipe is omitted, only `code --status` is read to resolve one exact recipe match. `sync` instead consumes a manually exported private profile, recursively classifies settings, routes safe machine paths before validation, writes flattened portable differences only to recipe-specific sidecars, and optionally reconciles application-owned values from the built-in Default `settings.json`. It never assigns a live difference to a shared component because exports contain no source provenance. Secret/private resources fail closed, and the entire repository update is staged, validated, and rollback-safe.
+When explicitly requested with `-ExportCodeProfile`, composition creates a manual-import `.code-profile` containing composed settings, extension identifiers, and keybindings. UI-state capture may retain one opaque `globalState` snapshot per recipe under ignored `machine/local/ui-state/`; `-UiStateProfile` reuses a stored snapshot and `-UiStateFromProfile` supports a one-off source. When the capture recipe is omitted, only `code --status` is read to resolve one exact recipe match.
+
+`sync` consumes a manually exported private profile and uses an explicit
+ownership model. It indexes component, selected platform, selected machine, and
+explicit profile-local sources; applies the managed router at
+`config/ownership-router.jsonc` plus any custom router; classifies nested
+values; and groups unresolved items for a terminal decision. Existing exact
+ownership wins over managed patterns. Unknown portable items never fall back
+to profile JSON. Security classification forces exclusion and machine paths
+force the resolved machine owner before strict portability validation. Every
+owner/router/UI/global change is staged, validated, committed, and validated
+again as one rollback-safe plan.
 
 Separately, `vscode list` reads names and opaque profile location IDs from VS Code's version-sensitive profile metadata, and `vscode open` invokes the supported launcher. Ordinary composition still reads no live state. No command interprets UI payloads, maintains UI inheritance, writes the private profile registry, imports/exports/deletes profiles automatically, installs extensions, or controls Settings Sync. Source components, global settings, configuration, recipes, and reviewed recipe sidecars remain canonical.
 
-Sync, global ownership repair, rename, and shared-default mutations are prepared and validated in an isolated staging copy. Only the affected source roots are swapped into place; a second validation runs before rollback backups are removed. A collision, I/O failure, or validation failure restores every swapped path.
+Sync, router management, legacy-sidecar migration, global ownership repair,
+rename, and shared-default mutations are prepared and validated in an isolated
+staging copy. Only the affected source roots are swapped into place; a second
+validation runs before rollback backups are removed. A collision, I/O failure,
+or validation failure restores every swapped path.
+
+See [Ownership router and repository synchronization](OWNERSHIP-ROUTER.md) for
+the schema, precedence, CLI, custom modes, classification overrides, removal
+policy, and exit codes.

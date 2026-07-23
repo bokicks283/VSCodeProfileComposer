@@ -10,7 +10,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $script:DefaultRepositoryRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-Import-Module (Join-Path $PSScriptRoot 'ProfileComposer.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'ProfileComposer.psm1') -Force -DisableNameChecking
 
 function Write-GeneralHelp {
     @'
@@ -29,7 +29,9 @@ Commands:
   list-profiles                     List recipe IDs, names, and ordered components.
   list-machines                     List ignored named machine overlays.
   capture-ui-state [profile] <file> Store only an opaque globalState seed locally.
-  sync [profile] <export>           Sync a reviewed live export back into recipe sources.
+  sync [profile] <export>           Route a reviewed export back to authoritative owners.
+  route <action>                    Explain, audit, and manage ownership routes.
+  migrate legacy-sync              Audit or archive old profile-sidecar output.
   rename-profile <old> <new>        Safely rename a recipe and related repository sources.
   rename-component <old> <new>      Safely rename a component and recipe references.
   default show                      Show the configured shared default component.
@@ -119,24 +121,124 @@ Examples:
         }
         'sync' {
             @'
-sync [<profile>] <private-export> [-Platform <id>] [-VSCodeUserDataPath <path>]
-     [-Machine <id> | -MachineFile <path>] [-SkipGlobal] [-SkipUiState] [-DryRun]
-  Transactionally syncs settings, extensions, keybindings, and opaque UI layout
-  from a manually exported .code-profile into recipe-specific source deltas.
+sync [<profile>] <private-export> [-Platform <id>] [-Machine <id>]
+     [-RoutingFile <path>] [-RoutingMode Supplement|Override|Isolated]
+     [-NonInteractive] [-WriteUnresolved <path>] [-SkipGlobal] [-SkipUiState]
+     [-PersistDryRunDecisions] [-DryRun]
+  Imports a manually exported .code-profile, discovers exact repository owners,
+  applies managed/custom routes, classifies values, resolves unknown ownership,
+  validates one complete mutation plan, and updates authoritative sources.
   When <profile> is omitted, the export name must match exactly one recipe ID
   or display name. Application settings explicitly listed by
   workbench.settings.applyToAllProfiles are synced from the selected VS Code
-  User directory; Sync-ignored machine values are excluded. Safe absolute paths
-  are routed into the explicitly selected, locally defaulted, or uniquely
-  resolvable machine overlay before portable validation.
+  User directory; Sync-ignored machine values are excluded.
 
-  Flattened live resources are never guessed back into shared components.
-  Review -DryRun output and the Git diff before committing.
+  Existing exact ownership wins over broad rules. Security classification forces
+  exclusion; machine-local path classification forces machine ownership.
+  Unknown items are grouped for terminal resolution. -NonInteractive never
+  prompts and exits nonzero without repository writes if anything is unresolved.
+  -WriteUnresolved writes a reusable provisional router file for review.
+
+  RoutingMode defaults to Supplement. Override suppresses managed matches when a
+  custom route matches. Isolated disables the managed router, while exact existing
+  ownership and classification remain active. Dry-run performs no repository
+  mutation; interactive dry-run decisions persist only with
+  -PersistDryRunDecisions.
+
+  Exit 0: complete routed plan validated and applied, or valid dry-run.
+  Exit 1: invalid input/router, conflict, unresolved item, or validation failure.
 
 Examples:
-  ProfileComposer.ps1 sync C:\Private\Python.code-profile -Platform windows -Machine main-windows -DryRun
-  ProfileComposer.ps1 sync python-database C:\Private\Adjusted.code-profile -Platform windows -Machine main-windows
-  ProfileComposer.ps1 sync python C:\Private\Python.code-profile -SkipGlobal -SkipUiState -DryRun
+  vscomp sync .\Main.code-profile -Platform windows -Machine main-windows
+  vscomp sync .\Main.code-profile -Platform windows -Machine main-windows -DryRun
+  vscomp sync .\Main.code-profile -Platform windows -Machine main-windows -NonInteractive -WriteUnresolved .\unresolved-routing.yaml
+  vscomp sync .\Main.code-profile -Platform windows -Machine main-windows -RoutingFile .\temporary-routes.yaml -RoutingMode Supplement
+'@ | Write-Host
+        }
+        'route' {
+            @'
+route <action>
+  Manages config/ownership-router.jsonc through staged, validated CLI updates.
+
+Actions:
+  list
+  show <route-id-or-item>
+  explain <item> [-Kind setting|extension] [-Platform <id>]
+                 [-RoutingFile <path>] [-RoutingMode Supplement|Override|Isolated]
+  audit [-RoutingFile <path>] [-Platform <id>]
+  add-setting <key> <typed destination> [-Id <id>] [-Reason <text>]
+  add-extension <id> <typed destination> [-Id <route-id>] [-Reason <text>]
+  add-prefix <prefix> <typed destination> -ConfirmBroadRule [-Kind setting|extension]
+  add-publisher <publisher> <typed destination> -ConfirmBroadRule
+  remove <route-id> [-DryRun]
+  enable <route-id> [-DryRun]
+  disable <route-id> [-DryRun]
+  import <custom-router> [-DryRun]
+
+Typed destinations:
+  -Component <name> | -Platform <name> | -Machine | -Profile <name> |
+  -Exclude | -Unresolved
+
+Route metadata defaults:
+  -Source user-confirmed
+  -Status approved
+  -Reason "Added through vscomp route."
+
+Approved routes apply automatically. Provisional routes are suggestions only.
+Disabled routes do not participate. Prefix and publisher rules require the
+explicit -ConfirmBroadRule switch. Custom files are never imported implicitly.
+
+Examples:
+  vscomp route list
+  vscomp route explain "python.analysis.typeCheckingMode" -Platform windows
+  vscomp route add-setting "editor.formatOnSave" -Component main -Reason "Shared editor baseline"
+  vscomp route add-prefix "eslint." -Component web -ConfirmBroadRule
+  vscomp route audit
+'@ | Write-Host
+        }
+        'route explain' {
+            Write-Host 'route explain <item> [-Kind setting|extension] [-Platform <id>] [-RoutingFile <path>] [-RoutingMode Supplement|Override|Isolated]: prints every candidate, precedence, winner, destination file, classification override, and final validation. Example: vscomp route explain "eslint.useFlatConfig" -Platform windows'
+        }
+        'route audit' {
+            Write-Host 'route audit [-RoutingFile <path>] [-Platform <id>]: validates schema, IDs, references, duplicates, conflicts, pattern overlap, approval state, owner disagreement, and unsafe destinations. Errors exit 1; warnings are reported. Example: vscomp route audit'
+        }
+        'route add-setting' {
+            Write-Host 'route add-setting <key> <typed destination> [-Id <id>] [-Reason <text>] [-Source <value>] [-Status approved|provisional|disabled] [-DryRun]. Example: vscomp route add-setting "some.path" -Machine -Reason "Local executable path"'
+        }
+        'route add-extension' {
+            Write-Host 'route add-extension <publisher.id> <typed destination> [-Id <id>] [-Reason <text>] [-DryRun]. Example: vscomp route add-extension "ms-python.python" -Component python'
+        }
+        'route add-prefix' {
+            Write-Host 'route add-prefix <prefix> <typed destination> -ConfirmBroadRule [-Kind setting|extension] [-DryRun]. Shows intent through an explicit confirmation flag; audit reports overlaps. Example: vscomp route add-prefix "eslint." -Component web -ConfirmBroadRule'
+        }
+        'route add-publisher' {
+            Write-Host 'route add-publisher <publisher> <typed destination> -ConfirmBroadRule [-DryRun]. Example: vscomp route add-publisher "ms-python" -Component python -ConfirmBroadRule'
+        }
+        'route list' { Write-Host 'route list: lists every managed route with match, destination, status, provenance, and reason. Example: vscomp route list' }
+        'route show' { Write-Host 'route show <route-id-or-item>: shows exact matching route metadata without mutation. Example: vscomp route show python-settings' }
+        'route remove' { Write-Host 'route remove <route-id> [-DryRun]: removes one exact managed route through a staged transaction. Example: vscomp route remove old-rule -DryRun' }
+        'route enable' { Write-Host 'route enable <route-id> [-DryRun]: changes one route status to approved. Example: vscomp route enable python-settings' }
+        'route disable' { Write-Host 'route disable <route-id> [-DryRun]: changes one route status to disabled. Example: vscomp route disable stale-rule' }
+        'route import' { Write-Host 'route import <custom-router> [-DryRun]: explicitly imports validated non-conflicting routes and marks provenance custom-file. Sync -RoutingFile never mutates the managed router. Example: vscomp route import .\reviewed-routes.yaml -DryRun' }
+        'migrate' {
+            @'
+migrate legacy-sync [-ConfirmArchive] [-BackupName <id>] [-DryRun]
+  Audits profile JSONC sidecars produced by the pre-router sync workflow.
+  Without -ConfirmArchive it lists candidates and makes no changes.
+
+  -ConfirmArchive copies every candidate into
+  migration-backups/<BackupName>/ before removing it from profiles/. The
+  default BackupName is legacy-sync-manual. The staged repository must validate
+  before replacement, and a post-write failure rolls back profiles and backups.
+  Existing non-identical backups cause a safe failure.
+
+  Archiving changes profile behavior. Review the candidate list and Git diff,
+  then route each retained item explicitly. This command is terminal-only.
+
+Examples:
+  vscomp migrate legacy-sync
+  vscomp migrate legacy-sync -ConfirmArchive -BackupName legacy-sync-review -DryRun
+  vscomp migrate legacy-sync -ConfirmArchive -BackupName legacy-sync-review
 '@ | Write-Host
         }
         'rename-profile' {
@@ -429,6 +531,153 @@ function Invoke-VSCodeCommand {
     }
 }
 
+function Get-RouteDestinationFromOptions {
+    param([Parameter(Mandatory)][hashtable]$Options)
+
+    $selected = [System.Collections.Generic.List[object]]::new()
+    foreach ($entry in @(
+        @{ Key = 'component'; Type = 'component'; Value = $true },
+        @{ Key = 'platform'; Type = 'platform'; Value = $true },
+        @{ Key = 'profile'; Type = 'profile'; Value = $true },
+        @{ Key = 'machine'; Type = 'machine'; Value = $false },
+        @{ Key = 'exclude'; Type = 'exclude'; Value = $false },
+        @{ Key = 'unresolved'; Type = 'unresolved'; Value = $false }
+    )) {
+        if (($entry.Value -and $Options.ContainsKey($entry.Key)) -or (-not $entry.Value -and [bool]$Options[$entry.Key])) {
+            $selected.Add($entry)
+        }
+    }
+    if ($selected.Count -ne 1) {
+        throw 'Choose exactly one destination: -Component, -Platform, -Machine, -Profile, -Exclude, or -Unresolved.'
+    }
+    $choice = $selected[0]
+    $name = if ($choice.Value) { [string]$Options[$choice.Key] } else { $null }
+    return New-OwnershipDestination $choice.Type $name
+}
+
+function Invoke-RouteCommand {
+    param([string[]]$Arguments)
+
+    if ($Arguments.Count -eq 0) { Write-CommandHelp route; return }
+    $action = $Arguments[0].ToLowerInvariant()
+    $remaining = @($Arguments | Select-Object -Skip 1)
+    if ($action -in @('help', '-help', '--help', '-h')) {
+        if ($remaining.Count -gt 0) { Write-CommandHelp "route $($remaining[0])" } else { Write-CommandHelp route }
+        return
+    }
+    switch ($action) {
+        'list' {
+            $parsed = Read-CommandOptions $remaining @() @('RepositoryRoot')
+            if ($parsed.Options.Help) { Write-CommandHelp 'route list'; return }
+            if ($parsed.Positionals.Count -ne 0) { throw 'route list does not accept positional arguments.' }
+            $root = Get-RepositoryRootFromOptions $parsed.Options
+            $router = Get-ManagedOwnershipRouter $root
+            Write-Host "Managed ownership routes ($($router.routes.Count)):"
+            foreach ($route in $router.routes | Sort-Object id) {
+                Write-Host "  $($route.id): $($route.kind) $($route.match.type) '$($route.match.value)' -> $(Get-OwnershipDestinationLabel $route.destination) [$($route.status); $($route.source)]"
+                Write-Host "    $($route.reason)"
+            }
+        }
+        'show' {
+            $parsed = Read-CommandOptions $remaining @() @('RepositoryRoot')
+            if ($parsed.Options.Help) { Write-CommandHelp 'route show'; return }
+            if ($parsed.Positionals.Count -ne 1) { throw 'route show requires one route ID or routed item.' }
+            $root = Get-RepositoryRootFromOptions $parsed.Options
+            $value = $parsed.Positionals[0]
+            $matches = @((Get-ManagedOwnershipRouter $root).routes | Where-Object {
+                $_.id -ieq $value -or ($_.match.type -eq 'exact' -and $_.match.value -ieq $value)
+            })
+            if ($matches.Count -eq 0) { throw "No route matches '$value'." }
+            $matches | ConvertTo-Json -Depth 20 | Write-Host
+        }
+        'explain' {
+            $parsed = Read-CommandOptions $remaining @() @('RepositoryRoot', 'Kind', 'Platform', 'RoutingFile', 'RoutingMode')
+            if ($parsed.Options.Help) { Write-CommandHelp 'route explain'; return }
+            if ($parsed.Positionals.Count -ne 1) { throw 'route explain requires one setting key or extension ID.' }
+            $root = Get-RepositoryRootFromOptions $parsed.Options
+            $parameters = @{ RepositoryRoot = $root; Item = $parsed.Positionals[0] }
+            foreach ($key in @('kind', 'platform', 'routingfile', 'routingmode')) {
+                if ($parsed.Options.ContainsKey($key)) { $parameters[$key] = $parsed.Options[$key] }
+            }
+            $report = Explain-OwnershipRoute @parameters
+            Write-Host "$($report.kind): $($report.item)"
+            Write-Host 'Resolution candidates:'
+            if ($report.candidates.Count -eq 0) { Write-Host '  No matching candidates.' }
+            foreach ($candidate in $report.candidates | Sort-Object precedence) {
+                Write-Host "  $($candidate.precedence). $($candidate.id) [$($candidate.source); $($candidate.status)] -> $(Get-OwnershipDestinationLabel $candidate.destination)"
+                Write-Host "     $($candidate.reason)"
+            }
+            Write-Host "Destination: $($report.destination)"
+            if ($report.destinationFile) { Write-Host "Destination file: $($report.destinationFile)" }
+            Write-Host "Classification: $($report.classification)"
+            Write-Host "Validation: $($report.validation)"
+        }
+        'audit' {
+            $parsed = Read-CommandOptions $remaining @() @('RepositoryRoot', 'RoutingFile', 'Platform')
+            if ($parsed.Options.Help) { Write-CommandHelp 'route audit'; return }
+            if ($parsed.Positionals.Count -ne 0) { throw 'route audit does not accept positional arguments.' }
+            $root = Get-RepositoryRootFromOptions $parsed.Options
+            $parameters = @{ RepositoryRoot = $root }
+            foreach ($key in @('routingfile', 'platform')) { if ($parsed.Options.ContainsKey($key)) { $parameters[$key] = $parsed.Options[$key] } }
+            $result = Invoke-OwnershipRouterAudit @parameters
+            Write-ValidationSummary $result
+            if ($result.errors.Count -gt 0) { exit 1 }
+        }
+        { $_ -in @('add-setting', 'add-extension', 'add-prefix', 'add-publisher') } {
+            $parsed = Read-CommandOptions $remaining @('Machine', 'Exclude', 'Unresolved', 'ConfirmBroadRule', 'DryRun') @(
+                'Component', 'Platform', 'Profile', 'RepositoryRoot', 'Id', 'Reason', 'Source', 'Status', 'Kind'
+            )
+            if ($parsed.Options.Help) { Write-CommandHelp "route $action"; return }
+            if ($parsed.Positionals.Count -ne 1) { throw "route $action requires one key, extension ID, prefix, or publisher." }
+            if ($action -in @('add-prefix', 'add-publisher') -and -not $parsed.Options.confirmbroadrule) {
+                throw "route $action requires -ConfirmBroadRule after reviewing the proposed match."
+            }
+            $root = Get-RepositoryRootFromOptions $parsed.Options
+            $destination = Get-RouteDestinationFromOptions $parsed.Options
+            $kind = switch ($action) {
+                'add-setting' { 'setting' }
+                'add-extension' { 'extension' }
+                'add-publisher' { 'extension' }
+                default { if ($parsed.Options.ContainsKey('kind')) { [string]$parsed.Options.kind } else { 'setting' } }
+            }
+            if ($kind -notin @('setting', 'extension')) { throw "-Kind must be setting or extension." }
+            $matchType = if ($action -in @('add-setting', 'add-extension')) { 'exact' } elseif ($action -eq 'add-publisher') { 'publisher' } else { 'prefix' }
+            $matchValue = $parsed.Positionals[0]
+            $safe = $matchValue.ToLowerInvariant() -replace '[^a-z0-9._-]', '-'
+            $routeId = if ($parsed.Options.ContainsKey('id')) { [string]$parsed.Options.id } else { "$kind-$matchType-$safe" }
+            $reason = if ($parsed.Options.ContainsKey('reason')) { [string]$parsed.Options.reason } else { 'Added through vscomp route.' }
+            $source = if ($parsed.Options.ContainsKey('source')) { [string]$parsed.Options.source } else { 'user-confirmed' }
+            $status = if ($parsed.Options.ContainsKey('status')) { [string]$parsed.Options.status } else { 'approved' }
+            $route = New-OwnershipRoute $routeId $kind $matchType $matchValue $destination $source $status $reason
+            $result = Add-ManagedOwnershipRoute $root $route -DryRun:$parsed.Options.dryrun
+            Write-ChangePlan $result
+        }
+        { $_ -in @('remove', 'enable', 'disable') } {
+            $parsed = Read-CommandOptions $remaining @('DryRun') @('RepositoryRoot')
+            if ($parsed.Options.Help) { Write-CommandHelp "route $action"; return }
+            if ($parsed.Positionals.Count -ne 1) { throw "route $action requires one route ID." }
+            $root = Get-RepositoryRootFromOptions $parsed.Options
+            if ($action -eq 'remove') {
+                $result = Remove-ManagedOwnershipRoute $root $parsed.Positionals[0] -DryRun:$parsed.Options.dryrun
+            }
+            else {
+                $status = if ($action -eq 'enable') { 'approved' } else { 'disabled' }
+                $result = Set-ManagedOwnershipRouteStatus $root $parsed.Positionals[0] $status -DryRun:$parsed.Options.dryrun
+            }
+            Write-ChangePlan $result
+        }
+        'import' {
+            $parsed = Read-CommandOptions $remaining @('DryRun') @('RepositoryRoot')
+            if ($parsed.Options.Help) { Write-CommandHelp 'route import'; return }
+            if ($parsed.Positionals.Count -ne 1) { throw 'route import requires one custom router path.' }
+            $root = Get-RepositoryRootFromOptions $parsed.Options
+            $result = Import-ManagedOwnershipRoutes $root $parsed.Positionals[0] -DryRun:$parsed.Options.dryrun
+            Write-ChangePlan $result
+        }
+        default { throw "Unknown route action '$action'. Use 'vscomp help route'." }
+    }
+}
+
 function Invoke-Compose {
     param([bool]$AllProfiles, [string[]]$Arguments)
     $parsed = Read-CommandOptions $Arguments @('DryRun', 'Strict', 'ExportCodeProfile') @('Platform', 'Machine', 'MachineFile', 'UiStateFromProfile', 'UiStateProfile', 'RepositoryRoot')
@@ -476,8 +725,8 @@ try {
     switch ($normalizedCommand) {
         'help' {
             if ($CommandArguments.Count -eq 0) { Write-GeneralHelp }
-            elseif ($CommandArguments.Count -eq 1) { Write-CommandHelp $CommandArguments[0] }
-            else { throw 'help accepts at most one command name.' }
+            elseif ($CommandArguments.Count -le 2) { Write-CommandHelp ($CommandArguments -join ' ') }
+            else { throw 'help accepts a command and optional subcommand name.' }
         }
         'validate' {
             $parsed = Read-CommandOptions $CommandArguments @('Strict') @('Platform', 'Machine', 'MachineFile', 'RepositoryRoot')
@@ -576,7 +825,10 @@ try {
             Write-Host "$verb UI state for '$($result.profileId)' at $($result.outputPath). Only opaque globalState is retained."
         }
         'sync' {
-            $parsed = Read-CommandOptions $CommandArguments @('DryRun', 'SkipGlobal', 'SkipUiState') @('Platform', 'Machine', 'MachineFile', 'RepositoryRoot', 'VSCodeUserDataPath')
+            $parsed = Read-CommandOptions $CommandArguments @('DryRun', 'SkipGlobal', 'SkipUiState', 'NonInteractive', 'PersistDryRunDecisions') @(
+                'Platform', 'Machine', 'MachineFile', 'RepositoryRoot', 'VSCodeUserDataPath',
+                'RoutingFile', 'RoutingMode', 'WriteUnresolved'
+            )
             if ($parsed.Options.Help) { Write-CommandHelp sync; break }
             if ($parsed.Positionals.Count -lt 1 -or $parsed.Positionals.Count -gt 2) {
                 throw 'sync requires <profile-export> for automatic matching or <profile> <profile-export> explicitly.'
@@ -591,28 +843,48 @@ try {
                 DryRun = [bool]$parsed.Options.dryrun
                 SkipGlobal = [bool]$parsed.Options.skipglobal
                 SkipUiState = [bool]$parsed.Options.skipuistate
+                NonInteractive = [bool]$parsed.Options.noninteractive
+                PersistDryRunDecisions = [bool]$parsed.Options.persistdryrundecisions
             }
             if ($parsed.Positionals.Count -eq 2) { $parameters.Profile = $parsed.Positionals[0] }
-            foreach ($key in @('platform', 'machine', 'machinefile', 'vscodeuserdatapath')) {
+            foreach ($key in @('platform', 'machine', 'machinefile', 'vscodeuserdatapath', 'routingfile', 'routingmode', 'writeunresolved')) {
                 if ($parsed.Options.ContainsKey($key)) { $parameters[$key] = $parsed.Options[$key] }
             }
             $result = Sync-ComposerProfileFromExport @parameters
             Write-Host "$(if ($result.dryRun) { 'DRY RUN: planned sync' } else { 'Synced' }) export '$($result.exportName)' to recipe '$($result.profileId)'."
             Write-ChangePlan $result
-            Write-Host "  Settings: $($result.counts.settingReplacements) replacement(s), $($result.counts.settingRemovals) removal(s)"
-            Write-Host "  Extensions: $($result.counts.extensionAdditions) addition(s), $($result.counts.extensionRemovals) removal(s)"
-            Write-Host "  Keybindings: $($result.counts.keybindingAdditions) addition(s), $($result.counts.keybindingRemovals) removal(s), exact-order replacement=$($result.counts.keybindingsReplacedForOrder)"
+            Write-Host "  Settings routed: $($result.counts.settingsRouted); extensions routed: $($result.counts.extensionsRouted); excluded: $($result.counts.excluded)"
+            Write-Host "  Conservative removal policy: no shared setting or extension was removed because it was absent from this export."
+            Write-Host "  Keybindings: $($result.counts.keybindingAdditions) addition(s), exact-order replacement=$($result.counts.keybindingsReplacedForOrder)"
             Write-Host "  Global: $($result.counts.globalSettings) tracked setting(s); $($result.counts.machineOwnedGlobalSettingsSkipped) Sync-ignored machine value(s) skipped"
             Write-Host "  Ownership filters: $($result.counts.exportGlobalSettingsIgnored) global/machine setting(s) and $($result.counts.platformSettingsIgnored) platform setting(s) excluded from recipe deltas"
             Write-Host "  Machine routing: $($result.counts.machineSettingsAdded) addition(s), $($result.counts.machineSettingsUpdated) update(s), $($result.counts.machineSettingsRetained) retained"
             if ($result.machine) {
                 Write-Host "  Selected machine: $($result.machine.id) [$($result.machine.selection)] -> $($result.machine.path)"
             }
-            foreach ($route in $result.routes) {
-                $owner = if ($route.portableOwner) { "; earlier owner=$($route.portableOwner)" } else { '' }
-                Write-Host "    $($route.action.ToUpperInvariant()) $($route.setting) -> $($route.destination)$owner [$($route.ruleId)]"
+            $displayRoutes = @($result.routes | Where-Object { $_.changed -or $_.ruleId -ne 'existing-repository-owner' -or $_.classification -notin @('portable', 'extension') })
+            foreach ($route in $displayRoutes) {
+                Write-Host "    $($route.kind.ToUpperInvariant()) $($route.item) -> $($route.destination) [$($route.ruleId); precedence $($route.precedence); $($route.classification)]"
             }
             Write-Host "  UI state updated: $($result.uiStateUpdated)"
+        }
+        'route' { Invoke-RouteCommand $CommandArguments }
+        'migrate' {
+            $parsed = Read-CommandOptions $CommandArguments @('ConfirmArchive', 'DryRun') @('RepositoryRoot', 'BackupName')
+            if ($parsed.Options.Help -or $parsed.Positionals.Count -eq 0) { Write-CommandHelp migrate; break }
+            if ($parsed.Positionals.Count -ne 1 -or $parsed.Positionals[0] -ine 'legacy-sync') {
+                throw "migrate currently requires the target 'legacy-sync'."
+            }
+            $root = Get-RepositoryRootFromOptions $parsed.Options
+            $parameters = @{
+                RepositoryRoot = $root
+                ConfirmArchive = [bool]$parsed.Options.confirmarchive
+                DryRun = [bool]$parsed.Options.dryrun
+            }
+            if ($parsed.Options.ContainsKey('backupname')) { $parameters.BackupName = $parsed.Options.backupname }
+            $result = Archive-LegacySyncSidecars @parameters
+            Write-ChangePlan $result
+            if ($result.confirmationRequired) { Write-Host '  Re-run with -ConfirmArchive only after reviewing every candidate.' }
         }
         { $_ -in @('rename-profile', 'rename-component', 'rename') } {
             if ($normalizedCommand -eq 'rename') {

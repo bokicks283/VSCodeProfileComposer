@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "routes": [
+    {
+      "id": "python-settings",
+      "kind": "setting",
+      "match": {
+        "type": "prefix",
+        "value": "python."
+      },
+      "destination": {
+        "type": "component",
+        "name": "python"
+      },
+      "source": "repository-policy",
+      "status": "approved",
+      "reason": "Portable Python settings belong to the reusable Python component."
+    },
+    {
+      "id": "eslint-settings",
+      "kind": "setting",
+      "match": {
+        "type": "prefix",
+        "value": "eslint."
+      },
+      "destination": {
+        "type": "component",
+        "name": "web"
+      },
+      "source": "repository-policy",
+      "status": "approved",
+      "reason": "Portable ESLint behavior belongs to the Web component."
+    },
+    {
+      "id": "python-extension",
+      "kind": "extension",
+      "match": {
+        "type": "exact",
+        "value": "ms-python.python"
+      },
+      "destination": {
+        "type": "component",
+        "name": "python"
+      },
+      "source": "repository-policy",
+      "status": "approved",
+      "reason": "The Microsoft Python extension is owned by the Python component."
+    }
+  ]
+}

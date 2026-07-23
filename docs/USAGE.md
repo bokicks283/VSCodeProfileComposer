@@ -442,7 +442,9 @@ Treat both the source and seeded exports as private. `globalState` can contain p
 
 ### Sync tested changes back into the repository
 
-VS Code exports the final flattened profile but does not record which component originally owned each value. The `sync` command therefore writes only recipe-specific deltas and never guesses that a change belongs in Main, Python, Database, or another shared component:
+VS Code exports a flattened profile, but the repository already provides exact
+ownership for known values. `sync` updates those owners directly and routes
+new values through the managed/custom ownership system:
 
 ```powershell
 # In VS Code first: Profiles → profile overflow menu → Export Profile...
@@ -457,19 +459,57 @@ pwsh ./scripts/ProfileComposer.ps1 sync "C:\private\Adjusted Python.code-profile
 pwsh ./scripts/ProfileComposer.ps1 sync python-database "C:\private\Adjusted DB Profile.code-profile" -Platform windows -Machine main-windows
 ```
 
-The command synchronizes settings, extensions, keyboard shortcuts, and the export's opaque UI layout. Before constructing recipe changes, it recursively classifies every setting value. Safe absolute, UNC, POSIX, home-relative, environment-home, and file-URI paths route to the selected ignored machine definition. Portable differences become exact recipe replacements; missing component settings become recipe removals. Extension and keybinding changes become add/remove operations, while reordered keybindings use an exact recipe array. The UI resource is stored only under ignored `machine/local/ui-state/<recipe>/`.
+The command synchronizes settings, extensions, additive/reordered keyboard
+shortcuts, and the export's opaque UI layout. Before constructing changes, it:
+
+1. discovers exact component/platform/machine/profile owners;
+2. applies `config/ownership-router.jsonc` and an optional custom router;
+3. recursively classifies every setting value;
+4. groups unresolved namespaces/publishers for terminal decisions;
+5. validates and applies one rollback-safe plan.
+
+Safe absolute, UNC, POSIX, home-relative, environment-home, and file-URI paths
+force the selected ignored machine definition. Sensitive/private state forces
+exclusion. Unknown values do not become recipe replacements unless the user
+explicitly chooses `profile/<id>`. Absence from one export does not remove a
+shared setting or extension.
 
 Machine resolution order is explicit `-Machine`/`-MachineFile`, ignored `machine/local/.default-machine`, then one unique machine whose metadata is compatible with `-Platform`. Multiple matches fail rather than guessing. Create a local default with `Set-Content ./machine/local/.default-machine 'main-windows'`. New definitions use the schema in [Schema and ownership contract](SCHEMA.md); legacy plain maps remain readable.
 
 Unless `-SkipGlobal` is supplied, `sync` also reads the selected VS Code User directory's `settings.json`. It treats `workbench.settings.applyToAllProfiles` as the explicit global ownership list and rewrites `global/settings.jsonc` from those values. Values whose keys are ignored by Settings Sync are considered machine-owned and are skipped; their values are never printed. Use `-VSCodeUserDataPath` for Insiders or a nonstandard User directory.
 
-Because live exports contain no repository comments, a changed global, recipe, or machine source is normalized to formatted JSON and cannot reconstruct prior comments. Unchanged files retain their bytes. The values and ownership order remain reviewable; use `-DryRun` first and inspect the resulting Git diff before committing.
+Because live exports contain no repository comments, a changed JSONC owner may
+be normalized and cannot reconstruct prior comments. Unchanged files retain
+their bytes. Use `-DryRun` first and inspect the Git diff.
 
 Settings owned by the selected `-Platform` overlay are also excluded from recipe deltas. Update the platform source deliberately when an OS-wide choice changes; the sync summary reports the filtered count.
 
 The source export must include UI State. Use `-SkipUiState` only when intentionally syncing the other resources. Snippet and task resources are rejected because the current composer schema does not own them. Credential-bearing settings, saved connections, private hosts/endpoints, account IDs, certificates, SSH keys, and authentication state also fail before writes and are never printed in full. Keep the export private: it can contain account or extension state. After a real sync, inspect `git diff`, validate, and compose before committing.
 
-Shared components still require human intent. Once a recipe-specific change proves broadly useful, move it from the generated recipe sidecar into the smallest correct component and remove the redundant sidecar entry.
+Use deterministic automation when prompts are not possible:
+
+```powershell
+vscomp sync ".\Main.code-profile" `
+  -Platform windows `
+  -Machine main-windows `
+  -NonInteractive `
+  -WriteUnresolved ".\unresolved-routing.yaml"
+```
+
+Use a temporary custom router without mutating the managed registry:
+
+```powershell
+vscomp sync ".\Main.code-profile" `
+  -Platform windows `
+  -Machine main-windows `
+  -RoutingFile ".\temporary-routes.yaml" `
+  -RoutingMode Supplement
+```
+
+See [Ownership router and repository synchronization](OWNERSHIP-ROUTER.md) for
+the complete router schema, precedence, grouped resolver, route CLI,
+Supplement/Override/Isolated behavior, audit/explain, migration, and exit
+codes.
 
 Use VS Code's supported Profiles editor:
 
@@ -552,7 +592,9 @@ Logs can contain usernames, local paths, repository names, remote hosts, and ext
 2. Otherwise, find the owning component using `docs/COMPONENT-GUIDELINES.md`.
 3. Edit its `settings.jsonc`, `extensions.txt`, or `keybindings.jsonc`.
 4. Put a portable one-profile exception in `profiles/<profile-id>.settings.jsonc` only when component ownership would be misleading.
-5. Alternatively, export a tested live profile and run `sync ... -DryRun`; review its recipe-specific `.settings.replace`, `.settings.remove`, `.extensions`, and `.keybindings` sidecars before applying.
+5. Alternatively, export a tested live profile and run `sync ... -DryRun`;
+   review the owner-by-owner plan before applying. Profile sidecars appear only
+   for explicit profile-local routes or keybinding order.
 6. Put reusable OS behavior in `platform/windows.jsonc` or `platform/linux.jsonc`.
 7. Put private absolute paths and device values in an ignored named machine overlay.
 8. Validate, dry-run, compose, inspect overrides, and run tests.

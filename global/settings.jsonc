@@ -39,6 +39,7 @@
     "terminal.integrated.enableMultiLinePasteWarning",
     "terminal.integrated.enableVisualBell",
     "terminal.integrated.initialHint",
+    "terminal.integrated.persistentSessionScrollback",
     "workbench.editor.closeOnFileDelete",
     "workbench.editor.empty.hint",
     "workbench.editor.enablePreviewFromCodeNavigation",
@@ -49,7 +50,8 @@
     "workbench.editor.tabSizingFixedMinWidth",
     "workbench.editor.titleScrollbarSizing",
     "workbench.editor.untitled.labelFormat",
-    "workbench.editor.wrapTabs"
+    "workbench.editor.wrapTabs",
+    "window.newWindowProfile"
   ],
   "accessibility.dimUnfocused.enabled": true,
   "accessibility.signals.terminalBell": {
@@ -103,6 +105,7 @@
   "terminal.integrated.enableMultiLinePasteWarning": "never",
   "terminal.integrated.enableVisualBell": true,
   "terminal.integrated.initialHint": false,
+  "terminal.integrated.persistentSessionScrollback": 1000,
   "workbench.editor.closeOnFileDelete": true,
   "workbench.editor.empty.hint": "hidden",
   "workbench.editor.enablePreviewFromCodeNavigation": true,
@@ -113,5 +116,6 @@
   "workbench.editor.tabSizingFixedMinWidth": 38,
   "workbench.editor.titleScrollbarSizing": "large",
   "workbench.editor.untitled.labelFormat": "name",
-  "workbench.editor.wrapTabs": true
+  "workbench.editor.wrapTabs": true,
+  "window.newWindowProfile": "Main"
 }

@@ -43,6 +43,10 @@ pwsh ./scripts/ProfileComposer.ps1 compose main -Platform windows -ExportCodePro
 
 # Inspect inputs and planned output without writing build files.
 pwsh ./scripts/ProfileComposer.ps1 compose main -Platform windows -ExportCodeProfile -DryRun
+
+# Explain and audit ownership routing.
+pwsh ./scripts/ProfileComposer.ps1 route explain "python.analysis.typeCheckingMode" -Platform windows
+pwsh ./scripts/ProfileComposer.ps1 route audit -Platform windows
 ```
 
 After arranging a profile in VS Code and exporting it manually, store only its UI state under ignored local project data:
@@ -67,7 +71,17 @@ pwsh ./scripts/ProfileComposer.ps1 sync "C:\private\Adjusted Python.code-profile
 pwsh ./scripts/ProfileComposer.ps1 sync "C:\private\Adjusted Python.code-profile" -Platform windows -Machine main-windows
 ```
 
-`sync` classifies settings before planning. Portable changes become recipe-specific deltas; safe absolute paths route to the selected ignored machine file; secret/private resources fail with redacted diagnostics. It also reads the built-in Default/application `settings.json` and updates only values explicitly named by `workbench.settings.applyToAllProfiles`; Sync-ignored machine values are not copied into tracked settings. Supply the recipe ID before the export path when the exported name does not match exactly one recipe. Add `-SkipGlobal` or `-SkipUiState` to omit those resources.
+`sync` is an ownership-aware repository synchronization command. Existing
+component, platform, machine, and explicit profile-local owners are updated
+directly. New items use the managed registry at
+`config/ownership-router.jsonc`, an optional custom JSONC/YAML router, or a
+grouped terminal decision. Unknown items never fall back to profile JSON.
+Classification runs before portability validation: sensitive/private values
+are excluded and machine paths route to the selected ignored machine file. It
+also reads the built-in Default/application `settings.json` and updates only
+values explicitly named by `workbench.settings.applyToAllProfiles`;
+Sync-ignored machine values are not copied into tracked settings. Add
+`-NonInteractive -WriteUnresolved <path>` for deterministic automation.
 
 Reuse that stored layout for the same profile or as the starting layout for another profile:
 
@@ -138,7 +152,14 @@ Machine overlays are deliberately excluded from named-profile settings and `.cod
 
 `ProfileComposer.ps1 capture-ui-state [<profile-id>] <export-path>` validates a manually exported `.code-profile` and stores only its opaque `globalState` resource at `machine/local/ui-state/<profile>/seed.code-profile`. When the recipe ID is omitted, the CLI reads `code --status` and accepts exactly one active profile name matching a recipe ID or display name. Zero or multiple matches fail safely. The source settings, extensions, keybindings, name, and path are not copied. `-UiStateProfile <id>` reuses a stored seed during `compose` or `compose-all`; `-UiStateFromProfile <path>` remains available for a one-off build. This is copy-on-create, not inheritance: VS Code owns each profile's UI after import, later layout changes do not propagate, and views introduced by other extensions use their defaults. Stored and generated UI-seeded files are private because `globalState` can include extension or account-related state.
 
-`ProfileComposer.ps1 sync [<profile-id>] <export-path>` is the reviewed reverse path. It consumes the export's settings, extensions, keybindings, and `globalState`, but never guesses flattened changes back into shared components. It classifies nested values first, routes safe machine paths into the resolved ignored machine definition, and writes remaining validated recipe sidecars under `profiles/`; exact setting values use `.settings.replace.jsonc`, removed component settings use `.settings.remove.jsonc`, and extension/keybinding add/remove operations use their corresponding `.jsonc` sidecars. A keybinding order change is preserved through an exact recipe replacement. The private UI resource remains ignored under `machine/local/ui-state/`.
+`ProfileComposer.ps1 sync [<profile-id>] <export-path>` is the reviewed reverse
+path. It consumes settings, extensions, keybindings, and optional
+`globalState`; resolves exact ownership before managed/custom patterns; groups
+unresolved items for terminal decisions; validates the complete plan; and
+updates authoritative files atomically. Missing imported resources do not
+delete shared ownership. Explicit profile routes may use the existing profile
+sidecar formats, and a reviewed keybinding order remains profile-local. The
+private UI resource remains ignored under `machine/local/ui-state/`.
 
 ## Guided VS Code profile management
 
@@ -197,8 +218,14 @@ Run the isolated suite:
 pwsh -NoProfile -Command "Invoke-Pester -Path ./tests -Output Detailed -CI"
 ```
 
+Run the terminal-only documentation/help/schema/link drift check:
+
+```powershell
+pwsh -NoProfile -NonInteractive -File ./scripts/Test-Documentation.ps1
+```
+
 ## Installer status
 
 Unattended installation, replacement, deletion, and export remain deferred because VS Code 1.130 exposes no supported complete profile-management CLI. The guided commands may read profile names/location IDs and `code --status`, and `vscode open` may launch an existing profile; they never write profile storage, invoke import/export automatically, install extensions, or alter Settings Sync. `sync` requires a manually exported private `.code-profile` and reads application settings only for explicit global ownership reconciliation. Settings Sync remains the primary cross-machine delivery mechanism for imported active profiles.
 
-See [Complete usage guide](docs/USAGE.md), [Composer details](docs/COMPOSER.md), [Architecture](docs/ARCHITECTURE.md), [Schema and ownership contract](docs/SCHEMA.md), [Sync routing and schema-model audit](docs/audits/2026-07-23-sync-schema-model.md), [Main-profile ownership audit](docs/audits/2026-07-22-main-profile-ownership.md), [Portability](docs/PORTABILITY.md), [Migration](docs/MIGRATION.md), and the sanitized [historical extension reference](reference/extensions/README.md).
+See [Complete usage guide](docs/USAGE.md), [Ownership router and sync](docs/OWNERSHIP-ROUTER.md), [Composer details](docs/COMPOSER.md), [Architecture](docs/ARCHITECTURE.md), [Schema and ownership contract](docs/SCHEMA.md), [Sync routing and schema-model audit](docs/audits/2026-07-23-sync-schema-model.md), [Main-profile ownership audit](docs/audits/2026-07-22-main-profile-ownership.md), [Portability](docs/PORTABILITY.md), [Migration](docs/MIGRATION.md), and the sanitized [historical extension reference](reference/extensions/README.md).

@@ -10,6 +10,11 @@ Before retaining a live export:
 2. Review the complete file for personal paths, credentials, tokens, private connection data, account state, UI state, and machine-only values.
 3. Store sensitive backups outside this public repository.
 
-`.code-profile` files in this directory are ignored by default. A reviewed live export may be supplied to `ProfileComposer.ps1 sync`, which converts supported differences into validated recipe-specific sidecars and an ignored UI seed without guessing shared-component ownership. The export itself is never canonical and should not be committed without an explicit content review.
+`.code-profile` files in this directory are ignored by default. A reviewed live
+export may be supplied to `ProfileComposer.ps1 sync`, which updates exact
+owners, applies approved managed/custom routes, groups unresolved items, and
+stores an ignored UI seed. Unknown items never default to profile sidecars. The
+export itself is never canonical and should not be committed without an
+explicit content review.
 
 See [Complete usage guide](../docs/USAGE.md) for normal composition and import steps.
