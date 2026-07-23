@@ -4,6 +4,13 @@ This was a read-only comparison of the live stable VS Code `Main` profile and
 the repository. No VS Code file, profile, extension, UI state, account state,
 or Settings Sync setting was modified.
 
+> Snapshot note: the numeric findings below describe the live comparison at
+> audit time. Later target-branch commits added reviewed global cSpell settings,
+> `terminal.integrated.persistentSessionScrollback`, and
+> `window.newWindowProfile`. The integrated repository validator is the current
+> authority for final ownership and requires every global value to appear
+> exactly once in `workbench.settings.applyToAllProfiles`.
+
 ## Sources inspected
 
 - Built-in Default/application settings: `%APPDATA%\Code\User\settings.json`

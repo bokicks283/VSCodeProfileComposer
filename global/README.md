@@ -8,4 +8,6 @@ Do not put machine paths, secrets, workspace policy, or profile-specific setting
 
 The portable `settingsSync.ignoredSettings` value keeps the machine-specific Todo Tree ripgrep path out of Sync. The composer does not otherwise control Settings Sync.
 
-cSpell uses custom decorations so spelling issues stay out of VS Code's Problems panel. Its correction menu is displayed inline, while the shared Default keybindings provide `Ctrl+Alt+S` for direct spelling suggestions.
+cSpell uses custom decorations so spelling issues stay out of VS Code's Problems panel. Its correction menu is displayed inline, while the shared Default keybindings provide `Ctrl+Shift+S` for direct spelling suggestions.
+
+`terminal.integrated.persistentSessionScrollback` and `window.newWindowProfile` are also application-owned. Their values are listed exactly once in `workbench.settings.applyToAllProfiles` and must not be duplicated in components.

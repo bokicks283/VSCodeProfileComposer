@@ -38,6 +38,16 @@ Describe 'Global settings ownership' {
         $settings['cSpell.suggestionMenuType'] | Should -BeExactly 'quickFix'
     }
 
+    It 'owns persistent terminal history and the new-window profile globally' {
+        $settings = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $script:RepositoryRoot 'global/settings.jsonc')))
+        $defaultSettings = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $script:RepositoryRoot 'components/default/settings.jsonc')))
+        foreach ($id in @('terminal.integrated.persistentSessionScrollback', 'window.newWindowProfile')) {
+            $settings['workbench.settings.applyToAllProfiles'] | Should -Contain $id
+            $settings.Contains($id) | Should -BeTrue
+            $defaultSettings.Contains($id) | Should -BeFalse
+        }
+    }
+
     It 'rejects globally owned settings in profile component sources' {
         $fixture = New-ComposerFixture 'global-setting-in-component'
         $path = Join-Path $fixture 'components/default/settings.jsonc'
@@ -185,6 +195,10 @@ Describe 'Repository keybinding ownership' {
         $bindings.command | Should -Contain 'editor.foldAll'
         $bindings.command | Should -Contain 'workbench.action.toggleMaximizedPanel'
         $bindings.command | Should -Not -Contain 'mssql.rebuildIntelliSenseCache'
+        $spellBinding = @($bindings | Where-Object command -eq 'cSpell.suggestSpellingCorrections')
+        $spellBinding.Count | Should -Be 1
+        $spellBinding[0].key | Should -BeExactly 'ctrl+shift+s'
+        @($bindings | ForEach-Object { $_ | ConvertTo-Json -Depth 100 -Compress } | Sort-Object -Unique).Count | Should -Be $bindings.Count
     }
 
     It 'adds SQL Server-only bindings only to recipes that declare that component' {

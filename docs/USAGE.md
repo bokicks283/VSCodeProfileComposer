@@ -390,7 +390,7 @@ Official references:
 
 ## Current keybinding behavior
 
-`components/default/keybindings.jsonc` is the canonical shared set inherited by every recipe. It contains portable editor, notebook, panel, Markdown, and cSpell bindings. Commands that require a focused extension remain in that extension's owning component; for example, `mssql.rebuildIntelliSenseCache` is in `components/sql-server/keybindings.jsonc`.
+`components/default/keybindings.jsonc` is the canonical shared set inherited by every recipe. It contains portable editor, notebook, panel, Markdown, and cSpell bindings; the current cSpell suggestion shortcut is `Ctrl+Shift+S`. Commands that require a focused extension remain in that extension's owning component; for example, `mssql.rebuildIntelliSenseCache` is in `components/sql-server/keybindings.jsonc`.
 
 The composer does not read live user keybindings during validation or composition. To retain a new customization, review it and add it to the smallest appropriate component. Preserve VS Code's explicit `-command.id` removal entries when they accompany a remapping, because removing them can restore an old default shortcut and create a conflict.
 
