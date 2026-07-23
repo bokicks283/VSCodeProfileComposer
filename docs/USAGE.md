@@ -134,6 +134,24 @@ pwsh ./scripts/ProfileComposer.ps1 validate -Platform windows
 pwsh ./scripts/ProfileComposer.ps1 validate -Platform windows -Machine windows
 ```
 
+### Repair global ownership metadata
+
+Preview mechanically safe repairs reported by global ownership validation:
+
+```powershell
+pwsh ./scripts/ProfileComposer.ps1 fix global -DryRun
+```
+
+Apply the staged repair after reviewing the plan:
+
+```powershell
+pwsh ./scripts/ProfileComposer.ps1 fix global
+```
+
+The command creates a missing `workbench.settings.applyToAllProfiles` array, removes duplicate IDs while preserving their first occurrence, and appends settings that have values in `global/settings.jsonc` but are absent from the array. Added settings preserve their existing file order. The repaired repository must validate before the source file is replaced, and a failed post-write validation rolls it back.
+
+The command deliberately does not invent values for listed settings that have none, remove settings from components or overlays, or decide whether a conflicting value should be global. Those cases fail with an actionable error. Because the JSONC parser does not retain comments, a repair that changes the file rewrites it as normalized JSON; use `-DryRun` and inspect `git diff` before committing.
+
 ### Generate built-in Default settings
 
 ```powershell
