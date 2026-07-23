@@ -1,7 +1,7 @@
 [
   // Show cSpell corrections directly beside the word without using the lightbulb.
   {
-    "key": "ctrl+alt+s",
+    "key": "ctrl+shift+s",
     "command": "cSpell.suggestSpellingCorrections",
     "when": "editorTextFocus && !editorReadonly && cSpell.editorMenuContext.showSuggestions"
   },

@@ -64,8 +64,6 @@
   "search.searchView.keywordSuggestions": true,
   "task.problemMatchers.neverPrompt": false,
   "terminal.explorerKind": "both",
-  "terminal.integrated.persistentSessionScrollback": 1000,
-
   "terminal.integrated.scrollback": 10000,
   "terminal.integrated.shellIntegration.environmentReporting": true,
   "todo-tree.filtering.excludeGlobs": [

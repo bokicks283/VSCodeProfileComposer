@@ -9,6 +9,9 @@
     "accessibility.verbosity.terminalChatOutput",
     "cSpell.suggestionMenuType",
     "cSpell.useCustomDecorations",
+    "cSpell.checkVSCodeSystemFiles",
+    "cSpell.checkOnlyEnabledFileTypes",
+    "cSpell.suggestionNumChanges",
     "diffEditor.codeLens",
     "editor.accessibilityPageSize",
     "editor.autoClosingDelete",
@@ -50,7 +53,6 @@
     "workbench.editor.untitled.labelFormat",
     "workbench.editor.wrapTabs"
   ],
-
   "accessibility.dimUnfocused.enabled": true,
   "accessibility.signals.terminalBell": {
     "sound": "on"
@@ -58,11 +60,12 @@
   "accessibility.verbosity.panelChat": false,
   "accessibility.verbosity.terminal": false,
   "accessibility.verbosity.terminalChatOutput": false,
-
-  // Keep spelling issues out of Problems and show corrections next to the word.
+  "cSpell.checkVSCodeSystemFiles": true,
+  "cSpell.checkOnlyEnabledFileTypes": false,
   "cSpell.suggestionMenuType": "quickFix",
+  "cSpell.suggestionNumChanges": 5,
+  // Keep spelling issues out of Problems and show corrections next to the word.
   "cSpell.useCustomDecorations": true,
-
   "diffEditor.codeLens": true,
   "editor.accessibilityPageSize": 14,
   "editor.autoClosingDelete": "always",
@@ -70,12 +73,10 @@
   "editor.codeActionWidget.includeNearbyQuickFixes": true,
   "editor.suggest.shareSuggestSelections": true,
   "editor.suggest.showStatusBar": true,
-
   "explorer.compactFolders": false,
   "explorer.confirmDelete": false,
   "explorer.confirmDragAndDrop": false,
   "explorer.incrementalNaming": "smart",
-
   "git.allowForcePush": true,
   "git.autofetch": true,
   "git.enableSmartCommit": true,
@@ -83,17 +84,13 @@
   "git.openRepositoryInParentFolders": "always",
   "scm.alwaysShowActions": true,
   "scm.alwaysShowRepositories": true,
-
   "security.workspace.trust.enabled": true,
   "security.workspace.trust.untrustedFiles": "open",
-
   // Keep the machine-specific Todo Tree executable out of Settings Sync.
   // The leading '-' preserves the existing choice to sync window zoom.
   "settingsSync.ignoredSettings": [
-    "-window.zoomLevel",
     "todo-tree.ripgrep.ripgrep"
   ],
-
   "terminal.integrated.accessibleViewFocusOnCommandExecution": false,
   "terminal.integrated.allowedLinkSchemes": [
     "file",
@@ -111,7 +108,7 @@
   "terminal.integrated.enableMultiLinePasteWarning": "never",
   "terminal.integrated.enableVisualBell": true,
   "terminal.integrated.initialHint": false,
-
+  "terminal.integrated.persistentSessionScrollback": 1000,
   "workbench.editor.closeOnFileDelete": true,
   "workbench.editor.empty.hint": "hidden",
   "workbench.editor.enablePreviewFromCodeNavigation": true,
@@ -122,5 +119,6 @@
   "workbench.editor.tabSizingFixedMinWidth": 38,
   "workbench.editor.titleScrollbarSizing": "large",
   "workbench.editor.untitled.labelFormat": "name",
-  "workbench.editor.wrapTabs": true
+  "workbench.editor.wrapTabs": true,
+  "window.newWindowProfile": "Main"
 }
