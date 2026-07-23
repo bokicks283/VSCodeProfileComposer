@@ -7,11 +7,11 @@ For example:
 ```powershell
 Copy-Item ./machine/windows.example.jsonc ./machine/local/main-windows.jsonc
 Copy-Item ./machine/windows.example.jsonc ./machine/local/gaming-server.jsonc
-pwsh ./scripts/Compose-Profile.ps1 -ListMachines
-pwsh ./scripts/Compose-Profile.ps1 -Profile unreal -Platform windows -Machine main-windows
+pwsh ./scripts/ProfileComposer.ps1 list-machines
+pwsh ./scripts/ProfileComposer.ps1 compose unreal -Platform windows -Machine main-windows
 ```
 
-The filename without `.jsonc` is the `-Machine` ID. This makes the intended target explicit and records it in the manifest. `-MachineFile` remains a backward-compatible escape hatch; do not use both switches together.
+The filename without `.jsonc` is the `-Machine` ID. This makes the intended target explicit and records it in the manifest. `-MachineFile` remains an explicit-path escape hatch; do not use both switches together.
 
 The selected values are generated only into `build/global/settings.json`. The composer adds their keys to both `workbench.settings.applyToAllProfiles` and `settingsSync.ignoredSettings`, so they apply in every profile on this computer without syncing to another computer. Named-profile settings and `.code-profile` exports remain portable.
 
@@ -33,5 +33,7 @@ The source audit confirmed a working Todo Tree ripgrep path under the current Wi
 Never commit credentials, tokens, connection strings, private hosts, or personal absolute paths.
 
 Because these source files are intentionally ignored, Git does not distribute them. The generated ignored-settings list prevents their setting values from traveling through Settings Sync. Recreate the files from the committed examples on each computer or keep a separate secure private backup. A build for another machine is possible only when that machine's local file is present.
+
+When `ProfileComposer.ps1 sync` reconciles built-in Default/application settings, keys present in the live `settingsSync.ignoredSettings` list are treated as machine-owned and their values are not copied into tracked global settings. Continue maintaining the actual values in `machine/local/`.
 
 See [Complete usage guide](../docs/USAGE.md) for setup, ignore verification, portability, and import guidance.

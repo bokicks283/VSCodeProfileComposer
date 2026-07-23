@@ -128,4 +128,4 @@ Trunk CLI, CI, and repository `.trunk` files remain valid external tooling.
 
 ## Generated infrastructure omitted
 
-No generated profile packages, rollout/apply scripts, fragment builders, synchronization scripts, reconciliation systems, performance harnesses, temporary workflows, or artifact trees were migrated or added during the ownership refinements.
+No generated profile packages, rollout/apply scripts, fragment builders, performance harnesses, temporary workflows, or artifact trees were migrated during the ownership refinements. The later unified CLI adds a reviewed `sync` transaction for manually exported profiles; it creates recipe-specific deltas and does not retroactively treat flattened historical exports as component sources.

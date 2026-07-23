@@ -18,6 +18,20 @@ BeforeAll {
         [System.IO.Directory]::CreateDirectory((Split-Path -Parent $Path)) | Out-Null
         [System.IO.File]::WriteAllText($Path, $Content, [System.Text.UTF8Encoding]::new($false))
     }
+
+    function New-VSCodeUserDataFixture {
+        param(
+            [Parameter(Mandatory)][string]$Name,
+            [object[]]$Profiles = @(
+                [ordered]@{ location = 'file:///C:/fixture/profiles/main-id'; name = 'Main' },
+                [ordered]@{ location = 'file:///C:/fixture/profiles/python-id'; name = 'Python' }
+            )
+        )
+        $userDataPath = Join-Path $TestDrive $Name
+        $storagePath = Join-Path $userDataPath 'globalStorage/storage.json'
+        Write-TestFile $storagePath (ConvertTo-Json -InputObject ([ordered]@{ userDataProfiles = $Profiles }) -Depth 10)
+        return $userDataPath
+    }
 }
 
 Describe 'Global settings ownership' {
@@ -217,11 +231,19 @@ Describe 'Safe repository transformations' {
     It 'dry-runs and applies a profile rename with its optional override and stored UI-state seed' {
         $fixture = New-ComposerFixture 'rename-profile'
         Write-TestFile (Join-Path $fixture 'profiles/python.settings.jsonc') '{ "python.analysis.typeCheckingMode": "strict" }'
+        Write-TestFile (Join-Path $fixture 'profiles/python.settings.replace.jsonc') '{ "python.analysis.diagnosticMode": "workspace" }'
+        Write-TestFile (Join-Path $fixture 'profiles/python.settings.remove.jsonc') '["python.analysis.autoImportCompletions"]'
+        Write-TestFile (Join-Path $fixture 'profiles/python.extensions.jsonc') '{ "add": ["sample.extension"], "remove": [] }'
+        Write-TestFile (Join-Path $fixture 'profiles/python.keybindings.jsonc') '{ "add": [{"key":"ctrl+alt+p","command":"sample.command"}], "remove": [] }'
         Write-TestFile (Join-Path $fixture 'machine/local/ui-state/python/seed.code-profile') '{ "name": "seed", "globalState": "{\"layout\":true}" }'
 
         $plan = Rename-ComposerProfile $fixture python python-work -DryRun
         $plan.changes.source | Should -Contain 'profiles/python.yaml'
         $plan.changes.source | Should -Contain 'profiles/python.settings.jsonc'
+        $plan.changes.source | Should -Contain 'profiles/python.settings.replace.jsonc'
+        $plan.changes.source | Should -Contain 'profiles/python.settings.remove.jsonc'
+        $plan.changes.source | Should -Contain 'profiles/python.extensions.jsonc'
+        $plan.changes.source | Should -Contain 'profiles/python.keybindings.jsonc'
         $plan.changes.source | Should -Contain 'machine/local/ui-state/python'
         Test-Path -LiteralPath (Join-Path $fixture 'profiles/python.yaml') | Should -BeTrue
         Test-Path -LiteralPath (Join-Path $fixture 'profiles/python-work.yaml') | Should -BeFalse
@@ -230,6 +252,10 @@ Describe 'Safe repository transformations' {
         Test-Path -LiteralPath (Join-Path $fixture 'profiles/python.yaml') | Should -BeFalse
         Test-Path -LiteralPath (Join-Path $fixture 'profiles/python-work.yaml') | Should -BeTrue
         Test-Path -LiteralPath (Join-Path $fixture 'profiles/python-work.settings.jsonc') | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $fixture 'profiles/python-work.settings.replace.jsonc') | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $fixture 'profiles/python-work.settings.remove.jsonc') | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $fixture 'profiles/python-work.extensions.jsonc') | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $fixture 'profiles/python-work.keybindings.jsonc') | Should -BeTrue
         Test-Path -LiteralPath (Join-Path $fixture 'machine/local/ui-state/python-work/seed.code-profile') | Should -BeTrue
         (Test-ComposerRepository $fixture).errors.Count | Should -Be 0
     }
@@ -883,6 +909,226 @@ Describe 'Unified CLI and compatibility wrappers' {
         $saveOutput = @(& pwsh -NoProfile -File $save -Profile default -SourceProfileExport $seed -DryRun 2>&1)
         $LASTEXITCODE | Should -Be 0
         $saveOutput -join "`n" | Should -Match 'DRY RUN'
+    }
+}
+
+Describe 'VS Code profile guidance and automatic UI-state capture selection' {
+    It 'lists live profile metadata without reading profile resource values' {
+        $userDataPath = New-VSCodeUserDataFixture 'live-profile-list'
+        $profiles = @(Get-LiveVSCodeProfileDefinitions -VSCodeUserDataPath $userDataPath)
+
+        $profiles.Name | Should -Be @('Default', 'Main', 'Python')
+        $profiles[0].IsDefault | Should -BeTrue
+        $profiles[1].Id | Should -BeExactly 'main-id'
+        $profiles[2].Id | Should -BeExactly 'python-id'
+        $profiles.PSObject.Properties.Name | Should -Not -Contain 'Settings'
+    }
+
+    It 'matches exactly one active VS Code display name to its repository recipe' {
+        $fixture = New-ComposerFixture 'active-profile-match'
+        $status = '    0  120  1234  window [1] (main.py - Project - Python + Database - Visual Studio Code)'
+        $match = Resolve-ComposerProfileFromVSCodeStatus -RepositoryRoot $fixture -StatusText $status
+
+        $match.ProfileId | Should -BeExactly 'python-database'
+        $match.DisplayName | Should -BeExactly 'Python + Database'
+    }
+
+    It 'requires an explicit recipe when active names have zero or multiple matches' {
+        $fixture = New-ComposerFixture 'active-profile-ambiguous'
+        { Resolve-ComposerProfileFromVSCodeStatus -RepositoryRoot $fixture -StatusText 'window [1] (Project - Main - Visual Studio Code)' } |
+            Should -Throw '*Supply the profile ID explicitly*'
+
+        Write-TestFile (Join-Path $fixture 'profiles/python-duplicate.yaml') "name: Python`ncomponents:`n  - default`n"
+        { Resolve-ComposerProfileFromVSCodeStatus -RepositoryRoot $fixture -StatusText 'window [1] (Project - Python - Visual Studio Code)' } |
+            Should -Throw '*multiple repository recipes*'
+    }
+
+    It 'captures UI state by an automatically matched active recipe in an isolated fixture' {
+        $fixture = New-ComposerFixture 'capture-auto-profile'
+        $sourcePath = Join-Path $TestDrive 'auto-profile-seed.code-profile'
+        Write-TestFile $sourcePath '{ "name": "Private Export", "globalState": "{\"layout\":true}" }'
+        $fakeCode = Join-Path $TestDrive 'fake-code-status.ps1'
+        Write-TestFile $fakeCode @'
+'    0  120  1234  window [1] (main.py - Project - Python + Database - Visual Studio Code)'
+'@
+        $cli = Join-Path $script:RepositoryRoot 'scripts/ProfileComposer.ps1'
+        $output = @(& pwsh -NoProfile -File $cli capture-ui-state $sourcePath -CodeCommand $fakeCode -RepositoryRoot $fixture -DryRun 2>&1)
+
+        $LASTEXITCODE | Should -Be 0
+        $output -join "`n" | Should -Match "Matched active VS Code profile 'Python \+ Database'"
+        $output -join "`n" | Should -Match "UI state for 'python-database'"
+        Test-Path -LiteralPath (Join-Path $fixture 'machine/local/ui-state/python-database/seed.code-profile') | Should -BeFalse
+    }
+
+    It 'dispatches guided live-profile commands only against isolated metadata' {
+        $fixture = New-ComposerFixture 'vscode-guidance'
+        $userDataPath = New-VSCodeUserDataFixture 'vscode-guidance-user-data'
+        $cli = Join-Path $script:RepositoryRoot 'scripts/ProfileComposer.ps1'
+
+        $list = @(& pwsh -NoProfile -File $cli vscode list -VSCodeUserDataPath $userDataPath 2>&1)
+        $LASTEXITCODE | Should -Be 0
+        $list -join "`n" | Should -Match 'Main \[location main-id\]'
+
+        $open = @(& pwsh -NoProfile -File $cli vscode open Main -VSCodeUserDataPath $userDataPath -CodeCommand code -DryRun 2>&1)
+        $LASTEXITCODE | Should -Be 0
+        $open -join "`n" | Should -Match 'code --new-window --profile Main'
+
+        $import = @(& pwsh -NoProfile -File $cli vscode import python-database -RepositoryRoot $fixture -Platform windows -DryRun 2>&1)
+        $LASTEXITCODE | Should -Be 0
+        $import -join "`n" | Should -Match "recipe 'python-database'"
+        $import -join "`n" | Should -Match 'Profiles: Import Profile'
+
+        $replace = @(& pwsh -NoProfile -File $cli vscode replace python-database -LiveProfile Main -VSCodeUserDataPath $userDataPath -RepositoryRoot $fixture -Platform windows -DryRun 2>&1)
+        $LASTEXITCODE | Should -Be 0
+        $replace -join "`n" | Should -Match 'Live target: Main'
+        $replace -join "`n" | Should -Match 'No live VS Code profile'
+
+        $delete = @(& pwsh -NoProfile -File $cli vscode delete Main -VSCodeUserDataPath $userDataPath -DryRun 2>&1)
+        $LASTEXITCODE | Should -Be 0
+        $delete -join "`n" | Should -Match "deletion target 'Main'"
+    }
+
+    It 'protects built-in and missing live profiles from guided destructive actions' {
+        $userDataPath = New-VSCodeUserDataFixture 'vscode-guidance-errors'
+        $cli = Join-Path $script:RepositoryRoot 'scripts/ProfileComposer.ps1'
+
+        $defaultDelete = @(& pwsh -NoProfile -File $cli vscode delete Default -VSCodeUserDataPath $userDataPath -DryRun 2>&1)
+        $LASTEXITCODE | Should -Be 1
+        $defaultDelete -join "`n" | Should -Match 'cannot be deleted'
+
+        $missingDelete = @(& pwsh -NoProfile -File $cli vscode delete Missing -VSCodeUserDataPath $userDataPath -DryRun 2>&1)
+        $LASTEXITCODE | Should -Be 1
+        $missingDelete -join "`n" | Should -Match 'was not found'
+    }
+}
+
+Describe 'Profile export synchronization' {
+    It 'syncs recipe deltas, application-owned settings, and opaque UI state transactionally' {
+        $fixture = New-ComposerFixture 'sync-profile-export'
+        Invoke-ProfileComposition $fixture python -Platform windows -ExportCodeProfile | Out-Null
+        $generatedExport = Join-Path $fixture 'build/profiles/python/Python.code-profile'
+        $template = ConvertFrom-JsonC ([System.IO.File]::ReadAllText($generatedExport))
+
+        $settingsResource = ConvertFrom-JsonC $template.settings
+        $liveSettings = ConvertFrom-JsonC $settingsResource.settings
+        $componentSettings = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'components/default/settings.jsonc')))
+        $removedSetting = [string]@($componentSettings.Keys)[0]
+        $liveSettings.Remove($removedSetting)
+        $liveSettings['sync.fixture.setting'] = [ordered]@{ enabled = $true; modes = @('one', 'two') }
+        $liveSettings['machine.fixture.path'] = 'C:\Private\tool.exe'
+        $settingsResource.settings = ConvertTo-Json -InputObject $liveSettings -Depth 100
+        $template.settings = ConvertTo-Json -InputObject $settingsResource -Depth 100 -Compress
+
+        $liveExtensions = [System.Collections.Generic.List[object]]::new()
+        foreach ($entry in (ConvertFrom-JsonC $template.extensions)) { $liveExtensions.Add($entry) }
+        $removedExtension = [string]$liveExtensions[0].identifier.id
+        $liveExtensions.RemoveAt(0)
+        $liveExtensions.Add([ordered]@{ identifier = [ordered]@{ id = 'sample.synced-extension' } })
+        $template.extensions = ConvertTo-Json -InputObject ([object[]]$liveExtensions.ToArray()) -Depth 100 -Compress
+
+        $keybindingResource = ConvertFrom-JsonC $template.keybindings
+        $liveKeybindings = [System.Collections.Generic.List[object]]::new()
+        foreach ($entry in (ConvertFrom-JsonC $keybindingResource.keybindings)) { $liveKeybindings.Add($entry) }
+        $lastBinding = $liveKeybindings[$liveKeybindings.Count - 1]
+        $liveKeybindings.RemoveAt($liveKeybindings.Count - 1)
+        $liveKeybindings.Insert(0, $lastBinding)
+        $liveKeybindings.Add([ordered]@{ key = 'ctrl+alt+y'; command = 'sample.syncedCommand' })
+        $keybindingResource.keybindings = ConvertTo-Json -InputObject ([object[]]$liveKeybindings.ToArray()) -Depth 100
+        $template.keybindings = ConvertTo-Json -InputObject $keybindingResource -Depth 100 -Compress
+        $template.globalState = '{"layout":"synced"}'
+        $sourceExport = Join-Path $TestDrive 'Python-sync.code-profile'
+        Write-TestFile $sourceExport (ConvertTo-Json -InputObject $template -Depth 100)
+
+        $userDataPath = New-VSCodeUserDataFixture 'sync-profile-user-data'
+        $applicationSettings = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'global/settings.jsonc')))
+        $applicationSettings['terminal.integrated.confirmOnKill'] = 'editor'
+        $applicationSettings['sync.fixture.global'] = 42
+        $applicationSettings['machine.fixture.path'] = 'C:\Private\tool.exe'
+        $applicationSettings['workbench.settings.applyToAllProfiles'] = [string[]]@(
+            $applicationSettings['workbench.settings.applyToAllProfiles']
+            'sync.fixture.global'
+            'machine.fixture.path'
+        )
+        $applicationSettings['settingsSync.ignoredSettings'] = [string[]]@(
+            $applicationSettings['settingsSync.ignoredSettings']
+            'machine.fixture.path'
+        )
+        Write-TestFile (Join-Path $userDataPath 'settings.json') (ConvertTo-Json -InputObject $applicationSettings -Depth 100)
+
+        $result = Sync-ComposerProfileFromExport -RepositoryRoot $fixture -SourceProfileExport $sourceExport -Platform windows -VSCodeUserDataPath $userDataPath
+
+        $result.profileId | Should -BeExactly 'python'
+        $result.counts.settingReplacements | Should -BeGreaterThan 0
+        $result.counts.settingRemovals | Should -BeGreaterThan 0
+        $result.counts.extensionAdditions | Should -Be 1
+        $result.counts.extensionRemovals | Should -Be 1
+        $result.counts.keybindingsReplacedForOrder | Should -BeTrue
+        $result.counts.machineOwnedGlobalSettingsSkipped | Should -Be 1
+        Test-Path -LiteralPath (Join-Path $fixture 'profiles/python.settings.replace.jsonc') | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $fixture 'profiles/python.settings.remove.jsonc') | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $fixture 'profiles/python.extensions.jsonc') | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $fixture 'profiles/python.keybindings.jsonc') | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $fixture 'machine/local/ui-state/python/seed.code-profile') | Should -BeTrue
+
+        $global = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'global/settings.jsonc')))
+        $global['terminal.integrated.confirmOnKill'] | Should -BeExactly 'editor'
+        $global['sync.fixture.global'] | Should -Be 42
+        $global.Contains('machine.fixture.path') | Should -BeFalse
+        $global['workbench.settings.applyToAllProfiles'] | Should -Not -Contain 'machine.fixture.path'
+        $replacementSettings = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'profiles/python.settings.replace.jsonc')))
+        $replacementSettings.Contains('machine.fixture.path') | Should -BeFalse
+
+        Invoke-ProfileComposition $fixture python -Platform windows | Out-Null
+        $composedSettings = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'build/profiles/python/settings.json')))
+        $composedSettings.Contains($removedSetting) | Should -BeFalse
+        $composedSettings['sync.fixture.setting'].enabled | Should -BeTrue
+        $composedExtensions = [System.IO.File]::ReadAllLines((Join-Path $fixture 'build/profiles/python/extensions.txt'))
+        $composedExtensions | Should -Contain 'sample.synced-extension'
+        $composedExtensions | Should -Not -Contain $removedExtension
+        $composedKeybindings = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'build/profiles/python/keybindings.json')))
+        @($composedKeybindings | ForEach-Object { $_ | ConvertTo-Json -Depth 100 -Compress }) |
+            Should -Be @($liveKeybindings | ForEach-Object { $_ | ConvertTo-Json -Depth 100 -Compress })
+        (Test-ComposerRepository $fixture -Platform windows).errors.Count | Should -Be 0
+    }
+
+    It 'supports a no-write dry run and rejects unsafe staged values without partial changes' {
+        $fixture = New-ComposerFixture 'sync-profile-safety'
+        $template = New-CodeProfileTemplate -DisplayName 'Python' -SettingsJson '{"sync.fixture.setting":true}' -Extensions @('sample.extension') -KeybindingsJson '[]' -Platform windows -GlobalState '{"layout":true}'
+        $sourceExport = Join-Path $TestDrive 'sync-safety.code-profile'
+        Write-TestFile $sourceExport (ConvertTo-Json -InputObject $template -Depth 100)
+
+        $plan = Sync-ComposerProfileFromExport -RepositoryRoot $fixture -SourceProfileExport $sourceExport -Platform windows -SkipGlobal -DryRun
+        $plan.profileId | Should -BeExactly 'python'
+        $plan.dryRun | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $fixture 'profiles/python.settings.replace.jsonc') | Should -BeFalse
+        Test-Path -LiteralPath (Join-Path $fixture 'machine/local/ui-state/python/seed.code-profile') | Should -BeFalse
+
+        $unsafeTemplate = New-CodeProfileTemplate -DisplayName 'Python' -SettingsJson '{"service.apiToken":"do-not-track-this-secret-value"}' -Extensions @() -KeybindingsJson '[]' -Platform windows -GlobalState '{"layout":true}'
+        Write-TestFile $sourceExport (ConvertTo-Json -InputObject $unsafeTemplate -Depth 100)
+        $beforeGlobal = [System.IO.File]::ReadAllText((Join-Path $fixture 'global/settings.jsonc'))
+        { Sync-ComposerProfileFromExport -RepositoryRoot $fixture -SourceProfileExport $sourceExport -Platform windows -SkipGlobal } |
+            Should -Throw '*failed validation*'
+        [System.IO.File]::ReadAllText((Join-Path $fixture 'global/settings.jsonc')) | Should -BeExactly $beforeGlobal
+        Test-Path -LiteralPath (Join-Path $fixture 'profiles/python.settings.replace.jsonc') | Should -BeFalse
+        Test-Path -LiteralPath (Join-Path $fixture 'machine/local/ui-state/python/seed.code-profile') | Should -BeFalse
+    }
+
+    It 'dispatches sync through the unified CLI and requires UI state unless explicitly skipped' {
+        $fixture = New-ComposerFixture 'sync-profile-cli'
+        $template = New-CodeProfileTemplate -DisplayName 'Python' -SettingsJson '{"sync.fixture.cli":true}' -Extensions @() -KeybindingsJson '[]' -Platform windows
+        $sourceExport = Join-Path $TestDrive 'sync-cli.code-profile'
+        Write-TestFile $sourceExport (ConvertTo-Json -InputObject $template -Depth 100)
+        $cli = Join-Path $script:RepositoryRoot 'scripts/ProfileComposer.ps1'
+
+        $missingUi = @(& pwsh -NoProfile -File $cli sync $sourceExport -RepositoryRoot $fixture -Platform windows -SkipGlobal -DryRun 2>&1)
+        $LASTEXITCODE | Should -Be 1
+        $missingUi -join "`n" | Should -Match 'does not contain UI layout state'
+
+        $output = @(& pwsh -NoProfile -File $cli sync $sourceExport -RepositoryRoot $fixture -Platform windows -SkipGlobal -SkipUiState -DryRun 2>&1)
+        $LASTEXITCODE | Should -Be 0
+        $output -join "`n" | Should -Match "planned sync.*recipe 'python'"
+        $output -join "`n" | Should -Match 'Settings:'
+        Test-Path -LiteralPath (Join-Path $fixture 'profiles/python.settings.replace.jsonc') | Should -BeFalse
     }
 }
 

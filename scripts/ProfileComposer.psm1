@@ -1,6 +1,6 @@
 Set-StrictMode -Version Latest
 
-$script:ComposerVersion = '0.7.0'
+$script:ComposerVersion = '0.9.0'
 $script:ManifestVersion = 1
 $script:Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 $script:SensitivePattern = '(?i)(password|(?<!semantic)token|secret|credential|connectionstring|api[_-]?key|private[_-]?key)'
@@ -297,6 +297,148 @@ function Get-ProfileDefinitions {
     })
 }
 
+function Get-DefaultVSCodeUserDataPath {
+    [CmdletBinding()]
+    param()
+
+    if ($IsWindows) {
+        return [System.IO.Path]::GetFullPath((Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::ApplicationData)) 'Code/User'))
+    }
+    if ($IsMacOS) {
+        return [System.IO.Path]::GetFullPath((Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile)) 'Library/Application Support/Code/User'))
+    }
+    $configurationRoot = if ($env:XDG_CONFIG_HOME) {
+        $env:XDG_CONFIG_HOME
+    }
+    else {
+        Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile)) '.config'
+    }
+    return [System.IO.Path]::GetFullPath((Join-Path $configurationRoot 'Code/User'))
+}
+
+function Get-LiveVSCodeProfileDefinitions {
+    [CmdletBinding()]
+    param([string]$VSCodeUserDataPath)
+
+    $userDataPath = if ($VSCodeUserDataPath) {
+        [System.IO.Path]::GetFullPath($VSCodeUserDataPath)
+    }
+    else {
+        Get-DefaultVSCodeUserDataPath
+    }
+    $storagePath = Join-Path $userDataPath 'globalStorage/storage.json'
+    if (-not (Test-Path -LiteralPath $storagePath -PathType Leaf)) {
+        throw "VS Code profile metadata was not found at '$storagePath'. Use -VSCodeUserDataPath to select the intended VS Code User directory."
+    }
+
+    $storage = Read-JsonCFile $storagePath
+    if (-not (Test-IsDictionary $storage)) {
+        throw "VS Code profile metadata '$storagePath' must have an object root."
+    }
+
+    $profiles = [System.Collections.Generic.List[object]]::new()
+    $profiles.Add([pscustomobject][ordered]@{
+        Id = 'default'
+        Name = 'Default'
+        IsDefault = $true
+        UserDataPath = $userDataPath
+    })
+    if (-not $storage.Contains('userDataProfiles')) {
+        return [object[]]$profiles.ToArray()
+    }
+    if ($storage.userDataProfiles -isnot [System.Array]) {
+        throw "VS Code profile metadata '$storagePath' has an unsupported 'userDataProfiles' value."
+    }
+
+    foreach ($profile in $storage.userDataProfiles) {
+        if (-not (Test-IsDictionary $profile) -or
+            -not $profile.Contains('name') -or $profile.name -isnot [string] -or [string]::IsNullOrWhiteSpace($profile.name) -or
+            -not $profile.Contains('location') -or $profile.location -isnot [string] -or [string]::IsNullOrWhiteSpace($profile.location)) {
+            throw "VS Code profile metadata '$storagePath' contains an unsupported profile entry."
+        }
+        $location = [string]$profile.location
+        $locationId = $null
+        try {
+            $uri = [uri]$location
+            $locationPath = if ($uri.IsAbsoluteUri -and $uri.IsFile) { $uri.LocalPath } else { $uri.AbsolutePath }
+            $locationId = [System.IO.Path]::GetFileName($locationPath.TrimEnd('/', '\'))
+        }
+        catch {
+            $locationId = [System.IO.Path]::GetFileName($location.TrimEnd('/', '\'))
+        }
+        if ([string]::IsNullOrWhiteSpace($locationId)) {
+            throw "VS Code profile metadata '$storagePath' contains a profile without a usable location ID."
+        }
+        $profiles.Add([pscustomobject][ordered]@{
+            Id = $locationId
+            Name = [string]$profile.name
+            IsDefault = $false
+            UserDataPath = $userDataPath
+        })
+    }
+    return [object[]]@($profiles.ToArray() | Sort-Object @{ Expression = 'IsDefault'; Descending = $true }, Name)
+}
+
+function Get-VSCodeStatusText {
+    [CmdletBinding()]
+    param([string]$CodeCommand = 'code')
+
+    try {
+        $output = @(& $CodeCommand --status 2>&1)
+        $exitCode = if (Test-Path variable:LASTEXITCODE) { $LASTEXITCODE } else { 0 }
+    }
+    catch {
+        throw "Could not run VS Code status through '$CodeCommand': $($_.Exception.Message)"
+    }
+    if ($null -ne $exitCode -and $exitCode -ne 0) {
+        throw "VS Code status command '$CodeCommand --status' failed with exit code $exitCode."
+    }
+    return [string]::Join([Environment]::NewLine, @($output | ForEach-Object { [string]$_ }))
+}
+
+function Resolve-ComposerProfileFromVSCodeStatus {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RepositoryRoot,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$StatusText
+    )
+
+    $windowLines = @(
+        $StatusText -split '\r?\n' |
+            Where-Object { $_ -match '(?i)\bwindow(?:\s+\[\d+\])?\s+\(' }
+    )
+    $recipeMatches = [System.Collections.Generic.List[object]]::new()
+    foreach ($definition in (Get-ProfileDefinitions $RepositoryRoot)) {
+        $recipe = Read-ProfileRecipe $definition.Path
+        $candidateNames = @($definition.Id, $recipe.Name) | Select-Object -Unique
+        $liveNames = [System.Collections.Generic.List[string]]::new()
+        foreach ($candidateName in $candidateNames) {
+            $escapedName = [regex]::Escape([string]$candidateName)
+            $pattern = "(?i)\s-\s$escapedName\s-\s(?:Visual Studio Code|Code(?:\s-\sInsiders)?)(?:\s+\[[^\]]+\])?\)\s*$"
+            if ($windowLines | Where-Object { $_ -match $pattern }) {
+                $liveNames.Add([string]$candidateName)
+            }
+        }
+        if ($liveNames.Count -gt 0) {
+            $match = [pscustomobject][ordered]@{
+                ProfileId = $definition.Id
+                DisplayName = $recipe.Name
+                LiveProfileNames = [string[]]$liveNames.ToArray()
+            }
+            $recipeMatches.Add($match)
+        }
+    }
+
+    if ($recipeMatches.Count -eq 0) {
+        throw 'No active VS Code profile name uniquely matches a repository recipe ID or display name. Supply the profile ID explicitly.'
+    }
+    if ($recipeMatches.Count -gt 1) {
+        $ids = @($recipeMatches | ForEach-Object ProfileId) -join ', '
+        throw "Active VS Code profile names match multiple repository recipes: $ids. Supply the profile ID explicitly."
+    }
+    return $recipeMatches[0]
+}
+
 function Test-ComposerId {
     param([Parameter(Mandatory)][string]$Id)
     return $Id -match '^[A-Za-z0-9][A-Za-z0-9._-]*$'
@@ -581,6 +723,7 @@ function Test-ComposerRepository {
         catch { Add-ValidationItem $result errors 'invalid-yaml' $_.Exception.Message $source }
 
         $overridePath = Join-Path $profileRoot "$($profile.Id).settings.jsonc"
+        $overrideSettingIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
         if (Test-Path -LiteralPath $overridePath -PathType Leaf) {
             try {
                 $override = Read-JsonCFile $overridePath
@@ -588,6 +731,7 @@ function Test-ComposerRepository {
                 else {
                     Test-PortableSettings $override $result (Get-RelativeDisplayPath $root $overridePath)
                     foreach ($key in $override.Keys) {
+                        $overrideSettingIds.Add([string]$key) | Out-Null
                         if ($globalSettingIds.Contains([string]$key)) {
                             Add-ValidationItem $result errors 'global-setting-in-profile-source' "Setting '$key' is globally owned and must not be declared in a profile override." (Get-RelativeDisplayPath $root $overridePath) "/$key"
                         }
@@ -595,6 +739,60 @@ function Test-ComposerRepository {
                 }
             }
             catch { Add-ValidationItem $result errors 'invalid-jsonc' $_.Exception.Message (Get-RelativeDisplayPath $root $overridePath) }
+        }
+
+        $replacementSettingIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+        $settingsReplacementPath = Join-Path $profileRoot "$($profile.Id).settings.replace.jsonc"
+        if (Test-Path -LiteralPath $settingsReplacementPath -PathType Leaf) {
+            try {
+                $replacement = Read-JsonCFile $settingsReplacementPath
+                if (-not (Test-IsDictionary $replacement)) {
+                    Add-ValidationItem $result errors 'profile-settings-replacement-root' 'Profile-local settings replacement root must be an object.' (Get-RelativeDisplayPath $root $settingsReplacementPath)
+                }
+                else {
+                    Test-PortableSettings $replacement $result (Get-RelativeDisplayPath $root $settingsReplacementPath)
+                    foreach ($key in $replacement.Keys) {
+                        $replacementSettingIds.Add([string]$key) | Out-Null
+                        if ($globalSettingIds.Contains([string]$key)) {
+                            Add-ValidationItem $result errors 'global-setting-in-profile-source' "Setting '$key' is globally owned and must not be declared in a profile replacement." (Get-RelativeDisplayPath $root $settingsReplacementPath) "/$key"
+                        }
+                        if ($overrideSettingIds.Contains([string]$key)) {
+                            Add-ValidationItem $result errors 'conflicting-profile-setting-operation' "Setting '$key' cannot be both recursively overridden and exactly replaced by the same profile." (Get-RelativeDisplayPath $root $settingsReplacementPath) "/$key"
+                        }
+                    }
+                }
+            }
+            catch { Add-ValidationItem $result errors 'invalid-jsonc' $_.Exception.Message (Get-RelativeDisplayPath $root $settingsReplacementPath) }
+        }
+
+        $settingsRemovalPath = Join-Path $profileRoot "$($profile.Id).settings.remove.jsonc"
+        if (Test-Path -LiteralPath $settingsRemovalPath -PathType Leaf) {
+            try {
+                foreach ($settingId in (Read-ProfileSettingsRemovals $settingsRemovalPath)) {
+                    if ($globalSettingIds.Contains($settingId)) {
+                        Add-ValidationItem $result errors 'global-setting-in-profile-source' "Globally owned setting '$settingId' cannot be removed by a profile." (Get-RelativeDisplayPath $root $settingsRemovalPath) "/$settingId"
+                    }
+                    if ($overrideSettingIds.Contains($settingId)) {
+                        Add-ValidationItem $result errors 'conflicting-profile-setting-operation' "Setting '$settingId' cannot be both removed and overridden by the same profile." (Get-RelativeDisplayPath $root $settingsRemovalPath) "/$settingId"
+                    }
+                    if ($replacementSettingIds.Contains($settingId)) {
+                        Add-ValidationItem $result errors 'conflicting-profile-setting-operation' "Setting '$settingId' cannot be both removed and replaced by the same profile." (Get-RelativeDisplayPath $root $settingsRemovalPath) "/$settingId"
+                    }
+                }
+            }
+            catch { Add-ValidationItem $result errors 'invalid-profile-settings-removals' $_.Exception.Message (Get-RelativeDisplayPath $root $settingsRemovalPath) }
+        }
+
+        $extensionOperationsPath = Join-Path $profileRoot "$($profile.Id).extensions.jsonc"
+        if (Test-Path -LiteralPath $extensionOperationsPath -PathType Leaf) {
+            try { Read-ProfileExtensionOperations $extensionOperationsPath | Out-Null }
+            catch { Add-ValidationItem $result errors 'invalid-profile-extension-operations' $_.Exception.Message (Get-RelativeDisplayPath $root $extensionOperationsPath) }
+        }
+
+        $keybindingOperationsPath = Join-Path $profileRoot "$($profile.Id).keybindings.jsonc"
+        if (Test-Path -LiteralPath $keybindingOperationsPath -PathType Leaf) {
+            try { Read-ProfileKeybindingOperations $keybindingOperationsPath | Out-Null }
+            catch { Add-ValidationItem $result errors 'invalid-profile-keybinding-operations' $_.Exception.Message (Get-RelativeDisplayPath $root $keybindingOperationsPath) }
         }
     }
 
@@ -1048,6 +1246,146 @@ function Test-CodeProfileTemplate {
     return $true
 }
 
+function Read-CodeProfileResources {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path)
+
+    $resolvedPath = [System.IO.Path]::GetFullPath($Path)
+    Test-CodeProfileTemplate -Path $resolvedPath | Out-Null
+    $template = Read-JsonCFile $resolvedPath
+    foreach ($unsupportedResource in @('tasks', 'snippets')) {
+        if ($template.Contains($unsupportedResource)) {
+            throw "VS Code profile export '$resolvedPath' contains '$unsupportedResource', which the composer does not own and cannot sync safely."
+        }
+    }
+
+    $settingsResource = ConvertFrom-JsonC $template.settings "$resolvedPath#settings"
+    $settings = ConvertFrom-JsonC $settingsResource.settings "$resolvedPath#settings.settings"
+    $extensionsResource = ConvertFrom-JsonC $template.extensions "$resolvedPath#extensions"
+    $extensions = @($extensionsResource | ForEach-Object { [string]$_.identifier.id })
+    $keybindingsResource = ConvertFrom-JsonC $template.keybindings "$resolvedPath#keybindings"
+    $keybindings = ConvertFrom-JsonC $keybindingsResource.keybindings "$resolvedPath#keybindings.keybindings"
+    foreach ($keybinding in @($keybindings)) {
+        if (-not (Test-IsDictionary $keybinding)) {
+            throw "VS Code profile export '$resolvedPath' contains a keybinding entry that is not an object."
+        }
+    }
+
+    return [pscustomobject][ordered]@{
+        Name = [string]$template.name
+        Settings = $settings
+        Extensions = [string[]]$extensions
+        Keybindings = [object[]]@($keybindings)
+        KeybindingsPlatform = [int]$keybindingsResource.platform
+        GlobalState = if ($template.Contains('globalState')) { [string]$template.globalState } else { $null }
+    }
+}
+
+function Get-CanonicalComposerValue {
+    param([Parameter(Mandatory)][AllowNull()]$Value)
+    return ConvertTo-Json -InputObject $Value -Depth 100 -Compress
+}
+
+function Read-ProfileSettingsRemovals {
+    param([Parameter(Mandatory)][string]$Path)
+
+    $value = Read-JsonCFile $Path
+    if ($value -isnot [System.Array]) { throw "Profile settings-removal root must be an array in '$Path'." }
+    $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    $result = [System.Collections.Generic.List[string]]::new()
+    foreach ($settingId in $value) {
+        if ($settingId -isnot [string] -or [string]::IsNullOrWhiteSpace($settingId)) {
+            throw "Profile settings-removal entries must be non-empty strings in '$Path'."
+        }
+        if (-not $seen.Add($settingId)) { throw "Profile settings-removal '$settingId' is duplicated in '$Path'." }
+        $result.Add([string]$settingId)
+    }
+    return [string[]]$result.ToArray()
+}
+
+function Read-ProfileExtensionOperations {
+    param([Parameter(Mandatory)][string]$Path)
+
+    $value = Read-JsonCFile $Path
+    if (-not (Test-IsDictionary $value)) { throw "Profile extension operations root must be an object in '$Path'." }
+    foreach ($key in $value.Keys) {
+        if ([string]$key -notin @('add', 'remove')) { throw "Unsupported profile extension operation '$key' in '$Path'." }
+    }
+    $addValue = $null
+    $removeValue = $null
+    if ($value.Contains('add')) { $addValue = $value['add'] }
+    if ($value.Contains('remove')) { $removeValue = $value['remove'] }
+    if (($null -ne $addValue -and $addValue -isnot [System.Array]) -or
+        ($null -ne $removeValue -and $removeValue -isnot [System.Array])) {
+        $addType = if ($null -eq $addValue) { 'null' } else { $addValue.GetType().FullName }
+        $removeType = if ($null -eq $removeValue) { 'null' } else { $removeValue.GetType().FullName }
+        throw "Profile extension 'add' and 'remove' operations must be arrays in '$Path' (add: $addType; remove: $removeType)."
+    }
+    $add = @($addValue)
+    $remove = @($removeValue)
+    $seenAdd = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $seenRemove = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($entry in @($add)) {
+        if ($entry -isnot [string] -or $entry -notmatch '^[A-Za-z0-9][A-Za-z0-9-]*\.[A-Za-z0-9][A-Za-z0-9._-]*$') {
+            throw "Invalid extension ID '$entry' in '$Path'."
+        }
+        if (-not $seenAdd.Add($entry)) { throw "Duplicate extension addition '$entry' in '$Path'." }
+    }
+    foreach ($entry in @($remove)) {
+        if ($entry -isnot [string] -or $entry -notmatch '^[A-Za-z0-9][A-Za-z0-9-]*\.[A-Za-z0-9][A-Za-z0-9._-]*$') {
+            throw "Invalid extension ID '$entry' in '$Path'."
+        }
+        if (-not $seenRemove.Add($entry)) { throw "Duplicate extension removal '$entry' in '$Path'." }
+        if ($seenAdd.Contains($entry)) { throw "Extension '$entry' cannot be both added and removed in '$Path'." }
+    }
+    return [pscustomobject]@{ Add = [string[]]@($add); Remove = [string[]]@($remove) }
+}
+
+function Read-ProfileKeybindingOperations {
+    param([Parameter(Mandatory)][string]$Path)
+
+    $value = Read-JsonCFile $Path
+    if (-not (Test-IsDictionary $value)) { throw "Profile keybinding operations root must be an object in '$Path'." }
+    foreach ($key in $value.Keys) {
+        if ([string]$key -notin @('add', 'remove', 'replace')) { throw "Unsupported profile keybinding operation '$key' in '$Path'." }
+    }
+    if ($value.Contains('replace')) {
+        if ($value.Contains('add') -or $value.Contains('remove')) {
+            throw "Profile keybinding 'replace' cannot be combined with 'add' or 'remove' in '$Path'."
+        }
+        if ($null -ne $value.replace -and $value.replace -isnot [System.Array]) { throw "Profile keybinding 'replace' must be an array in '$Path'." }
+        $replace = [object[]]@($value.replace)
+        foreach ($entry in $replace) {
+            if (-not (Test-IsDictionary $entry)) { throw "Profile keybinding replacements must be objects in '$Path'." }
+        }
+        return [pscustomobject]@{ Replace = $replace; Add = @(); Remove = @() }
+    }
+    $addValue = $null
+    $removeValue = $null
+    if ($value.Contains('add')) { $addValue = $value['add'] }
+    if ($value.Contains('remove')) { $removeValue = $value['remove'] }
+    if (($null -ne $addValue -and $addValue -isnot [System.Array]) -or
+        ($null -ne $removeValue -and $removeValue -isnot [System.Array])) {
+        throw "Profile keybinding 'add' and 'remove' operations must be arrays in '$Path'."
+    }
+    $add = @($addValue)
+    $remove = @($removeValue)
+    $seenAdd = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    $seenRemove = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    foreach ($entry in @($add)) {
+        if (-not (Test-IsDictionary $entry)) { throw "Profile keybinding additions must be objects in '$Path'." }
+        $canonical = Get-CanonicalComposerValue $entry
+        if (-not $seenAdd.Add($canonical)) { throw "Duplicate profile keybinding addition in '$Path'." }
+    }
+    foreach ($entry in @($remove)) {
+        if (-not (Test-IsDictionary $entry)) { throw "Profile keybinding removals must be objects in '$Path'." }
+        $canonical = Get-CanonicalComposerValue $entry
+        if (-not $seenRemove.Add($canonical)) { throw "Duplicate profile keybinding removal in '$Path'." }
+        if ($seenAdd.Contains($canonical)) { throw "A keybinding cannot be both added and removed in '$Path'." }
+    }
+    return [pscustomobject]@{ Replace = $null; Add = [object[]]@($add); Remove = [object[]]@($remove) }
+}
+
 function Get-FileHashValue {
     param([Parameter(Mandatory)][string]$Path)
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -1219,11 +1557,16 @@ function Rename-ComposerProfile {
     $extension = [System.IO.Path]::GetExtension($source[0].Path)
     $changes = [System.Collections.Generic.List[object]]::new()
     $changes.Add([pscustomobject]@{ action = 'move'; source = "profiles/$sourceId$extension"; target = "profiles/$NewId$extension" })
-    $overrideSource = Join-Path $root "profiles/$sourceId.settings.jsonc"
-    $overrideTarget = Join-Path $root "profiles/$NewId.settings.jsonc"
-    if ((Test-Path -LiteralPath $overrideTarget) -and $overrideSource -ine $overrideTarget) { throw "Profile override for '$NewId' already exists." }
-    if (Test-Path -LiteralPath $overrideSource -PathType Leaf) {
-        $changes.Add([pscustomobject]@{ action = 'move'; source = "profiles/$sourceId.settings.jsonc"; target = "profiles/$NewId.settings.jsonc" })
+    $profileSidecars = @('settings.jsonc', 'settings.replace.jsonc', 'settings.remove.jsonc', 'extensions.jsonc', 'keybindings.jsonc')
+    foreach ($suffix in $profileSidecars) {
+        $sidecarSource = Join-Path $root "profiles/$sourceId.$suffix"
+        $sidecarTarget = Join-Path $root "profiles/$NewId.$suffix"
+        if ((Test-Path -LiteralPath $sidecarTarget) -and $sidecarSource -ine $sidecarTarget) {
+            throw "Profile sidecar '$NewId.$suffix' already exists."
+        }
+        if (Test-Path -LiteralPath $sidecarSource -PathType Leaf) {
+            $changes.Add([pscustomobject]@{ action = 'move'; source = "profiles/$sourceId.$suffix"; target = "profiles/$NewId.$suffix" })
+        }
     }
     $uiSource = Join-Path $root "machine/local/ui-state/$sourceId"
     $uiTarget = Join-Path $root "machine/local/ui-state/$NewId"
@@ -1236,9 +1579,11 @@ function Rename-ComposerProfile {
     $stagingRoot = New-ComposerStagingRepository $root
     try {
         Move-ComposerItemCaseSafe (Join-Path $stagingRoot "profiles/$sourceId$extension") (Join-Path $stagingRoot "profiles/$NewId$extension")
-        $stageOverrideSource = Join-Path $stagingRoot "profiles/$sourceId.settings.jsonc"
-        if (Test-Path -LiteralPath $stageOverrideSource) {
-            Move-ComposerItemCaseSafe $stageOverrideSource (Join-Path $stagingRoot "profiles/$NewId.settings.jsonc")
+        foreach ($suffix in $profileSidecars) {
+            $stageSidecarSource = Join-Path $stagingRoot "profiles/$sourceId.$suffix"
+            if (Test-Path -LiteralPath $stageSidecarSource) {
+                Move-ComposerItemCaseSafe $stageSidecarSource (Join-Path $stagingRoot "profiles/$NewId.$suffix")
+            }
         }
         if ($hasUiState) {
             Move-ComposerItemCaseSafe (Join-Path $stagingRoot "machine/local/ui-state/$sourceId") (Join-Path $stagingRoot "machine/local/ui-state/$NewId")
@@ -1363,6 +1708,309 @@ function Set-SharedDefaultComponent {
     }
     finally {
         if (Test-Path -LiteralPath $stagingRoot) { Remove-Item -LiteralPath $stagingRoot -Recurse -Force }
+    }
+}
+
+function Sync-ComposerProfileFromExport {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$RepositoryRoot,
+        [string]$Profile,
+        [Parameter(Mandatory)][string]$SourceProfileExport,
+        [string]$Platform,
+        [string]$VSCodeUserDataPath,
+        [switch]$SkipGlobal,
+        [switch]$SkipUiState,
+        [switch]$DryRun
+    )
+
+    $root = [System.IO.Path]::GetFullPath($RepositoryRoot)
+    $sourcePath = if ([System.IO.Path]::IsPathRooted($SourceProfileExport)) {
+        [System.IO.Path]::GetFullPath($SourceProfileExport)
+    }
+    else {
+        [System.IO.Path]::GetFullPath((Join-Path $root $SourceProfileExport))
+    }
+    $resources = Read-CodeProfileResources -Path $sourcePath
+    if (-not $SkipUiState -and [string]::IsNullOrWhiteSpace([string]$resources.GlobalState)) {
+        throw 'The profile export does not contain UI layout state. Export the UI State resource or use -SkipUiState.'
+    }
+
+    $preflight = Test-ComposerRepository -RepositoryRoot $root -Platform $Platform
+    if ($preflight.errors.Count -gt 0) {
+        throw "Profile sync requires a valid repository; found $($preflight.errors.Count) error(s)."
+    }
+    $definitions = @(Get-ProfileDefinitions $root)
+    if ($Profile) {
+        $matches = @($definitions | Where-Object Id -ieq $Profile)
+        if ($matches.Count -eq 0) { throw "Unknown profile recipe '$Profile'." }
+        if ($matches.Count -gt 1) { throw "Profile recipe ID '$Profile' is ambiguous." }
+        $definition = $matches[0]
+    }
+    else {
+        $matches = [System.Collections.Generic.List[object]]::new()
+        foreach ($candidate in $definitions) {
+            $recipe = Read-ProfileRecipe $candidate.Path
+            if ($candidate.Id -ieq $resources.Name -or $recipe.Name -ieq $resources.Name) { $matches.Add($candidate) }
+        }
+        if ($matches.Count -eq 0) {
+            throw "Exported profile name '$($resources.Name)' does not match a repository recipe ID or display name. Supply the recipe ID explicitly."
+        }
+        if ($matches.Count -gt 1) {
+            $ids = @($matches | ForEach-Object Id) -join ', '
+            throw "Exported profile name '$($resources.Name)' matches multiple repository recipes: $ids. Supply the recipe ID explicitly."
+        }
+        $definition = $matches[0]
+    }
+
+    $profileId = $definition.Id
+    $recipe = Read-ProfileRecipe $definition.Path
+    $componentSettings = New-OrderedMap
+    $componentSettingSources = [hashtable]::new([System.StringComparer]::Ordinal)
+    $componentOverrides = [System.Collections.Generic.List[object]]::new()
+    $extensionFiles = [System.Collections.Generic.List[object]]::new()
+    $keybindingFiles = [System.Collections.Generic.List[object]]::new()
+    foreach ($component in $recipe.Components) {
+        $componentPath = Join-Path $root "components/$component"
+        $settingsPath = Join-Path $componentPath 'settings.jsonc'
+        if (Test-Path -LiteralPath $settingsPath -PathType Leaf) {
+            $incoming = Read-JsonCFile $settingsPath
+            Merge-Settings $componentSettings $incoming (Get-RelativeDisplayPath $root $settingsPath) $componentSettingSources $componentOverrides | Out-Null
+        }
+        foreach ($spec in @(
+            @{ Name = 'extensions.txt'; Target = $extensionFiles },
+            @{ Name = 'keybindings.jsonc'; Target = $keybindingFiles }
+        )) {
+            $path = Join-Path $componentPath $spec.Name
+            if (Test-Path -LiteralPath $path -PathType Leaf) {
+                $spec.Target.Add([pscustomobject]@{ Path = $path; Source = (Get-RelativeDisplayPath $root $path) })
+            }
+        }
+    }
+    $componentExtensions = @(Merge-Extensions $extensionFiles.ToArray())
+    $componentKeybindings = @((Merge-Keybindings $keybindingFiles.ToArray()).Items)
+
+    $platformSettingIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    if ($Platform) {
+        $platformSettings = Read-JsonCFile (Join-Path $root "platform/$Platform.jsonc")
+        foreach ($key in $platformSettings.Keys) { $platformSettingIds.Add([string]$key) | Out-Null }
+    }
+
+    $trackedGlobal = Read-JsonCFile (Join-Path $root 'global/settings.jsonc')
+    $globalSettingIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    foreach ($id in @($trackedGlobal['workbench.settings.applyToAllProfiles'])) { $globalSettingIds.Add([string]$id) | Out-Null }
+    $newGlobal = $null
+    $machineOwnedGlobalCount = 0
+    $machineOwnedSettingIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    if (-not $SkipGlobal) {
+        $userDataPath = if ($VSCodeUserDataPath) {
+            [System.IO.Path]::GetFullPath($VSCodeUserDataPath)
+        }
+        else {
+            Get-DefaultVSCodeUserDataPath
+        }
+        $applicationSettingsPath = Join-Path $userDataPath 'settings.json'
+        if (-not (Test-Path -LiteralPath $applicationSettingsPath -PathType Leaf)) {
+            throw "VS Code application settings were not found at '$applicationSettingsPath'. Use -VSCodeUserDataPath or -SkipGlobal."
+        }
+        $applicationSettings = Read-JsonCFile $applicationSettingsPath
+        if (-not (Test-IsDictionary $applicationSettings)) { throw "VS Code application settings '$applicationSettingsPath' must have an object root." }
+        if (-not $applicationSettings.Contains('workbench.settings.applyToAllProfiles') -or
+            $applicationSettings['workbench.settings.applyToAllProfiles'] -isnot [System.Array]) {
+            throw "VS Code application settings must contain the authoritative 'workbench.settings.applyToAllProfiles' array."
+        }
+        if (-not $applicationSettings.Contains('settingsSync.ignoredSettings') -or
+            $applicationSettings['settingsSync.ignoredSettings'] -isnot [System.Array]) {
+            throw "VS Code application settings must contain the 'settingsSync.ignoredSettings' array."
+        }
+
+        $syncIgnored = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+        foreach ($id in @($applicationSettings['settingsSync.ignoredSettings'])) {
+            if ($id -isnot [string] -or [string]::IsNullOrWhiteSpace($id)) {
+                throw "VS Code application settings contain an invalid 'settingsSync.ignoredSettings' entry."
+            }
+            if (-not $id.StartsWith('-')) { $syncIgnored.Add([string]$id) | Out-Null }
+        }
+        $seenGlobal = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+        $filteredGlobalIds = [System.Collections.Generic.List[string]]::new()
+        $newGlobal = New-OrderedMap
+        $globalSettingIds.Clear()
+        foreach ($idValue in @($applicationSettings['workbench.settings.applyToAllProfiles'])) {
+            if ($idValue -isnot [string] -or [string]::IsNullOrWhiteSpace($idValue)) {
+                throw 'VS Code application settings contain an invalid apply-to-all setting ID.'
+            }
+            $id = [string]$idValue
+            if (-not $seenGlobal.Add($id)) { throw "VS Code application settings list global setting '$id' more than once." }
+            if (-not $applicationSettings.Contains($id)) { throw "VS Code application setting '$id' is apply-to-all but has no value." }
+            if ($id -ne 'settingsSync.ignoredSettings' -and $syncIgnored.Contains($id)) {
+                $machineOwnedGlobalCount++
+                $machineOwnedSettingIds.Add($id) | Out-Null
+                continue
+            }
+            $filteredGlobalIds.Add($id)
+            $globalSettingIds.Add($id) | Out-Null
+        }
+        if (-not $seenGlobal.Contains('settingsSync.ignoredSettings')) {
+            throw "VS Code application settings must apply 'settingsSync.ignoredSettings' to all profiles."
+        }
+        $newGlobal['workbench.settings.applyToAllProfiles'] = [string[]]$filteredGlobalIds.ToArray()
+        foreach ($id in $filteredGlobalIds) { $newGlobal[$id] = Copy-ComposerValue $applicationSettings[$id] }
+    }
+
+    $settingsReplacements = New-OrderedMap
+    $settingsRemovals = [System.Collections.Generic.List[string]]::new()
+    $globalSettingsIgnored = 0
+    $platformSettingsIgnored = 0
+    foreach ($key in $componentSettings.Keys) {
+        if ($globalSettingIds.Contains([string]$key) -or
+            $machineOwnedSettingIds.Contains([string]$key) -or
+            $platformSettingIds.Contains([string]$key)) { continue }
+        if (-not $resources.Settings.Contains($key)) { $settingsRemovals.Add([string]$key) }
+    }
+    foreach ($key in $resources.Settings.Keys) {
+        if ($machineOwnedSettingIds.Contains([string]$key)) {
+            $globalSettingsIgnored++
+            continue
+        }
+        if ($globalSettingIds.Contains([string]$key)) {
+            $globalSettingsIgnored++
+            continue
+        }
+        if ($platformSettingIds.Contains([string]$key)) {
+            $platformSettingsIgnored++
+            continue
+        }
+        if (-not $componentSettings.Contains($key) -or -not (Test-ValuesEqual $componentSettings[$key] $resources.Settings[$key])) {
+            $settingsReplacements[[string]$key] = Copy-ComposerValue $resources.Settings[$key]
+        }
+    }
+
+    $componentExtensionSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($id in $componentExtensions) { $componentExtensionSet.Add($id) | Out-Null }
+    $liveExtensionSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($id in $resources.Extensions) { $liveExtensionSet.Add($id) | Out-Null }
+    $extensionAdditions = @($resources.Extensions | Where-Object { -not $componentExtensionSet.Contains($_) })
+    $extensionRemovals = @($componentExtensions | Where-Object { -not $liveExtensionSet.Contains($_) })
+
+    $componentKeybindingSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    foreach ($item in $componentKeybindings) { $componentKeybindingSet.Add((Get-CanonicalComposerValue $item)) | Out-Null }
+    $liveKeybindingSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    foreach ($item in $resources.Keybindings) { $liveKeybindingSet.Add((Get-CanonicalComposerValue $item)) | Out-Null }
+    $keybindingAdditions = @($resources.Keybindings | Where-Object { -not $componentKeybindingSet.Contains((Get-CanonicalComposerValue $_)) })
+    $keybindingRemovals = @($componentKeybindings | Where-Object { -not $liveKeybindingSet.Contains((Get-CanonicalComposerValue $_)) })
+    $predictedKeybindings = @(
+        $componentKeybindings | Where-Object { $liveKeybindingSet.Contains((Get-CanonicalComposerValue $_)) }
+        $keybindingAdditions
+    )
+    $predictedOrder = @($predictedKeybindings | ForEach-Object { Get-CanonicalComposerValue $_ }) -join "`n"
+    $liveOrder = @($resources.Keybindings | ForEach-Object { Get-CanonicalComposerValue $_ }) -join "`n"
+    $replaceKeybindings = $predictedOrder -cne $liveOrder
+
+    $changes = [System.Collections.Generic.List[object]]::new()
+    $stagingRoot = New-ComposerStagingRepository $root
+    try {
+        $stagedProfiles = Join-Path $stagingRoot 'profiles'
+        $legacyOverridePath = Join-Path $stagedProfiles "$profileId.settings.jsonc"
+        if (Test-Path -LiteralPath $legacyOverridePath -PathType Leaf) {
+            Remove-Item -LiteralPath $legacyOverridePath -Force
+            $changes.Add([pscustomobject]@{ action = 'remove'; path = "profiles/$profileId.settings.jsonc" })
+        }
+
+        $resourcePlans = @(
+            @{
+                Path = Join-Path $stagedProfiles "$profileId.settings.replace.jsonc"
+                Relative = "profiles/$profileId.settings.replace.jsonc"
+                Present = $settingsReplacements.Count -gt 0
+                Value = $settingsReplacements
+            },
+            @{
+                Path = Join-Path $stagedProfiles "$profileId.settings.remove.jsonc"
+                Relative = "profiles/$profileId.settings.remove.jsonc"
+                Present = $settingsRemovals.Count -gt 0
+                Value = [string[]]$settingsRemovals.ToArray()
+            },
+            @{
+                Path = Join-Path $stagedProfiles "$profileId.extensions.jsonc"
+                Relative = "profiles/$profileId.extensions.jsonc"
+                Present = ($extensionAdditions.Count + $extensionRemovals.Count) -gt 0
+                Value = [ordered]@{ add = [string[]]$extensionAdditions; remove = [string[]]$extensionRemovals }
+            },
+            @{
+                Path = Join-Path $stagedProfiles "$profileId.keybindings.jsonc"
+                Relative = "profiles/$profileId.keybindings.jsonc"
+                Present = ($resources.Keybindings.Count -gt 0 -or $componentKeybindings.Count -gt 0) -and
+                    ($replaceKeybindings -or ($keybindingAdditions.Count + $keybindingRemovals.Count) -gt 0)
+                Value = if ($replaceKeybindings) {
+                    [ordered]@{ replace = [object[]]$resources.Keybindings }
+                }
+                else {
+                    [ordered]@{ add = [object[]]$keybindingAdditions; remove = [object[]]$keybindingRemovals }
+                }
+            }
+        )
+        foreach ($plan in $resourcePlans) {
+            $existed = Test-Path -LiteralPath $plan.Path -PathType Leaf
+            if ($plan.Present) {
+                Write-Utf8File $plan.Path (ConvertTo-PrettyJson $plan.Value)
+                $changes.Add([pscustomobject]@{ action = if ($existed) { 'update' } else { 'create' }; path = $plan.Relative })
+            }
+            elseif ($existed) {
+                Remove-Item -LiteralPath $plan.Path -Force
+                $changes.Add([pscustomobject]@{ action = 'remove'; path = $plan.Relative })
+            }
+        }
+
+        if (-not $SkipGlobal) {
+            Write-Utf8File (Join-Path $stagingRoot 'global/settings.jsonc') (ConvertTo-PrettyJson $newGlobal)
+            $changes.Add([pscustomobject]@{ action = 'update'; path = 'global/settings.jsonc' })
+        }
+        if (-not $SkipUiState) {
+            $uiDirectory = Join-Path $stagingRoot "machine/local/ui-state/$profileId"
+            [System.IO.Directory]::CreateDirectory($uiDirectory) | Out-Null
+            $seed = [ordered]@{
+                name = "Stored UI state seed for $profileId"
+                globalState = [string]$resources.GlobalState
+            }
+            $uiPath = Join-Path $uiDirectory 'seed.code-profile'
+            Write-Utf8File $uiPath (ConvertTo-PrettyJson $seed)
+            Read-CodeProfileGlobalState $uiPath | Out-Null
+            $changes.Add([pscustomobject]@{ action = 'update'; path = "machine/local/ui-state/$profileId/seed.code-profile" })
+        }
+
+        Assert-StagedRepositoryValid $stagingRoot
+        if (-not $DryRun) {
+            $commitPaths = [System.Collections.Generic.List[string]]::new()
+            $commitPaths.Add('profiles')
+            if (-not $SkipGlobal) { $commitPaths.Add('global') }
+            if (-not $SkipUiState) { $commitPaths.Add('machine/local/ui-state') }
+            Invoke-StagedRepositoryCommit $root $stagingRoot $commitPaths.ToArray()
+        }
+    }
+    finally {
+        if (Test-Path -LiteralPath $stagingRoot) { Remove-Item -LiteralPath $stagingRoot -Recurse -Force }
+    }
+
+    return [pscustomobject][ordered]@{
+        operation = 'sync-profile'
+        profileId = $profileId
+        displayName = $recipe.Name
+        exportName = $resources.Name
+        changes = [object[]]$changes.ToArray()
+        counts = [pscustomobject][ordered]@{
+            settingReplacements = $settingsReplacements.Count
+            settingRemovals = $settingsRemovals.Count
+            extensionAdditions = $extensionAdditions.Count
+            extensionRemovals = $extensionRemovals.Count
+            keybindingAdditions = $keybindingAdditions.Count
+            keybindingRemovals = $keybindingRemovals.Count
+            keybindingsReplacedForOrder = [bool]$replaceKeybindings
+            globalSettings = if ($SkipGlobal) { 0 } else { $newGlobal.Count - 1 }
+            machineOwnedGlobalSettingsSkipped = $machineOwnedGlobalCount
+            exportGlobalSettingsIgnored = $globalSettingsIgnored
+            platformSettingsIgnored = $platformSettingsIgnored
+        }
+        uiStateUpdated = -not [bool]$SkipUiState
+        dryRun = [bool]$DryRun
     }
 }
 
@@ -1568,17 +2216,35 @@ function Invoke-ProfileComposition {
         }
     }
 
+    $profileOverrideRecord = $null
     $profileOverridePath = Join-Path $root "profiles/$profileId.settings.jsonc"
     if (Test-Path -LiteralPath $profileOverridePath -PathType Leaf) {
         $source = Get-RelativeDisplayPath $root $profileOverridePath
-        $settingsLayers.Add([pscustomobject]@{ Path = $profileOverridePath; Source = $source })
+        $profileOverrideRecord = [pscustomobject]@{ Path = $profileOverridePath; Source = $source }
         $inputFiles.Add([pscustomobject]@{ type = 'profile-settings'; path = $source })
     }
+    $profileSettingsReplacementPath = Join-Path $root "profiles/$profileId.settings.replace.jsonc"
+    if (Test-Path -LiteralPath $profileSettingsReplacementPath -PathType Leaf) {
+        $inputFiles.Add([pscustomobject]@{ type = 'profile-settings-replacements'; path = (Get-RelativeDisplayPath $root $profileSettingsReplacementPath) })
+    }
+    $profileSettingsRemovalPath = Join-Path $root "profiles/$profileId.settings.remove.jsonc"
+    if (Test-Path -LiteralPath $profileSettingsRemovalPath -PathType Leaf) {
+        $inputFiles.Add([pscustomobject]@{ type = 'profile-settings-removals'; path = (Get-RelativeDisplayPath $root $profileSettingsRemovalPath) })
+    }
+    $profileExtensionOperationsPath = Join-Path $root "profiles/$profileId.extensions.jsonc"
+    if (Test-Path -LiteralPath $profileExtensionOperationsPath -PathType Leaf) {
+        $inputFiles.Add([pscustomobject]@{ type = 'profile-extension-operations'; path = (Get-RelativeDisplayPath $root $profileExtensionOperationsPath) })
+    }
+    $profileKeybindingOperationsPath = Join-Path $root "profiles/$profileId.keybindings.jsonc"
+    if (Test-Path -LiteralPath $profileKeybindingOperationsPath -PathType Leaf) {
+        $inputFiles.Add([pscustomobject]@{ type = 'profile-keybinding-operations'; path = (Get-RelativeDisplayPath $root $profileKeybindingOperationsPath) })
+    }
+    $platformRecord = $null
     $platformPath = $null
     if ($Platform) {
         $platformPath = Join-Path $root "platform/$Platform.jsonc"
         $source = Get-RelativeDisplayPath $root $platformPath
-        $settingsLayers.Add([pscustomobject]@{ Path = $platformPath; Source = $source })
+        $platformRecord = [pscustomobject]@{ Path = $platformPath; Source = $source }
         $inputFiles.Add([pscustomobject]@{ type = 'platform-settings'; path = $source })
     }
     $resolvedMachine = Resolve-MachinePath -RepositoryRoot $root -Machine $Machine -MachineFile $MachineFile
@@ -1599,6 +2265,44 @@ function Invoke-ProfileComposition {
         if (-not (Test-IsDictionary $incoming)) { throw "Settings root must be an object in '$($layer.Source)'." }
         Merge-Settings $settings $incoming $layer.Source $sourceMap $overrides | Out-Null
     }
+    if (Test-Path -LiteralPath $profileSettingsRemovalPath -PathType Leaf) {
+        foreach ($settingId in (Read-ProfileSettingsRemovals $profileSettingsRemovalPath)) {
+            if ($settings.Contains($settingId)) {
+                $settings.Remove($settingId)
+                Remove-SourceDescendants $sourceMap "/$(ConvertTo-JsonPointerSegment $settingId)"
+            }
+        }
+    }
+    if ($null -ne $profileOverrideRecord) {
+        $incoming = Read-JsonCFile $profileOverrideRecord.Path
+        if (-not (Test-IsDictionary $incoming)) { throw "Settings root must be an object in '$($profileOverrideRecord.Source)'." }
+        Merge-Settings $settings $incoming $profileOverrideRecord.Source $sourceMap $overrides | Out-Null
+    }
+    if (Test-Path -LiteralPath $profileSettingsReplacementPath -PathType Leaf) {
+        $replacementSource = Get-RelativeDisplayPath $root $profileSettingsReplacementPath
+        $replacement = Read-JsonCFile $profileSettingsReplacementPath
+        if (-not (Test-IsDictionary $replacement)) { throw "Settings replacement root must be an object in '$replacementSource'." }
+        foreach ($key in $replacement.Keys) {
+            $path = "/$(ConvertTo-JsonPointerSegment ([string]$key))"
+            if ($settings.Contains($key) -and -not (Test-ValuesEqual $settings[$key] $replacement[$key])) {
+                $overrides.Add([pscustomobject][ordered]@{
+                    path = $path
+                    previousSource = if ($sourceMap.ContainsKey($path)) { $sourceMap[$path] } else { 'component-settings' }
+                    source = $replacementSource
+                    previousValue = Get-RedactedValue $path $settings[$key]
+                    value = Get-RedactedValue $path $replacement[$key]
+                })
+            }
+            $settings[$key] = Copy-ComposerValue $replacement[$key]
+            Remove-SourceDescendants $sourceMap $path
+            Set-SourceTree $settings[$key] $path $replacementSource $sourceMap
+        }
+    }
+    if ($null -ne $platformRecord) {
+        $incoming = Read-JsonCFile $platformRecord.Path
+        if (-not (Test-IsDictionary $incoming)) { throw "Settings root must be an object in '$($platformRecord.Source)'." }
+        Merge-Settings $settings $incoming $platformRecord.Source $sourceMap $overrides | Out-Null
+    }
     foreach ($settingId in $machineSettingIds) {
         $machinePath = "/$(ConvertTo-JsonPointerSegment $settingId)"
         if ($settings.Contains($settingId)) {
@@ -1612,9 +2316,46 @@ function Invoke-ProfileComposition {
         }
     }
     $extensions = @(Merge-Extensions -Files $extensionFiles.ToArray())
+    if (Test-Path -LiteralPath $profileExtensionOperationsPath -PathType Leaf) {
+        $operations = Read-ProfileExtensionOperations $profileExtensionOperationsPath
+        $removedExtensions = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        foreach ($id in $operations.Remove) { $removedExtensions.Add($id) | Out-Null }
+        $extensionResult = [System.Collections.Generic.List[string]]::new()
+        $extensionSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        foreach ($id in $extensions) {
+            if (-not $removedExtensions.Contains($id) -and $extensionSet.Add($id)) { $extensionResult.Add($id) }
+        }
+        foreach ($id in $operations.Add) {
+            if ($extensionSet.Add($id)) { $extensionResult.Add($id) }
+        }
+        $extensions = [string[]]$extensionResult.ToArray()
+    }
     $keybindingsResult = Merge-Keybindings -Files $keybindingFiles.ToArray()
     $keybindings = @($keybindingsResult.Items)
     $mergeWarnings = @($keybindingsResult.Warnings)
+    if (Test-Path -LiteralPath $profileKeybindingOperationsPath -PathType Leaf) {
+        $operations = Read-ProfileKeybindingOperations $profileKeybindingOperationsPath
+        if ($null -ne $operations.Replace) {
+            $keybindings = [object[]]@($operations.Replace | ForEach-Object { Copy-ComposerValue $_ })
+        }
+        else {
+            $removedKeybindings = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+            foreach ($item in $operations.Remove) { $removedKeybindings.Add((Get-CanonicalComposerValue $item)) | Out-Null }
+            $keybindingResult = [System.Collections.Generic.List[object]]::new()
+            $keybindingSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+            foreach ($item in $keybindings) {
+                $canonical = Get-CanonicalComposerValue $item
+                if (-not $removedKeybindings.Contains($canonical) -and $keybindingSet.Add($canonical)) {
+                    $keybindingResult.Add((Copy-ComposerValue $item))
+                }
+            }
+            foreach ($item in $operations.Add) {
+                $canonical = Get-CanonicalComposerValue $item
+                if ($keybindingSet.Add($canonical)) { $keybindingResult.Add((Copy-ComposerValue $item)) }
+            }
+            $keybindings = [object[]]$keybindingResult.ToArray()
+        }
+    }
     $targetDirectory = [System.IO.Path]::GetFullPath((Join-Path $root "build/profiles/$profileId"))
     $codeProfileFileName = if ($ExportCodeProfile) { Get-CodeProfileFileName -DisplayName $recipe.Name } else { $null }
     $codeProfileTargetPath = if ($codeProfileFileName) { [System.IO.Path]::GetFullPath((Join-Path $targetDirectory $codeProfileFileName)) } else { $null }
@@ -1780,4 +2521,4 @@ function Invoke-ProfileComposition {
     }
 }
 
-Export-ModuleMember -Function ConvertFrom-JsonC, Read-ProfileRecipe, Get-ProfileDefinitions, Get-MachineDefinitions, Get-SharedDefaultComponent, Test-ComposerRepository, Merge-Settings, Merge-Extensions, Merge-Keybindings, Get-CodeProfileFileName, New-CodeProfileTemplate, Read-CodeProfileGlobalState, Get-StoredUiStateSeedPath, Save-ProfileUiStateSeed, Test-CodeProfileTemplate, Invoke-SafeDirectoryReplace, Rename-ComposerProfile, Rename-ComposerComponent, Set-SharedDefaultComponent, Invoke-GlobalSettingsComposition, Invoke-ProfileComposition
+Export-ModuleMember -Function ConvertFrom-JsonC, Read-ProfileRecipe, Get-ProfileDefinitions, Get-MachineDefinitions, Get-DefaultVSCodeUserDataPath, Get-LiveVSCodeProfileDefinitions, Get-VSCodeStatusText, Resolve-ComposerProfileFromVSCodeStatus, Get-SharedDefaultComponent, Test-ComposerRepository, Merge-Settings, Merge-Extensions, Merge-Keybindings, Get-CodeProfileFileName, New-CodeProfileTemplate, Read-CodeProfileResources, Read-CodeProfileGlobalState, Get-StoredUiStateSeedPath, Save-ProfileUiStateSeed, Test-CodeProfileTemplate, Invoke-SafeDirectoryReplace, Rename-ComposerProfile, Rename-ComposerComponent, Set-SharedDefaultComponent, Sync-ComposerProfileFromExport, Invoke-GlobalSettingsComposition, Invoke-ProfileComposition

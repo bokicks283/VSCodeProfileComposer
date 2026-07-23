@@ -2,7 +2,7 @@
 
 ## Overview
 
-`scripts/ProfileComposer.ps1` is the unified supported entry point. It validates and composes repository-owned artifacts, lists definitions, captures explicitly supplied UI state, and performs safe repository renames/default-ownership changes. `Compose-Profile.ps1` and `Save-ProfileUiState.ps1` remain compatible wrappers. Runtime composition requires PowerShell 7 and built-in .NET APIs; YAML support is intentionally limited to the current recipe schema, so no YAML module is required.
+`scripts/ProfileComposer.ps1` is the unified supported entry point. It validates and composes repository-owned artifacts, lists definitions, synchronizes reviewed profile exports, captures explicitly supplied UI state, performs safe repository renames/default-ownership changes, and provides guarded live-profile discovery/guidance. All new workflows should use its subcommands; `Compose-Profile.ps1` and `Save-ProfileUiState.ps1` remain compatible wrappers for existing automation. Runtime composition requires PowerShell 7 and built-in .NET APIs; YAML support is intentionally limited to the current recipe schema, so no YAML module is required.
 
 For a task-oriented walkthrough rather than this technical reference, see [Complete usage guide](USAGE.md).
 
@@ -17,9 +17,15 @@ pwsh ./scripts/ProfileComposer.ps1 list-machines
 pwsh ./scripts/ProfileComposer.ps1 compose default
 pwsh ./scripts/ProfileComposer.ps1 compose unreal -Platform windows -Machine windows
 pwsh ./scripts/ProfileComposer.ps1 compose-all -Platform windows -ExportCodeProfile
+pwsh ./scripts/ProfileComposer.ps1 capture-ui-state default "C:\private\Adjusted Default.code-profile"
+pwsh ./scripts/ProfileComposer.ps1 sync "C:\private\Adjusted Python.code-profile" -Platform windows -DryRun
+pwsh ./scripts/ProfileComposer.ps1 vscode list
+pwsh ./scripts/ProfileComposer.ps1 vscode import python-database -Platform windows -DryRun
+pwsh ./scripts/ProfileComposer.ps1 vscode replace python-database -LiveProfile "Old Python Setup" -DryRun
 pwsh ./scripts/ProfileComposer.ps1 rename-profile old new -DryRun
 pwsh ./scripts/ProfileComposer.ps1 rename-component old new -DryRun
 pwsh ./scripts/ProfileComposer.ps1 default show
+pwsh ./scripts/ProfileComposer.ps1 default set default -DryRun
 ```
 
 Use `-Strict` when warnings, including duplicate extension declarations, should fail the command. Ordinary composition fails only on errors.
@@ -29,8 +35,11 @@ Use `-Strict` when warnings, including duplicate extension declarations, should 
 Global settings are owned separately by `global/settings.jsonc` and generated to `build/global/settings.json`. For each named-profile recipe, the composer reads composable files in this order:
 
 1. Component `settings.jsonc`, `extensions.txt`, and `keybindings.jsonc` files in declared recipe order.
-2. Optional portable `profiles/<profile-id>.settings.jsonc`.
-3. Optional `platform/<platform>.jsonc`.
+2. Optional `profiles/<profile-id>.settings.remove.jsonc` top-level setting removals.
+3. Optional recursive `profiles/<profile-id>.settings.jsonc` overrides.
+4. Optional exact-value `profiles/<profile-id>.settings.replace.jsonc` replacements.
+5. Optional `profiles/<profile-id>.extensions.jsonc` and `.keybindings.jsonc` recipe operations.
+6. Optional `platform/<platform>.jsonc`.
 
 An optional named machine or explicit machine file is composed separately into the built-in Default/application artifact, not as a fourth named-profile layer.
 
@@ -40,7 +49,7 @@ Missing component input files are valid. Missing explicitly requested platform o
 
 `global/settings.jsonc` contains `workbench.settings.applyToAllProfiles` and exactly one value for every listed setting. Repository validation rejects duplicates, missing values, unlisted values, and declarations of globally owned settings in components, profile overrides, or platform overlays.
 
-`pwsh ./scripts/Compose-Profile.ps1 -Global` safely generates:
+`pwsh ./scripts/ProfileComposer.ps1 compose-global` safely generates:
 
 ```text
 build/global/
@@ -51,7 +60,7 @@ build/global/
 
 This artifact targets VS Code's built-in Default profile. It is not included in `.code-profile` exports because those create named profiles, where VS Code ignores these values. Apply it manually by merging it into **Preferences: Open Application Settings (JSON)**. `build/global/overrides.json` records any machine value that replaced a portable global default, using the same sensitive-value redaction as profile reports.
 
-Named machine overlays use `machine/local/<id>.jsonc`. `-ListMachines` discovers available IDs and `-Machine <id>` selects one. Each selected machine key is merged into `build/global/settings.json`, appended to `workbench.settings.applyToAllProfiles`, and appended to `settingsSync.ignoredSettings`; a conflicting `-setting.name` force-sync entry is removed. The same key is omitted from named-profile output and exports. The manifests record the ID, selection mode, delivery target, and count without recording machine values. `-MachineFile` remains supported for an explicit path.
+Named machine overlays use `machine/local/<id>.jsonc`. `ProfileComposer.ps1 list-machines` discovers available IDs and `-Machine <id>` selects one for a validating or composing subcommand. Each selected machine key is merged into `build/global/settings.json`, appended to `workbench.settings.applyToAllProfiles`, and appended to `settingsSync.ignoredSettings`; a conflicting `-setting.name` force-sync entry is removed. The same key is omitted from named-profile output and exports. The manifests record the ID, selection mode, delivery target, and count without recording machine values. `-MachineFile` remains supported for an explicit path.
 
 The recipe parser accepts the repository's narrow schema:
 
@@ -107,7 +116,7 @@ The export has no `globalState` resource by default. Accidental component-level 
 For an explicit one-time starting layout, pass a private VS Code export:
 
 ```powershell
-pwsh ./scripts/Compose-Profile.ps1 -All -Platform windows -ExportCodeProfile -UiStateFromProfile "C:\private\Composer Default Layout.code-profile"
+pwsh ./scripts/ProfileComposer.ps1 compose-all -Platform windows -ExportCodeProfile -UiStateFromProfile "C:\private\Composer Default Layout.code-profile"
 ```
 
 The composer validates the source wrapper and passes only its opaque `globalState` string through unchanged. It does not copy source settings, extensions, keybindings, name, or path, and it does not interpret or merge the UI payload. The manifest records the payload hash and `seed-on-import-then-managed-by-vscode`. Generated profiles receive the same starting snapshot, after which VS Code owns each live layout independently.
@@ -115,22 +124,50 @@ The composer validates the source wrapper and passes only its opaque `globalStat
 For repeatable local use, capture the opaque resource under an ignored profile ID and reuse it:
 
 ```powershell
-pwsh ./scripts/Save-ProfileUiState.ps1 -Profile default -SourceProfileExport "C:\private\Adjusted Default.code-profile"
-pwsh ./scripts/Compose-Profile.ps1 -Profile python-database -Platform windows -ExportCodeProfile -UiStateProfile default
+pwsh ./scripts/ProfileComposer.ps1 capture-ui-state default "C:\private\Adjusted Default.code-profile"
+pwsh ./scripts/ProfileComposer.ps1 compose python-database -Platform windows -ExportCodeProfile -UiStateProfile default
 ```
 
 The stored file contains only a generic name and `globalState`; its original path and other export resources are discarded. `-UiStateProfile` may seed the same recipe or a different target recipe. Stored UI data is local and private, not canonical component input.
 
+The recipe ID may be omitted from `capture-ui-state` when exactly one active VS Code profile name in `code --status` matches a recipe ID or display name. Matching is case-insensitive and deduplicated by recipe ID. Zero or multiple recipe matches fail and require the explicit form. Status text is used only for selection and is never stored or printed.
+
+## Synchronizing a tested profile
+
+VS Code has no supported complete profile-export CLI, so synchronization starts with **Profiles: Export Profile...** and a private local `.code-profile` file:
+
+```powershell
+pwsh ./scripts/ProfileComposer.ps1 sync "C:\private\Adjusted Python.code-profile" -Platform windows -DryRun
+pwsh ./scripts/ProfileComposer.ps1 sync "C:\private\Adjusted Python.code-profile" -Platform windows
+```
+
+The export name automatically selects one exact recipe ID or display name. The explicit form is `sync <recipe> <export>`. The command validates the export and synchronizes:
+
+- changed or added profile settings as exact recipe replacements;
+- component settings absent from the export as recipe removals;
+- extension additions and removals relative to the recipe's components;
+- keybinding additions/removals, or an exact recipe replacement when ordering changed;
+- the opaque `globalState` resource under ignored `machine/local/ui-state/<recipe>/`;
+- built-in Default/application values named by the live `workbench.settings.applyToAllProfiles` list.
+
+Application settings are read from the selected VS Code User directory. Keys also present in `settingsSync.ignoredSettings` are treated as machine-owned and their values are not copied into tracked settings. A leading `-` means VS Code force-syncs that key and is not treated as machine ownership. `-SkipGlobal` disables application reconciliation; `-SkipUiState` permits an export without UI state.
+
+Global reconciliation rewrites `global/settings.jsonc` as normalized JSON because live application settings carry no repository comments. Preview and review this diff before committing.
+
+Keys already owned by the selected `-Platform` overlay are excluded from recipe deltas. Change reusable OS behavior in `platform/<id>.jsonc`; the sync summary reports how many platform-owned settings were filtered.
+
+Exports are flattened and contain no component provenance. Sync therefore never edits shared components. It writes recipe sidecars, validates an isolated staging repository, and atomically replaces only `profiles/`, `global/`, and the recipe's ignored UI-state root. A validation or commit failure rolls everything back. The command never edits the source export, live profile storage, installed extensions, or Settings Sync state. Task or snippet resources are rejected because the repository does not own them.
+
 Portable export:
 
 ```powershell
-pwsh ./scripts/Compose-Profile.ps1 -Profile unreal -Platform windows -ExportCodeProfile
+pwsh ./scripts/ProfileComposer.ps1 compose unreal -Platform windows -ExportCodeProfile
 ```
 
 Generate a portable profile plus application settings for one named machine:
 
 ```powershell
-pwsh ./scripts/Compose-Profile.ps1 -Profile unreal -Platform windows -Machine windows -ExportCodeProfile
+pwsh ./scripts/ProfileComposer.ps1 compose unreal -Platform windows -Machine windows -ExportCodeProfile
 ```
 
 Machine values are written only to `build/global/settings.json`; the `.code-profile` remains portable and its manifest records `machineSettingsDelivery: built-in-default-application-settings`. The export manifest also records the filename and SHA-256 hash, UI-state policy, and `manual-vscode-profile-import` import method. Only a UI-seeded artifact is classified `ui-state-seed-included`.
@@ -170,22 +207,24 @@ Tests require Pester 5.5 or newer and use isolated temporary repositories:
 pwsh -NoProfile -Command "Invoke-Pester -Path ./tests -Output Detailed"
 ```
 
-The suite covers recipe and JSONC parsing, validation, every merge mode, redaction, overlay order, safe replacement, failure preservation, dry run behavior, output structure, current core recipes, export schema/resources, portability metadata, hashes, filename containment, and safe local UI-state capture/reuse.
+The suite covers recipe and JSONC parsing, validation, every merge mode, redaction, overlay order, safe replacement, failure preservation, dry run behavior, output structure, current core recipes, export schema/resources, portability metadata, hashes, filename containment, CLI dispatch and errors, compatibility wrappers, transactional source changes and rollback, guarded live-profile guidance, reviewed reverse synchronization, and safe local UI-state capture/reuse and automatic recipe selection.
 
 ## Troubleshooting
 
 - `invalid-jsonc`: fix the named source; comments and trailing commas are supported, malformed strings and delimiters are not.
 - `invalid-yaml`: keep the recipe to `name` plus an indented `components` list.
-- `missing-platform-overlay` or `missing-machine-overlay`: check the explicit argument; use `-ListMachines` for named local overlays.
+- `missing-platform-overlay` or `missing-machine-overlay`: check the explicit argument; run `pwsh ./scripts/ProfileComposer.ps1 list-machines` for named local overlays.
 - `global-setting-in-profile-source`: remove the setting from the component, profile override, or platform file and edit it in `global/settings.jsonc`.
 - `portable-absolute-path`: move the setting into `machine/local/` and pass it explicitly.
 - `invalid-export-filename`: keep the profile display name free of path separators, traversal sequences, and reserved Windows names.
 - `unsupported-ui-state-source`: remove the component-level file; starting UI state is accepted only through `-UiStateFromProfile` or a locally stored `-UiStateProfile` seed.
 - missing or invalid UI seed: manually export the arranged source profile again and confirm it contains a non-empty `globalState` resource.
+- sync reports a missing UI resource: export **UI State** with the profile, or intentionally add `-SkipUiState`.
+- sync rejects application settings: use `-VSCodeUserDataPath` for the intended stable/Insiders User directory, or `-SkipGlobal` for a recipe-only reconciliation.
 - strict-mode warning failure: rerun without `-Strict` to inspect an otherwise valid build, or resolve the warning at its source.
 
 ## Installer and rollback status
 
-No installer is included. Export generation never discovers or writes live VS Code storage and never imports automatically, so no VS Code rollback is needed. Delete ignored `build/` output to discard generated artifacts, or simply recompose from canonical sources.
+No unattended installer or exporter is included. Ordinary export generation never discovers or writes live VS Code storage and never imports automatically. `vscode list` reads only names and opaque location IDs; `vscode open` uses `code --profile` after verifying the name; and import/replace/delete print reviewed Profiles-editor steps without writing live storage. `sync` consumes a manual private export and optionally reads application settings, but writes only validated repository sources and ignored UI seed data. Delete ignored `build/` output to discard generated artifacts, or simply recompose from canonical sources.
 
-The locally installed `code --help` exposes `--profile <profileName>` for opening or creating a named profile, but exposes no supported command for importing composed settings, keybindings, or a complete profile package. Direct apply therefore remains deferred rather than editing undocumented profile databases. The next step is to re-evaluate official CLI support for profile import; any implementation must be explicit, backup-first, reversible, and separate from ordinary composition.
+The locally installed VS Code 1.130 `code --help` exposes `--profile <profileName>` but no supported command for importing, replacing, listing, or deleting complete profiles. The command group therefore verifies existing names before opening, composes import packages, and keeps final create/delete confirmations in the supported Profiles editor rather than editing undocumented profile databases.

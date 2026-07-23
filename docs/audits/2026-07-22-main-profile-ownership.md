@@ -60,6 +60,7 @@ requiring a guess about component, profile, platform, or machine ownership.
 ## Follow-up
 
 On each computer, keep the Todo Tree executable value in that computer's
-ignored machine overlay and compose application settings with `-Machine <id>`.
+ignored machine overlay and run a `ProfileComposer.ps1` validating or composing
+subcommand with `-Machine <id>`.
 Do not add the executable path to `global/settings.jsonc` or a named-profile
 source.

@@ -9,9 +9,12 @@
 - Named machine IDs under `machine/local/` can be listed and selected explicitly. Their values are generated only into the built-in Default/application artifact, automatically applied to every profile, and excluded from Settings Sync; private overlays remain outside Git.
 - Reviewed `.code-profile` artifacts can be generated explicitly for manual import through VS Code.
 - Exported resources are limited to composed settings, extensions, keybindings, profile identity, and an optional opaque UI-state seed captured from a manual export; VS Code owns live UI state after import.
-- Pester tests cover CLI dispatch/errors, wrappers, merge behavior, validation, safe replacement, source rename/default transactions, rollback, and current core profiles.
+- Pester tests cover CLI dispatch/errors, wrappers, merge behavior, validation, safe replacement, source rename/default/sync transactions, rollback, guarded live-profile guidance, automatic UI-state recipe selection, and current core profiles.
 - `composer.jsonc` declares the shared default component, and the CLI safely normalizes or renames that ownership without introducing a dependency graph.
-- A conservative read-only `Main` profile ownership audit is recorded under `docs/audits/`; no general live comparison or reverse-write command was added.
+- A conservative read-only `Main` profile ownership audit is recorded under `docs/audits/`.
+- The `vscode` command group can list profile names/opaque IDs read-only, open a verified existing profile with `code --profile`, compose guided import/replacement packages, and verify deletion targets without writing live storage.
+- `capture-ui-state` can infer its recipe only when `code --status` yields exactly one recipe ID/display-name match; ambiguous or absent matches require an explicit recipe.
+- `sync [<recipe>] <export>` transactionally reconciles a reviewed manual export into recipe-specific settings, extension, and keybinding deltas plus an ignored UI-state seed. It can also reconcile explicit apply-to-all application settings while excluding Sync-ignored machine values.
 
 ## Current delivery state
 
@@ -19,7 +22,8 @@
 - Settings Sync remains the primary cross-machine delivery mechanism after a profile is imported.
 - This repository is the canonical human-readable configuration and composition source.
 - Live VS Code profiles remain the runtime source of truth for UI placement and other VS Code-owned state.
-- `Save-ProfileUiState.ps1` can extract and retain only the opaque UI resource from a manually exported profile under ignored local data. `-UiStateProfile` reuses that copy-on-create starting point. Direct live capture, layout parsing or merging, and continuing inheritance remain deferred.
+- `ProfileComposer.ps1 capture-ui-state [<profile-id>] <export-path>` can extract and retain only the opaque UI resource from a manually exported profile under ignored local data. Automatic recipe selection reads status text only and fails closed. `-UiStateProfile` reuses that copy-on-create starting point during composition. Direct live capture, layout parsing or merging, and continuing inheritance remain deferred.
+- `ProfileComposer.ps1 sync [<profile-id>] <export-path>` is the reviewed reverse path for the repository-owned resources in that export. Flattened differences remain recipe-specific unless a human deliberately promotes them into a shared component.
 - Stable profiles may be exported and stored privately.
 - Default is the shared base and already provides everyday shell-language support to every profile.
 - PowerShell Development is an optional advanced profile, not a sixth required daily profile.
@@ -28,14 +32,16 @@
 
 ## Still deferred
 
-- create or update dedicated VS Code profiles through a supported, backup-first interface
+- unattended creation, replacement, or deletion of VS Code profiles (the supported Profiles editor remains the final confirmation surface)
 - verify that database-enabled exports contain no saved connections or authentication state
 - provide an opt-in, redacted general comparison report for arbitrary live profiles (the one-time `Main` audit is complete)
-- synchronize changes back from VS Code into components
+- automatically export the current profile without a manual Profiles-editor export
+- infer or promote flattened live changes into shared components
+- synchronize snippets, tasks, MCP definitions, or other resource classes not owned by the current repository schema
 - provide GUI management
 - integrate with Unreal Tool Suite
 
-Automatic profile installation remains deferred until a supported VS Code CLI workflow is proven. Do not edit undocumented VS Code profile databases. Settings Sync remains the primary cross-machine delivery mechanism for active profiles.
+Automatic profile installation remains deferred until a supported VS Code CLI workflow is proven. Guided preparation and target verification are implemented; do not edit undocumented VS Code profile databases. Settings Sync remains the primary cross-machine delivery mechanism for active profiles.
 
 ## Remaining validation gate
 

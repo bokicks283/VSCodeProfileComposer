@@ -1,6 +1,6 @@
 # VS Code Profile Composer
 
-This repository contains reusable VS Code settings and extension components plus a safe PowerShell 7 composer. `scripts/ProfileComposer.ps1` is the unified CLI for validation, composition, discovery, UI-state capture, and transactional source maintenance without changing the user's VS Code installation.
+This repository contains reusable VS Code settings and extension components plus a safe PowerShell 7 composer. `scripts/ProfileComposer.ps1` is the unified CLI for validation, composition, discovery, reviewed export synchronization, UI-state capture, transactional source maintenance, and guarded VS Code profile guidance. Ordinary composition remains repository-only.
 
 For a complete first-run walkthrough, profile-selection guide, import procedure, Settings Sync precautions, maintenance workflow, and troubleshooting reference, start with [Complete usage guide](docs/USAGE.md).
 
@@ -45,8 +45,26 @@ pwsh ./scripts/ProfileComposer.ps1 compose default -Platform windows -ExportCode
 After arranging a profile in VS Code and exporting it manually, store only its UI state under ignored local project data:
 
 ```powershell
+# Explicit recipe ID.
 pwsh ./scripts/ProfileComposer.ps1 capture-ui-state default "C:\private\Adjusted Default.code-profile"
+
+# Or omit the recipe when exactly one active VS Code profile name matches a recipe.
+pwsh ./scripts/ProfileComposer.ps1 capture-ui-state "C:\private\Adjusted Python.code-profile"
 ```
+
+If active VS Code windows match zero or multiple recipe IDs/display names, automatic selection fails and requires the explicit form.
+
+After changing a test profile, export it through the Profiles editor and preview a complete repository sync:
+
+```powershell
+# The export name matches the Python recipe automatically.
+pwsh ./scripts/ProfileComposer.ps1 sync "C:\private\Adjusted Python.code-profile" -Platform windows -DryRun
+
+# Apply only after reviewing the plan; inspect the Git diff afterward.
+pwsh ./scripts/ProfileComposer.ps1 sync "C:\private\Adjusted Python.code-profile" -Platform windows
+```
+
+`sync` updates recipe-specific settings, extension, and keybinding deltas plus the ignored opaque UI-state seed. It also reads the built-in Default/application `settings.json` and updates only values explicitly named by `workbench.settings.applyToAllProfiles`; Sync-ignored machine values are not copied into tracked settings. Supply the recipe ID before the export path when the exported name does not match exactly one recipe. Add `-SkipGlobal` or `-SkipUiState` to omit those resources.
 
 Reuse that stored layout for the same profile or as the starting layout for another profile:
 
@@ -61,7 +79,8 @@ Warnings are informational by default. Add `-Strict` to make warnings fail valid
 ```text
 Named profile: Default shared base
 → additional recipe components in declared order
-→ optional profiles/<id>.settings.jsonc override
+→ optional recipe-specific settings removals, recursive overrides, and exact replacements
+→ optional recipe-specific extension/keybinding operations
 → platform/<platform>.jsonc
 
 Built-in Default/application settings: global/settings.jsonc
@@ -81,7 +100,7 @@ pwsh ./scripts/ProfileComposer.ps1 rename-profile old-id new-id -DryRun
 pwsh ./scripts/ProfileComposer.ps1 rename-component old-id new-id -DryRun
 ```
 
-Rename and shared-default changes are validated in an isolated staged copy, then applied as a rollback-safe source transaction. They never rename live VS Code profiles. The older `Compose-Profile.ps1` and `Save-ProfileUiState.ps1` commands remain compatible wrappers.
+Sync, rename, and shared-default changes are validated in an isolated staged copy, then applied as a rollback-safe source transaction. They never rename or rewrite live VS Code profiles. Use `ProfileComposer.ps1` for all new workflows; the older `Compose-Profile.ps1` and `Save-ProfileUiState.ps1` scripts remain compatible wrappers for existing automation.
 
 ## Output and safety
 
@@ -108,11 +127,27 @@ Repository validation checks recipes, JSONC/YAML structure, extension IDs and du
 
 ## VS Code profile export
 
-Add `-ExportCodeProfile` to one-profile or `-All` composition. For example, Default writes `build/profiles/default/Default.code-profile`; Unreal writes `build/profiles/unreal/Unreal-Engine.code-profile`. The export contains the fully composed settings, recipe-owned extension identifiers, and generated keybindings. VS Code handles extension acquisition during its normal import workflow—composition never installs extensions.
+Add `-ExportCodeProfile` to `compose <profile-id>` or `compose-all`. For example, Default writes `build/profiles/default/Default.code-profile`; Unreal writes `build/profiles/unreal/Unreal-Engine.code-profile`. The export contains the fully composed settings, recipe-owned extension identifiers, and generated keybindings. VS Code handles extension acquisition during its normal import workflow—composition never installs extensions.
 
 Machine overlays are deliberately excluded from named-profile settings and `.code-profile` exports. Selecting `-Machine` or `-MachineFile` instead adds those keys to `build/global/settings.json`, `workbench.settings.applyToAllProfiles`, and `settingsSync.ignoredSettings`. This makes the values effective on the selected computer without sending its paths through Settings Sync. Exports remain portable unless `-UiStateFromProfile` adds a private UI snapshot.
 
-`Save-ProfileUiState.ps1` validates a manually exported `.code-profile` and stores only its opaque `globalState` resource at `machine/local/ui-state/<profile>/seed.code-profile`. The source settings, extensions, keybindings, name, and path are not copied. `-UiStateProfile <id>` reuses a stored seed; `-UiStateFromProfile <path>` remains available for a one-off build. This is copy-on-create, not inheritance: VS Code owns each profile's UI after import, later layout changes do not propagate, and views introduced by other extensions use their defaults. Stored and generated UI-seeded files are private because `globalState` can include extension or account-related state.
+`ProfileComposer.ps1 capture-ui-state [<profile-id>] <export-path>` validates a manually exported `.code-profile` and stores only its opaque `globalState` resource at `machine/local/ui-state/<profile>/seed.code-profile`. When the recipe ID is omitted, the CLI reads `code --status` and accepts exactly one active profile name matching a recipe ID or display name. Zero or multiple matches fail safely. The source settings, extensions, keybindings, name, and path are not copied. `-UiStateProfile <id>` reuses a stored seed during `compose` or `compose-all`; `-UiStateFromProfile <path>` remains available for a one-off build. This is copy-on-create, not inheritance: VS Code owns each profile's UI after import, later layout changes do not propagate, and views introduced by other extensions use their defaults. Stored and generated UI-seeded files are private because `globalState` can include extension or account-related state.
+
+`ProfileComposer.ps1 sync [<profile-id>] <export-path>` is the reviewed reverse path. It consumes the export's settings, extensions, keybindings, and `globalState`, but never guesses flattened changes back into shared components. Instead, it writes validated recipe sidecars under `profiles/`; exact setting values use `.settings.replace.jsonc`, removed component settings use `.settings.remove.jsonc`, and extension/keybinding add/remove operations use their corresponding `.jsonc` sidecars. A keybinding order change is preserved through an exact recipe replacement. The private UI resource remains ignored under `machine/local/ui-state/`.
+
+## Guided VS Code profile management
+
+The `vscode` command group automates safe preparation and read-only discovery while leaving profile creation and deletion in VS Code's supported Profiles editor:
+
+```powershell
+pwsh ./scripts/ProfileComposer.ps1 vscode list
+pwsh ./scripts/ProfileComposer.ps1 vscode open "Python + Database" .
+pwsh ./scripts/ProfileComposer.ps1 vscode import python-database -Platform windows -DryRun
+pwsh ./scripts/ProfileComposer.ps1 vscode replace python-database -LiveProfile "Old Python Setup" -Platform windows -DryRun
+pwsh ./scripts/ProfileComposer.ps1 vscode delete "Old Python Setup" -DryRun
+```
+
+Here `<recipe>` is the filename under `profiles/` without `.yaml`; `-LiveProfile` is the exact existing VS Code display name. `vscode import` and `vscode replace` imply `.code-profile` export and print the reviewed Profiles-editor steps. `vscode list` reads only profile names and opaque location IDs. `vscode open` uses the supported `code --profile` option after verifying the target exists. Replace and delete never edit VS Code's private profile registry or Settings Sync data.
 
 Import manually:
 
@@ -127,7 +162,7 @@ File → Preferences → Profiles
 
 By default, UI placement is not included. When an explicit UI seed is supplied, the composer passes the snapshot through without interpreting or merging it. After import, VS Code owns and syncs the resulting live UI state. Review every import preview: re-importing may create a profile or replace selected profile resources according to VS Code's current import workflow.
 
-Portable custom keybindings are canonical component inputs. `components/default/keybindings.jsonc` supplies the editor, notebook, panel, Markdown, and spelling shortcuts inherited by every recipe, including `Ctrl+Shift+S` for cSpell suggestions; focused extension commands such as SQL Server's IntelliSense-cache rebuild shortcut stay in their owning component. The composer never reads live user keybindings during composition.
+Portable custom keybindings are canonical component inputs. `components/default/keybindings.jsonc` supplies the editor, notebook, panel, Markdown, and spelling shortcuts inherited by every recipe, including `Ctrl+Shift+S` for cSpell suggestions; focused extension commands such as SQL Server's IntelliSense-cache rebuild shortcut stay in their owning component. A reviewed sync can add, remove, or exactly order recipe-specific bindings without changing those shared sources.
 
 ## Machine-local setup
 
@@ -157,6 +192,6 @@ pwsh -NoProfile -Command "Invoke-Pester -Path ./tests -Output Detailed -CI"
 
 ## Installer status
 
-Direct installation into VS Code is intentionally deferred. `.code-profile` generation is an export only and never invokes import. The composer never edits VS Code user data, profile storage, extensions, Settings Sync, or operating-system configuration. Settings Sync remains the primary cross-machine delivery mechanism for imported active profiles.
+Unattended installation, replacement, deletion, and export remain deferred because VS Code 1.130 exposes no supported complete profile-management CLI. The guided commands may read profile names/location IDs and `code --status`, and `vscode open` may launch an existing profile; they never write profile storage, invoke import/export automatically, install extensions, or alter Settings Sync. `sync` requires a manually exported private `.code-profile` and reads application settings only for explicit global ownership reconciliation. Settings Sync remains the primary cross-machine delivery mechanism for imported active profiles.
 
 See [Complete usage guide](docs/USAGE.md), [Composer details](docs/COMPOSER.md), [Architecture](docs/ARCHITECTURE.md), [Main-profile ownership audit](docs/audits/2026-07-22-main-profile-ownership.md), [Portability](docs/PORTABILITY.md), [Migration](docs/MIGRATION.md), and the sanitized [historical extension reference](reference/extensions/README.md).

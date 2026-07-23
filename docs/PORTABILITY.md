@@ -29,7 +29,7 @@ Database command-line clients, native drivers, and certificate behavior may vary
 
 ## Machine-local settings
 
-Real machine values live under ignored `machine/local/<machine-id>.jsonc`. Committed examples use placeholders only. Use `-ListMachines` to see available local IDs and `-Machine <machine-id>` to choose the computer being targeted. The selected values are written only to `build/global/settings.json`; named profiles and `.code-profile` exports remain portable.
+Real machine values live under ignored `machine/local/<machine-id>.jsonc`. Committed examples use placeholders only. Use `ProfileComposer.ps1 list-machines` to see available local IDs and `-Machine <machine-id>` on a validating or composing subcommand to choose the computer being targeted. The selected values are written only to `build/global/settings.json`; named profiles and `.code-profile` exports remain portable.
 
 PowerShell executable overrides, module locations, signing certificates, remoting endpoints, database client paths, SSH tunnels, and shell-specific environment adjustments are machine-local when they cannot be expressed portably.
 
@@ -92,7 +92,9 @@ Database tooling is selected only when the active profile composes `database` or
 
 Generate portable `.code-profile` artifacts under ignored `build/profiles/` with `-ExportCodeProfile`. Inspect them before import or private storage. A composer-generated database profile contains only repository-owned settings and extension identifiers, but still review it before use.
 
-Separately, a profile exported from live VS Code can contain additional runtime-owned resources or machine/account state. Treat live exports as sensitive until inspected and store them privately rather than using them as canonical repository source. `Save-ProfileUiState.ps1` discards every resource except the opaque `globalState` and stores it under ignored `machine/local/ui-state/<profile>/`; that resource can itself contain extension or account-related state. `-UiStateProfile` reuses it as a one-time layout seed, not a portable or canonical source.
+Separately, a profile exported from live VS Code can contain additional runtime-owned resources or machine/account state. Treat live exports as sensitive until inspected and store them privately. `ProfileComposer.ps1 capture-ui-state [<profile-id>] <export-path>` discards every resource except the opaque `globalState` and stores it under ignored `machine/local/ui-state/<profile>/`; that resource can itself contain extension or account-related state. Omitting the recipe reads only `code --status` and succeeds for one exact recipe match. `-UiStateProfile` reuses the stored data as a one-time layout seed, not a portable component source.
+
+`ProfileComposer.ps1 sync [<profile-id>] <export-path>` deliberately broadens that import path for reviewed maintenance. It validates settings, extension IDs, keybindings, and UI state, then records only recipe-specific deltas; it never copies flattened values into shared components automatically. Application settings are limited to explicit `workbench.settings.applyToAllProfiles` ownership, and keys ignored by Settings Sync are excluded as machine-owned. Portable-value validation and an isolated transaction run before tracked source replacement. The original export and stored UI seed remain private.
 
 ## Temporary family or friend machines
 

@@ -35,11 +35,11 @@ Every recipe begins with `default`. Focused components add to this shared base r
 
 Settings and extension IDs are portable and contain no account state. Settings intentionally applied to every profile are owned by `global/settings.jsonc`, not duplicated here. The unreliable portable `todo-tree.ripgrep.ripgrep: "rg"` value is intentionally absent; machines that require it must provide a confirmed absolute path through an ignored named machine overlay.
 
-`keybindings.jsonc` is the canonical shared keybinding source. It preserves explicit removal entries alongside replacement shortcuts so VS Code does not reactivate displaced defaults. Extension-specific bindings belong here only when the owning extension is also part of Default.
+`keybindings.jsonc` is the canonical shared keybinding source. It preserves explicit removal entries alongside replacement shortcuts so VS Code does not reactivate displaced defaults. Extension-specific bindings belong here only when the owning extension is also part of Default. A reviewed `sync` may record recipe-specific keybinding operations without changing this shared source; promote them here only when every recipe should inherit them.
 
 ## Platform concerns
 
-Compose with `-Platform windows` or `-Platform linux` as appropriate. Windows terminal selection belongs in `platform/windows.jsonc`; Linux terminal selection belongs in `platform/linux.jsonc`. Default does not choose an operating-system shell.
+Run `ProfileComposer.ps1 compose default -Platform windows` or `ProfileComposer.ps1 compose default -Platform linux` as appropriate. Windows terminal selection belongs in `platform/windows.jsonc`; Linux terminal selection belongs in `platform/linux.jsonc`. Default does not choose an operating-system shell.
 
 ## Machine concerns
 
