@@ -9,9 +9,9 @@ The source export contained settings, extensions, and `globalState`. Only the ex
 - 150 unique extension IDs
 - 150 valid Marketplace-style IDs
 - 0 duplicate IDs
-- 50 IDs currently owned by repository components
-- 100 historical-only candidates
-- 0 active repository IDs missing from the snapshot
+- 51 IDs currently owned by repository components
+- 99 historical-only candidates
+- 1 active repository ID missing from the snapshot (`github.copilot-chat`)
 
 The inventory is [extension-library-staging.txt](extension-library-staging.txt).
 

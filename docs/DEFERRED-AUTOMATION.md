@@ -32,7 +32,7 @@
 - This repository is the canonical human-readable configuration and composition source.
 - Live VS Code profiles remain the runtime source of truth for UI placement and other VS Code-owned state.
 - `ProfileComposer.ps1 capture-ui-state [<profile-id>] <export-path>` can extract and retain only the opaque UI resource from a manually exported profile under ignored local data. Automatic recipe selection reads status text only and fails closed. Normal composition automatically copies the configured default seed; explicit overrides and `-NoUiState` remain available. Direct live capture, layout parsing or merging, and continuing inheritance remain deferred.
-- `ProfileComposer.ps1 sync [<profile-id>] <export-path>` is the reviewed reverse path for the repository-owned resources in that export. Flattened differences remain recipe-specific unless a human deliberately promotes them into a shared component.
+- `ProfileComposer.ps1 sync [<profile-id>] <export-path>` is the reviewed reverse path for the repository-owned resources in that export. Existing exact owners are updated directly; new flattened differences require an approved route or grouped decision, and profile-local ownership is explicit rather than a fallback.
 - Stable profiles may be exported and stored privately.
 - Main is the shared base and already provides everyday shell-language support to every profile.
 - PowerShell Development is an optional advanced profile, not a sixth required daily profile.
@@ -55,7 +55,14 @@ Automatic profile installation remains deferred until a supported VS Code CLI wo
 
 ## Remaining validation gate
 
-Before treating generated profiles as production defaults, manually validate Main, C++, Unreal, Web, and Python in representative workspaces and review VS Code's import preview.
+The 2026-07-29 automated and read-only Main health check is complete. Its
+generated settings and keybindings match the live profile except for two stale
+live profile-local entries documented in
+[the Main health audit](audits/2026-07-29-main-profile-health.md).
+
+Before treating generated profiles as production defaults, finish Main's
+reviewed live cleanup, then manually validate C++, Unreal, Web, and Python in
+representative workspaces and review VS Code's import preview.
 
 Validate Database, SQL Server, and MongoDB separately in disposable or non-sensitive environments before relying on them.
 

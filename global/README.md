@@ -8,11 +8,12 @@ Run `pwsh ./scripts/ProfileComposer.ps1 compose-global` to generate `build/globa
 
 After changing an application-owned value in VS Code, a reviewed
 `ProfileComposer.ps1 sync <export>` transaction reads the built-in Default
-`settings.json` and refreshes only keys explicitly listed by its live
-`workbench.settings.applyToAllProfiles`. Keys ignored by Settings Sync are
-excluded from tracked global values. Exported named-profile values use exact
-ownership plus the managed router; safe paths force machine ownership and
-secret/private resources force exclusion. Preview with `-DryRun`.
+`settings.json`, derives apply-to-all ownership from every other top-level
+setting, and routes each value. Portable application values update this
+tracked global source. Settings Sync-ignored values and safe machine paths
+route to the selected ignored machine definition; secret/private resources
+are excluded. Exported named-profile values use exact ownership plus the
+managed router. Preview with `-DryRun`.
 
 Do not put machine paths, secrets, workspace policy, or profile-specific settings here.
 

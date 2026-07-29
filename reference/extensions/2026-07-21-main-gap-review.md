@@ -2,22 +2,22 @@
 
 This is a point-in-time review from 2026-07-21. The live VS Code profile named `Main` was queried read-only with `code --profile Main --list-extensions`; no extension or profile data was changed.
 
-Repository follow-up on 2026-07-22: Default now owns 34 extensions and all components own 50 unique extensions after `alefragnani.project-manager` and `JimmyArroyo.shiftthat` were deliberately added. Both were already present in the historical staging inventory. The live counts below remain the original point-in-time evidence and have not been silently rewritten.
+Repository follow-up through 2026-07-29: the renamed Main component now owns 36 extensions and all components own 52 unique extensions. The live counts below remain the original point-in-time evidence and have not been silently rewritten.
 
 ## Counts
 
 - Live `Main`: 33 extensions
-- Repository `default` component: 32 extensions
+- Repository `default` component at audit time: 32 extensions
 - All repository components: 48 unique extensions
 - Historical Extension Library Staging inventory: 150 extensions
 - Historical IDs absent from `Main`: 118
 - Historical IDs absent from every repository component: 102
 
-Live `Main` matches the repository `default` extension set except for one extension:
+At audit time, live `Main` matched the repository `default` extension set except for one extension:
 
 - `davidanson.vscode-markdownlint`
 
-That extension was not in the 150-ID historical staging export either. Because `Main` was recently signed into Settings Sync, this review does not assume the extra extension was an intentional addition. Keep or remove it after checking whether Markdown lint diagnostics are useful in normal work; if kept, add it to `components/default/extensions.txt` so the repository remains canonical.
+That extension was not in the 150-ID historical staging export either. Because `Main` was recently signed into Settings Sync, this review did not assume the extra extension was an intentional addition. If it is still wanted after current Main validation, add it to `components/main/extensions.txt` so the repository remains canonical.
 
 ## What is actually missing
 
@@ -32,7 +32,7 @@ No historical-only extension is an obvious requirement for every profile. The st
 
 ## Decision
 
-Keep `default` lean for the first profile-debugging pass. The only unexplained live difference is `davidanson.vscode-markdownlint`; all other high-value gaps belong in focused components rather than Main. Revisit this file after representative Unreal, Web, Python, remote-server, and container work.
+Keep Main lean during profile validation. The only unexplained difference in the 2026-07-21 live snapshot was `davidanson.vscode-markdownlint`; all other high-value gaps belong in focused components rather than Main. Recheck live state before treating that historical difference as current.
 
 Official references used for the current capability check:
 

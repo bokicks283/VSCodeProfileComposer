@@ -51,8 +51,7 @@
     "workbench.editor.untitled.labelFormat",
     "workbench.editor.wrapTabs",
     "terminal.integrated.persistentSessionScrollback",
-    "window.newWindowProfile",
-    "todo-tree.ripgrep.ripgrep"
+    "window.newWindowProfile"
   ],
   "accessibility.dimUnfocused.enabled": true,
   "accessibility.signals.terminalBell": {

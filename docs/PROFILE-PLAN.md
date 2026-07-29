@@ -10,6 +10,16 @@
 
 Main is the shared foundation for every profile and already handles everyday PowerShell, Bash/Zsh shell scripts, Windows batch files, and the user's cross-profile extensions. It intentionally excludes database tooling.
 
+## Current rollout status
+
+The 2026-07-29 automated and read-only Main health check is complete. The
+canonical Main build is healthy; the live profile still has one stale
+machine-owned setting and one stale SQL Server keybinding to remove during its
+next reviewed cleanup. The Unreal Engine artifact has now been generated from
+Main + C++ + Unreal and is ready for manual import preview and validation in
+the primary Unreal workspace. See
+[Main profile health check](audits/2026-07-29-main-profile-health.md).
+
 ## Available opt-in profiles
 
 - PowerShell Development = Main + PowerShell
@@ -91,10 +101,12 @@ No empty vendor component is created without real reviewed content.
 
 Import each generated `.code-profile` into a new, clearly named test profile and review the selected resources before creating it. Do not replace the active Default profile during initial validation.
 
-1. Main in a small mixed repository, including common shell files.
+1. Main in a small mixed repository, including common shell files — automated
+   and read-only configuration comparison complete; final live cleanup remains.
 2. Main cold-start measurements.
 3. C++ in a normal native C++ repository.
-4. Unreal in the primary Unreal workspace.
+4. Unreal in the primary Unreal workspace — generated artifact ready for
+   manual import and runtime validation.
 5. Web in a current Vite/React or Docusaurus repository.
 6. Python in a current automation or service repository.
 7. Database in a disposable local SQL workspace with no saved production connection.

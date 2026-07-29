@@ -1,9 +1,0 @@
-{
-  "add": [
-    {
-      "key": "ctrl+numpad_divide",
-      "command": "mssql.rebuildIntelliSenseCache"
-    }
-  ],
-  "remove": []
-}

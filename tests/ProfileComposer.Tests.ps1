@@ -349,6 +349,7 @@ Describe 'Safe repository transformations' {
         Write-TestFile (Join-Path $fixture 'profiles/python.keybindings.jsonc') '{ "add": [{"key":"ctrl+alt+p","command":"sample.command"}], "remove": [] }'
         Write-TestFile (Join-Path $fixture 'machine/local/ui-state/python/seed.code-profile') '{ "name": "seed", "globalState": "{\"layout\":true}" }'
         Write-TestFile (Join-Path $fixture 'composer.jsonc') '{ "sharedDefaultComponent": "main", "defaultUiStateProfile": "python" }'
+        Add-ManagedOwnershipRoute $fixture (New-OwnershipRoute 'python-profile-setting' setting exact 'python.profileOnly' (New-OwnershipDestination profile python) user-confirmed approved 'Profile rename fixture.') | Out-Null
 
         $plan = Rename-ComposerProfile $fixture python python-work -DryRun
         $plan.changes.source | Should -Contain 'profiles/python.yaml'
@@ -373,6 +374,9 @@ Describe 'Safe repository transformations' {
         Test-Path -LiteralPath (Join-Path $fixture 'machine/local/ui-state/python-work/seed.code-profile') | Should -BeTrue
         $renamedConfiguration = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'composer.jsonc')))
         $renamedConfiguration['defaultUiStateProfile'] | Should -BeExactly 'python-work'
+        (Get-ManagedOwnershipRouter $fixture).routes |
+            Where-Object id -eq 'python-profile-setting' |
+            ForEach-Object { $_.destination.name | Should -BeExactly 'python-work' }
         (Test-ComposerRepository $fixture).errors.Count | Should -Be 0
     }
 
@@ -389,6 +393,12 @@ Describe 'Safe repository transformations' {
         Get-SharedDefaultComponent $fixture | Should -BeExactly 'shared'
         $after = (Read-ProfileRecipe (Join-Path $fixture 'profiles/unreal.yaml')).Components
         $after | Should -Be @('shared', $before[1], $before[2])
+        @((Get-ManagedOwnershipRouter $fixture).routes | Where-Object {
+            $_.destination.type -eq 'component' -and $_.destination.name -ieq 'main'
+        }).Count | Should -Be 0
+        @((Get-ManagedOwnershipRouter $fixture).routes | Where-Object {
+            $_.destination.type -eq 'component' -and $_.destination.name -ieq 'shared'
+        }).Count | Should -BeGreaterThan 0
         (Test-ComposerRepository $fixture).errors.Count | Should -Be 0
     }
 

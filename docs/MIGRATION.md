@@ -52,7 +52,7 @@ After the initial migration, shell-language ownership was refined without redoin
 - Built-in Windows batch associations were added for `.bat` and `.cmd`.
 - `terminal.explorerKind`, persistent-session scrollback, and shell-integration environment reporting were classified as portable cross-profile terminal behavior and now live in Default.
 - Command Explorer remained in the PowerShell component as an advanced development preference.
-- The PowerShell recipe display name changed to `PowerShell Development`; every recipe now begins with the shared Default component.
+- The PowerShell recipe display name changed to `PowerShell Development`; every recipe now begins with the shared Main component.
 
 The Microsoft PowerShell extension placement is provisional. Available audit evidence showed prior cross-profile ownership and activation on PowerShell language/debug/commands rather than eager startup, but no reliable timing measurement. No item was left in the advanced component because of a proven performance cost.
 
@@ -60,7 +60,7 @@ The Microsoft PowerShell extension placement is provisional. Available audit evi
 
 Database ownership was refined without redoing the migration:
 
-- Confirmed the shared Default base contains no database settings, clients, language servers, or connection explorers.
+- Confirmed the shared Main base contains no database settings, clients, language servers, or connection explorers.
 - Confirmed Web and Python were already database-independent.
 - Moved the previously reviewed generic SQLTools extension into a new opt-in `database` component.
 - Preserved the five reviewed `mssql.*` behavior settings in a focused `sql-server` component.
@@ -68,7 +68,7 @@ Database ownership was refined without redoing the migration:
 - Preserved `mongodbLanguageServer.maxNumberOfProblems` in a focused `mongodb` component.
 - Added `mongodb.mongodb-vscode` to the MongoDB component.
 - Added explicit Database, Web + Database, Python + Database, SQL Server, and MongoDB recipes.
-- Default remains database-free; database tooling is added only through explicit focused components.
+- Main remains database-free; database tooling is added only through explicit focused components.
 
 The old source settings contained live connection-profile metadata. No connection object, connection group, host, database name, username, password, token, certificate, account ID, private cloud resource, or authentication cache was copied or reproduced.
 
@@ -86,11 +86,11 @@ The old source settings contained live connection-profile metadata. No connectio
 - Unreal settings remain minimal because the current reviewed fragment is only a planning stub.
 - Database settings were separated into generic, SQL Server, and MongoDB ownership without carrying connection data into the public repository.
 
-## Default base consolidation
+## Shared-base consolidation and rename
 
-The former `suggested-baseline` component was merged into `default` after the user confirmed that both extension groups should be available in every profile. Every recipe now begins with `default`, and the standalone Default recipe contains only that component.
+The former `suggested-baseline` component was first merged into `default` after the user confirmed that both extension groups should be available in every profile. That consolidated component and its standalone recipe were later renamed to `main`. Every current recipe begins with `main`, and the standalone Main recipe contains only that component.
 
-The merge preserved the former Baseline-then-Default order inside the consolidated settings and extension files. Focused components still apply afterward, so their later settings retain precedence. The redundant `components/suggested-baseline/` directory and recipe references were removed.
+The consolidation preserved the former Baseline-then-Default order inside the current Main settings and extension files. Focused components still apply afterward, so their later settings retain precedence. The redundant `components/suggested-baseline/` directory and old `default` component/recipe references were removed.
 
 ## Intentionally retired
 

@@ -1941,6 +1941,7 @@ function Rename-ComposerProfile {
     }
 
     $configurationChanged = $false
+    $routerChanged = $false
     $stagingRoot = New-ComposerStagingRepository $root
     try {
         Move-ComposerItemCaseSafe (Join-Path $stagingRoot "profiles/$sourceId$extension") (Join-Path $stagingRoot "profiles/$NewId$extension")
@@ -1961,12 +1962,26 @@ function Rename-ComposerProfile {
             $changes.Add([pscustomobject]@{ action = 'update'; source = 'composer.jsonc'; target = 'composer.jsonc' })
             $configurationChanged = $true
         }
+        $routerPath = Get-ManagedOwnershipRouterPath $stagingRoot
+        $router = Read-OwnershipRouterFile $routerPath
+        foreach ($route in @($router.routes)) {
+            if ($route.destination.type -ieq 'profile' -and
+                $route.destination.name -ieq $sourceId) {
+                $route.destination.name = $NewId
+                $routerChanged = $true
+            }
+        }
+        if ($routerChanged) {
+            Write-OwnershipRouterFile $routerPath $router
+            $changes.Add([pscustomobject]@{ action = 'update'; source = 'config/ownership-router.jsonc'; target = 'config/ownership-router.jsonc' })
+        }
         Assert-StagedRepositoryValid $stagingRoot
         if (-not $DryRun) {
             $commitPaths = [System.Collections.Generic.List[string]]::new()
             $commitPaths.Add('profiles')
             if ($hasUiState) { $commitPaths.Add('machine/local/ui-state') }
             if ($configurationChanged) { $commitPaths.Add('composer.jsonc') }
+            if ($routerChanged) { $commitPaths.Add('config') }
             Invoke-StagedRepositoryCommit $root $stagingRoot $commitPaths.ToArray()
         }
         return [pscustomobject]@{ operation = 'rename-profile'; oldId = $sourceId; newId = $NewId; changes = [object[]]$changes.ToArray(); dryRun = [bool]$DryRun }
@@ -2020,12 +2035,27 @@ function Rename-ComposerComponent {
             Write-Utf8File (Join-Path $stagingRoot 'composer.jsonc') (ConvertTo-PrettyJson $configuration)
             $changes.Add([pscustomobject]@{ action = 'update'; source = 'composer.jsonc'; target = 'composer.jsonc' })
         }
+        $routerPath = Get-ManagedOwnershipRouterPath $stagingRoot
+        $router = Read-OwnershipRouterFile $routerPath
+        $routerChanged = $false
+        foreach ($route in @($router.routes)) {
+            if ($route.destination.type -ieq 'component' -and
+                $route.destination.name -ieq $sourceId) {
+                $route.destination.name = $NewId
+                $routerChanged = $true
+            }
+        }
+        if ($routerChanged) {
+            Write-OwnershipRouterFile $routerPath $router
+            $changes.Add([pscustomobject]@{ action = 'update'; source = 'config/ownership-router.jsonc'; target = 'config/ownership-router.jsonc' })
+        }
         Assert-StagedRepositoryValid $stagingRoot
         if (-not $DryRun) {
             $paths = [System.Collections.Generic.List[string]]::new()
             $paths.Add('components')
             $paths.Add('profiles')
             if ($configurationChanged) { $paths.Add('composer.jsonc') }
+            if ($routerChanged) { $paths.Add('config') }
             Invoke-StagedRepositoryCommit $root $stagingRoot $paths.ToArray()
         }
         return [pscustomobject]@{ operation = 'rename-component'; oldId = $sourceId; newId = $NewId; changes = [object[]]$changes.ToArray(); dryRun = [bool]$DryRun }

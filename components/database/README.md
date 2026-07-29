@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Provides an opt-in, vendor-neutral foundation for SQL editing and generic database work without adding database tooling to Default, Web, or Python.
+Provides an opt-in, vendor-neutral foundation for SQL editing and generic database work without adding database tooling to Main, Web, or Python.
 
 ## Belongs here
 
@@ -17,7 +17,7 @@ Vendor-specific language servers, drivers, connection settings, saved connection
 ```yaml
 name: Database
 components:
-  - default
+  - main
   - database
 ```
 
