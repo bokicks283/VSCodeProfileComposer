@@ -1,7 +1,5 @@
 Set-StrictMode -Version Latest
 
-$script:ComposerVersion = '0.12.0'
-$script:ManifestVersion = 1
 $script:MachineSchemaVersion = 1
 $script:Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 $script:SensitivePattern = '(?i)(password|(?<!semantic)token|secret|credential|connectionstring|api[_-]?key|private[_-]?key)'
@@ -551,6 +549,12 @@ function Get-ComposerConfiguration {
         -not (Test-ComposerId ([string]$configuration['sharedDefaultComponent']))) {
         throw "Composer configuration must declare a valid 'sharedDefaultComponent' ID."
     }
+    if ($configuration.Contains('defaultUiStateProfile') -and (
+        $configuration['defaultUiStateProfile'] -isnot [string] -or
+        -not (Test-ComposerId ([string]$configuration['defaultUiStateProfile']))
+    )) {
+        throw "Composer configuration 'defaultUiStateProfile' must be a valid profile ID."
+    }
     return $configuration
 }
 
@@ -858,8 +862,15 @@ function Test-ComposerRepository {
     $globalSettingsPath = Join-Path $root 'global/settings.jsonc'
     $globalSettingIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
     $sharedDefaultComponent = $null
+    $defaultUiStateProfile = $null
 
-    try { $sharedDefaultComponent = Get-SharedDefaultComponent -RepositoryRoot $root }
+    try {
+        $configuration = Get-ComposerConfiguration -RepositoryRoot $root
+        $sharedDefaultComponent = [string]$configuration['sharedDefaultComponent']
+        if ($configuration.Contains('defaultUiStateProfile')) {
+            $defaultUiStateProfile = [string]$configuration['defaultUiStateProfile']
+        }
+    }
     catch { Add-ValidationItem $result errors 'invalid-composer-configuration' $_.Exception.Message 'composer.jsonc' }
 
     if (-not (Test-Path -LiteralPath $globalSettingsPath -PathType Leaf)) {
@@ -1107,6 +1118,9 @@ function Test-ComposerRepository {
             try { Read-ProfileKeybindingOperations $keybindingOperationsPath | Out-Null }
             catch { Add-ValidationItem $result errors 'invalid-profile-keybinding-operations' $_.Exception.Message (Get-RelativeDisplayPath $root $keybindingOperationsPath) }
         }
+    }
+    if ($defaultUiStateProfile -and -not $profileIds.Contains($defaultUiStateProfile)) {
+        Add-ValidationItem $result errors 'missing-default-ui-state-profile' "Configured default UI-state profile '$defaultUiStateProfile' does not exist." 'composer.jsonc' '/defaultUiStateProfile'
     }
 
     $platformCandidates = [System.Collections.Generic.List[string]]::new()
@@ -1752,11 +1766,6 @@ function Read-ProfileKeybindingOperations {
     return [pscustomobject]@{ Replace = $null; Add = [object[]]@($add); Remove = [object[]]@($remove) }
 }
 
-function Get-FileHashValue {
-    param([Parameter(Mandatory)][string]$Path)
-    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
-}
-
 function Get-StringHashValue {
     param([Parameter(Mandatory)][AllowEmptyString()][string]$Value)
     $algorithm = [System.Security.Cryptography.SHA256]::Create()
@@ -1765,17 +1774,6 @@ function Get-StringHashValue {
         return [Convert]::ToHexString($algorithm.ComputeHash($bytes)).ToLowerInvariant()
     }
     finally { $algorithm.Dispose() }
-}
-
-function Get-GitCommit {
-    param([Parameter(Mandatory)][string]$RepositoryRoot)
-    if (-not (Test-Path -LiteralPath (Join-Path $RepositoryRoot '.git'))) { return $null }
-    try {
-        $sha = (& git -C $RepositoryRoot rev-parse HEAD 2>$null | Select-Object -First 1)
-        if ($LASTEXITCODE -eq 0) { return [string]$sha }
-    }
-    catch { }
-    return $null
 }
 
 function Invoke-SafeDirectoryReplace {
@@ -1942,6 +1940,7 @@ function Rename-ComposerProfile {
         $changes.Add([pscustomobject]@{ action = 'move'; source = "machine/local/ui-state/$sourceId"; target = "machine/local/ui-state/$NewId" })
     }
 
+    $configurationChanged = $false
     $stagingRoot = New-ComposerStagingRepository $root
     try {
         Move-ComposerItemCaseSafe (Join-Path $stagingRoot "profiles/$sourceId$extension") (Join-Path $stagingRoot "profiles/$NewId$extension")
@@ -1954,11 +1953,20 @@ function Rename-ComposerProfile {
         if ($hasUiState) {
             Move-ComposerItemCaseSafe (Join-Path $stagingRoot "machine/local/ui-state/$sourceId") (Join-Path $stagingRoot "machine/local/ui-state/$NewId")
         }
+        $configuration = Get-ComposerConfiguration $stagingRoot
+        if ($configuration.Contains('defaultUiStateProfile') -and
+            [string]$configuration['defaultUiStateProfile'] -ieq $sourceId) {
+            $configuration['defaultUiStateProfile'] = $NewId
+            Write-Utf8File (Join-Path $stagingRoot 'composer.jsonc') (ConvertTo-PrettyJson $configuration)
+            $changes.Add([pscustomobject]@{ action = 'update'; source = 'composer.jsonc'; target = 'composer.jsonc' })
+            $configurationChanged = $true
+        }
         Assert-StagedRepositoryValid $stagingRoot
         if (-not $DryRun) {
             $commitPaths = [System.Collections.Generic.List[string]]::new()
             $commitPaths.Add('profiles')
             if ($hasUiState) { $commitPaths.Add('machine/local/ui-state') }
+            if ($configurationChanged) { $commitPaths.Add('composer.jsonc') }
             Invoke-StagedRepositoryCommit $root $stagingRoot $commitPaths.ToArray()
         }
         return [pscustomobject]@{ operation = 'rename-profile'; oldId = $sourceId; newId = $NewId; changes = [object[]]$changes.ToArray(); dryRun = [bool]$DryRun }
@@ -2077,6 +2085,82 @@ function Set-SharedDefaultComponent {
     }
 }
 
+function Normalize-ApplicationSettingsOwnership {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Settings,
+        [switch]$EnsureIgnoredSettings
+    )
+
+    if (-not (Test-IsDictionary $Settings)) {
+        throw 'Application settings root must be an object.'
+    }
+
+    $ownershipKey = 'workbench.settings.applyToAllProfiles'
+    $ignoredKey = 'settingsSync.ignoredSettings'
+    $normalizedSettings = Copy-ComposerValue $Settings
+    $ownershipListCreated = -not $normalizedSettings.Contains($ownershipKey)
+    if (-not $ownershipListCreated -and $normalizedSettings[$ownershipKey] -isnot [System.Array]) {
+        throw "Application setting '$ownershipKey' must be an array."
+    }
+    if ($EnsureIgnoredSettings -and -not $normalizedSettings.Contains($ignoredKey)) {
+        $normalizedSettings[$ignoredKey] = [string[]]@()
+    }
+    if ($normalizedSettings.Contains($ignoredKey) -and $normalizedSettings[$ignoredKey] -isnot [System.Array]) {
+        throw "Application setting '$ignoredKey' must be an array."
+    }
+
+    $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    $ownership = [System.Collections.Generic.List[string]]::new()
+    $removedDuplicates = [System.Collections.Generic.List[string]]::new()
+    if (-not $ownershipListCreated) {
+        foreach ($entry in @($normalizedSettings[$ownershipKey])) {
+            if ($entry -isnot [string] -or [string]::IsNullOrWhiteSpace($entry)) {
+                throw "Application setting '$ownershipKey' contains a non-string or empty entry."
+            }
+            $id = [string]$entry
+            if ($id -ceq $ownershipKey) {
+                throw "Application setting '$ownershipKey' cannot list itself."
+            }
+            if (-not $normalizedSettings.Contains($id)) {
+                throw "Application setting '$id' is apply-to-all but has no value."
+            }
+            if ($seen.Add($id)) {
+                $ownership.Add($id)
+            }
+            else {
+                $removedDuplicates.Add($id)
+            }
+        }
+    }
+
+    $addedSettings = [System.Collections.Generic.List[string]]::new()
+    foreach ($keyValue in $normalizedSettings.Keys) {
+        $key = [string]$keyValue
+        if ($key -ceq $ownershipKey) { continue }
+        if ($seen.Add($key)) {
+            $ownership.Add($key)
+            $addedSettings.Add($key)
+        }
+    }
+
+    $ordered = New-OrderedMap
+    $ordered[$ownershipKey] = [string[]]$ownership.ToArray()
+    foreach ($keyValue in $normalizedSettings.Keys) {
+        $key = [string]$keyValue
+        if ($key -ceq $ownershipKey) { continue }
+        $ordered[$key] = Copy-ComposerValue $normalizedSettings[$key]
+    }
+
+    return [pscustomobject][ordered]@{
+        settings = $ordered
+        ownershipListCreated = $ownershipListCreated
+        addedSettings = [string[]]$addedSettings.ToArray()
+        removedDuplicates = [string[]]$removedDuplicates.ToArray()
+        changed = $ownershipListCreated -or $addedSettings.Count -gt 0 -or $removedDuplicates.Count -gt 0
+    }
+}
+
 function Repair-ComposerGlobalOwnership {
     [CmdletBinding()]
     param(
@@ -2099,46 +2183,16 @@ function Repair-ComposerGlobalOwnership {
         throw 'Global settings root must be an object.'
     }
 
-    $ownershipKey = 'workbench.settings.applyToAllProfiles'
-    $ownershipListCreated = -not $settings.Contains($ownershipKey)
-    if (-not $ownershipListCreated -and $settings[$ownershipKey] -isnot [System.Array]) {
-        throw "Global setting '$ownershipKey' must be an array before it can be repaired safely."
+    try {
+        $normalization = Normalize-ApplicationSettingsOwnership -Settings $settings
     }
-
-    $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
-    $normalized = [System.Collections.Generic.List[string]]::new()
-    $removedDuplicates = [System.Collections.Generic.List[string]]::new()
-    if (-not $ownershipListCreated) {
-        foreach ($entry in @($settings[$ownershipKey])) {
-            if ($entry -isnot [string] -or [string]::IsNullOrWhiteSpace($entry)) {
-                throw "Global setting '$ownershipKey' contains a non-string or empty entry that cannot be repaired safely."
-            }
-            $id = [string]$entry
-            if ($seen.Add($id)) {
-                $normalized.Add($id)
-            }
-            else {
-                $removedDuplicates.Add($id)
-            }
+    catch {
+        if ($_.Exception.Message -like "*apply-to-all but has no value*") {
+            throw "Cannot safely repair global ownership because listed settings have no value. $($_.Exception.Message)"
         }
+        throw
     }
-
-    $missingValues = @($normalized | Where-Object { -not $settings.Contains($_) })
-    if ($missingValues.Count -gt 0) {
-        throw "Cannot safely repair global ownership because these listed settings have no value: $($missingValues -join ', '). Restore their values or remove the entries explicitly."
-    }
-
-    $addedSettings = [System.Collections.Generic.List[string]]::new()
-    foreach ($keyValue in $settings.Keys) {
-        $key = [string]$keyValue
-        if ($key -ceq $ownershipKey) { continue }
-        if ($seen.Add($key)) {
-            $normalized.Add($key)
-            $addedSettings.Add($key)
-        }
-    }
-
-    $changed = $ownershipListCreated -or $removedDuplicates.Count -gt 0 -or $addedSettings.Count -gt 0
+    $changed = $normalization.changed
     $changes = [System.Collections.Generic.List[object]]::new()
     if ($changed) {
         $changes.Add([pscustomobject]@{
@@ -2151,7 +2205,7 @@ function Repair-ComposerGlobalOwnership {
     if (-not $changed) {
         return [pscustomobject][ordered]@{
             operation = 'fix-global-ownership'
-            ownershipListCreated = $false
+            ownershipListCreated = $normalization.ownershipListCreated
             addedSettings = [string[]]@()
             removedDuplicates = [string[]]@()
             changes = [object[]]@()
@@ -2162,9 +2216,7 @@ function Repair-ComposerGlobalOwnership {
     $stagingRoot = New-ComposerStagingRepository $root
     try {
         $stagedPath = Join-Path $stagingRoot $relativePath
-        $stagedSettings = Read-JsonCFile $stagedPath
-        $stagedSettings[$ownershipKey] = [string[]]$normalized.ToArray()
-        Write-Utf8File $stagedPath (ConvertTo-PrettyJson $stagedSettings)
+        Write-Utf8File $stagedPath (ConvertTo-PrettyJson $normalization.settings)
         Assert-StagedRepositoryValid $stagingRoot
 
         if (-not $DryRun) {
@@ -2173,9 +2225,9 @@ function Repair-ComposerGlobalOwnership {
 
         return [pscustomobject][ordered]@{
             operation = 'fix-global-ownership'
-            ownershipListCreated = $ownershipListCreated
-            addedSettings = [string[]]$addedSettings.ToArray()
-            removedDuplicates = [string[]]$removedDuplicates.ToArray()
+            ownershipListCreated = $normalization.ownershipListCreated
+            addedSettings = [string[]]$normalization.addedSettings
+            removedDuplicates = [string[]]$normalization.removedDuplicates
             changes = [object[]]$changes.ToArray()
             dryRun = [bool]$DryRun
         }
@@ -2781,6 +2833,10 @@ function Sync-ComposerProfileFromExport {
     foreach ($id in @($trackedGlobal['workbench.settings.applyToAllProfiles'])) { $globalSettingIds.Add([string]$id) | Out-Null }
     $newGlobal = $null
     $machineOwnedGlobalCount = 0
+    $applicationOwnershipAddedCount = 0
+    $applicationOwnershipDuplicateCount = 0
+    $applicationMachineClassifiedCount = 0
+    $applicationSensitiveExcludedCount = 0
     $machineOwnedSettingIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
     if (-not $SkipGlobal) {
         $userDataPath = if ($VSCodeUserDataPath) {
@@ -2794,22 +2850,26 @@ function Sync-ComposerProfileFromExport {
             throw "VS Code application settings were not found at '$applicationSettingsPath'. Use -VSCodeUserDataPath or -SkipGlobal."
         }
         $applicationSettings = Read-JsonCFile $applicationSettingsPath
-        if (-not (Test-IsDictionary $applicationSettings)) { throw "VS Code application settings '$applicationSettingsPath' must have an object root." }
-        if (-not $applicationSettings.Contains('workbench.settings.applyToAllProfiles') -or
-            $applicationSettings['workbench.settings.applyToAllProfiles'] -isnot [System.Array]) {
-            throw "VS Code application settings must contain the authoritative 'workbench.settings.applyToAllProfiles' array."
+        try {
+            $applicationNormalization = Normalize-ApplicationSettingsOwnership -Settings $applicationSettings -EnsureIgnoredSettings
         }
-        if (-not $applicationSettings.Contains('settingsSync.ignoredSettings') -or
-            $applicationSettings['settingsSync.ignoredSettings'] -isnot [System.Array]) {
-            throw "VS Code application settings must contain the 'settingsSync.ignoredSettings' array."
+        catch {
+            throw "VS Code application settings '$applicationSettingsPath' could not be normalized: $($_.Exception.Message)"
         }
+        $applicationSettings = $applicationNormalization.settings
+        $applicationOwnershipAddedCount = $applicationNormalization.addedSettings.Count
+        $applicationOwnershipDuplicateCount = $applicationNormalization.removedDuplicates.Count
 
         $syncIgnored = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+        $normalizedIgnored = [System.Collections.Generic.List[string]]::new()
+        $seenIgnoredEntries = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
         foreach ($id in @($applicationSettings['settingsSync.ignoredSettings'])) {
             if ($id -isnot [string] -or [string]::IsNullOrWhiteSpace($id)) {
                 throw "VS Code application settings contain an invalid 'settingsSync.ignoredSettings' entry."
             }
-            if (-not $id.StartsWith('-')) { $syncIgnored.Add([string]$id) | Out-Null }
+            $ignoredId = [string]$id
+            if ($seenIgnoredEntries.Add($ignoredId)) { $normalizedIgnored.Add($ignoredId) }
+            if (-not $ignoredId.StartsWith('-')) { $syncIgnored.Add($ignoredId) | Out-Null }
         }
         $seenGlobal = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
         $filteredGlobalIds = [System.Collections.Generic.List[string]]::new()
@@ -2822,9 +2882,27 @@ function Sync-ComposerProfileFromExport {
             $id = [string]$idValue
             if (-not $seenGlobal.Add($id)) { throw "VS Code application settings list global setting '$id' more than once." }
             if (-not $applicationSettings.Contains($id)) { throw "VS Code application setting '$id' is apply-to-all but has no value." }
-            if ($id -ne 'settingsSync.ignoredSettings' -and $syncIgnored.Contains($id)) {
+            $classification = if ($id -eq 'settingsSync.ignoredSettings') {
+                [pscustomobject]@{ classification = 'portable' }
+            }
+            else {
+                Get-SettingValueClassification -SettingKey $id -Value $applicationSettings[$id]
+            }
+            if ($classification.classification -eq 'secret-or-private') {
+                $applicationSensitiveExcludedCount++
+                continue
+            }
+            $machineOwned = $id -ne 'settingsSync.ignoredSettings' -and (
+                $syncIgnored.Contains($id) -or $classification.classification -eq 'machine-local-path'
+            )
+            if ($machineOwned) {
                 $machineOwnedGlobalCount++
                 $machineOwnedSettingIds.Add($id) | Out-Null
+                if (-not $syncIgnored.Contains($id)) {
+                    $syncIgnored.Add($id) | Out-Null
+                    if ($seenIgnoredEntries.Add($id)) { $normalizedIgnored.Add($id) }
+                    $applicationMachineClassifiedCount++
+                }
                 continue
             }
             $filteredGlobalIds.Add($id)
@@ -2833,6 +2911,7 @@ function Sync-ComposerProfileFromExport {
         if (-not $seenGlobal.Contains('settingsSync.ignoredSettings')) {
             throw "VS Code application settings must apply 'settingsSync.ignoredSettings' to all profiles."
         }
+        $applicationSettings['settingsSync.ignoredSettings'] = [string[]]$normalizedIgnored.ToArray()
         $newGlobal['workbench.settings.applyToAllProfiles'] = [string[]]$filteredGlobalIds.ToArray()
         foreach ($id in $filteredGlobalIds) { $newGlobal[$id] = Copy-ComposerValue $applicationSettings[$id] }
     }
@@ -3096,6 +3175,10 @@ function Sync-ComposerProfileFromExport {
             keybindingsReplacedForOrder = [bool]$replaceKeybindings
             globalSettings = if ($SkipGlobal) { 0 } else { $newGlobal.Count - 1 }
             machineOwnedGlobalSettingsSkipped = $machineOwnedGlobalCount
+            applicationSettingsAddedToApplyToAll = $applicationOwnershipAddedCount
+            applicationOwnershipDuplicatesRemoved = $applicationOwnershipDuplicateCount
+            applicationSettingsClassifiedAsMachine = $applicationMachineClassifiedCount
+            applicationSensitiveSettingsExcluded = $applicationSensitiveExcludedCount
             exportGlobalSettingsIgnored = $globalSettingsIgnored
             platformSettingsIgnored = 0
             machineSettingsRouted = @($resolutions | Where-Object { $_.destination.type -eq 'machine' }).Count
@@ -3468,16 +3551,6 @@ function Invoke-GlobalSettingsComposition {
         foreach ($key in $settings.Keys) { Set-SourceTree $settings[$key] "/$(ConvertTo-JsonPointerSegment ([string]$key))" 'global/settings.jsonc' $sourceMap }
         Merge-Settings $settings $machineSettings (Get-RelativeDisplayPath $root $resolvedMachine) $sourceMap $overrides | Out-Null
 
-        $applyToAll = [System.Collections.Generic.List[string]]::new()
-        $applySet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
-        foreach ($id in @($settings['workbench.settings.applyToAllProfiles'])) {
-            if ($applySet.Add([string]$id)) { $applyToAll.Add([string]$id) }
-        }
-        foreach ($id in $machineSettingIds) {
-            if ($applySet.Add($id)) { $applyToAll.Add($id) }
-        }
-        $settings['workbench.settings.applyToAllProfiles'] = [string[]]$applyToAll.ToArray()
-
         $ignored = [System.Collections.Generic.List[string]]::new()
         $ignoredSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
         foreach ($id in @($settings['settingsSync.ignoredSettings'])) {
@@ -3489,11 +3562,13 @@ function Invoke-GlobalSettingsComposition {
         }
         $settings['settingsSync.ignoredSettings'] = [string[]]$ignored.ToArray()
     }
+    $settings = (Normalize-ApplicationSettingsOwnership -Settings $settings -EnsureIgnoredSettings).settings
 
     $targetDirectory = [System.IO.Path]::GetFullPath((Join-Path $root 'build/global'))
     if ($DryRun) {
         return [pscustomobject][ordered]@{
             outputDirectory = Get-RelativeDisplayPath $root $targetDirectory
+            settingsPath = Get-RelativeDisplayPath $root (Join-Path $targetDirectory 'settings.json')
             sourcePath = Get-RelativeDisplayPath $root $sourcePath
             settingCount = $settings.Count - 1
             machineId = $machineId
@@ -3510,50 +3585,8 @@ function Invoke-GlobalSettingsComposition {
     try {
         $settingsPath = Join-Path $temporaryDirectory 'settings.json'
         Write-Utf8File $settingsPath (ConvertTo-PrettyJson -Value $settings)
-        $overridesPath = Join-Path $temporaryDirectory 'overrides.json'
-        Write-Utf8File $overridesPath (ConvertTo-PrettyJson -Value ([ordered]@{
-            artifact = 'vscode-built-in-default-settings'
-            overrides = [object[]]$overrides.ToArray()
-            warnings = @()
-        }))
         $generated = Read-JsonCFile $settingsPath
         if (-not (Test-IsDictionary $generated)) { throw 'Generated global settings did not validate as a JSON object.' }
-        Read-JsonCFile $overridesPath | Out-Null
-        $manifest = [ordered]@{
-            manifestVersion = $script:ManifestVersion
-            artifact = 'vscode-built-in-default-settings'
-            generatedAtUtc = [DateTimeOffset]::UtcNow.ToString('o')
-            composerVersion = $script:ComposerVersion
-            gitCommit = Get-GitCommit $root
-            source = 'global/settings.jsonc'
-            machineOverlay = if ($resolvedMachine) {
-                [ordered]@{
-                    id = $machineId
-                    path = Get-RelativeDisplayPath $root $resolvedMachine
-                    selection = if ($Machine) { 'named-machine' } else { 'explicit-file' }
-                    settingCount = $machineSettingIds.Count
-                    valuesRecorded = $false
-                }
-            }
-            else { $null }
-            applicationTarget = 'vscode-built-in-default-profile'
-            applicationMethod = 'manual-application-settings-json-merge'
-            settingsSyncPolicy = 'machine-settings-ignored-and-applied-to-all-profiles'
-            settingCount = $settings.Count - 1
-            overrideCount = $overrides.Count
-            outputHashes = [ordered]@{
-                'settings.json' = Get-FileHashValue $settingsPath
-                'overrides.json' = Get-FileHashValue $overridesPath
-            }
-            validation = [ordered]@{
-                result = 'passed'
-                errors = $validation.errors.Count
-                warnings = $validation.warnings.Count
-                information = $validation.information.Count
-            }
-        }
-        Write-Utf8File (Join-Path $temporaryDirectory 'manifest.json') (ConvertTo-PrettyJson -Value $manifest)
-        Read-JsonCFile (Join-Path $temporaryDirectory 'manifest.json') | Out-Null
         Invoke-SafeDirectoryReplace $temporaryDirectory $targetDirectory
     }
     catch {
@@ -3563,6 +3596,7 @@ function Invoke-GlobalSettingsComposition {
 
     return [pscustomobject][ordered]@{
         outputDirectory = Get-RelativeDisplayPath $root $targetDirectory
+        settingsPath = Get-RelativeDisplayPath $root (Join-Path $targetDirectory 'settings.json')
         sourcePath = Get-RelativeDisplayPath $root $sourcePath
         settingCount = $settings.Count - 1
         machineId = $machineId
@@ -3581,15 +3615,15 @@ function Invoke-ProfileComposition {
         [string]$Machine,
         [string]$MachineFile,
         [switch]$DryRun,
-        [switch]$ExportCodeProfile,
         [string]$UiStateFromProfile,
         [string]$UiStateProfile,
+        [switch]$NoUiState,
         [switch]$Strict
     )
 
     $root = [System.IO.Path]::GetFullPath($RepositoryRoot)
-    if (($UiStateFromProfile -or $UiStateProfile) -and -not $ExportCodeProfile) { throw 'UI-state seeding requires -ExportCodeProfile.' }
     if ($UiStateFromProfile -and $UiStateProfile) { throw '-UiStateFromProfile and -UiStateProfile cannot be used together.' }
+    if ($NoUiState -and ($UiStateFromProfile -or $UiStateProfile)) { throw '-NoUiState cannot be combined with an explicit UI-state source.' }
     if ($Machine -and $MachineFile) { throw '-Machine and -MachineFile cannot be used together.' }
     $validation = Test-ComposerRepository -RepositoryRoot $root -Platform $Platform -Machine $Machine -MachineFile $MachineFile
     if ($validation.errors.Count -gt 0 -or ($Strict -and $validation.warnings.Count -gt 0)) {
@@ -3600,16 +3634,41 @@ function Invoke-ProfileComposition {
     $definition = @(Get-ProfileDefinitions $root | Where-Object { $_.Id -ieq $Profile })
     if ($definition.Count -eq 0) { throw "Unknown profile '$Profile'." }
     if ($definition.Count -gt 1) { throw "Profile ID '$Profile' is ambiguous." }
-    $resolvedUiStateSeed = if ($UiStateProfile) {
+    $profileId = $definition[0].Id
+    $configuration = Get-ComposerConfiguration -RepositoryRoot $root
+    $configuredUiStateProfile = if ($configuration.Contains('defaultUiStateProfile')) {
+        [string]$configuration['defaultUiStateProfile']
+    }
+    else { $null }
+    $uiStateSource = 'none'
+    $resolvedUiStateSeed = if ($NoUiState) {
+        $uiStateSource = 'disabled'
+        $null
+    }
+    elseif ($UiStateProfile) {
         $uiDefinition = @(Get-ProfileDefinitions $root | Where-Object { $_.Id -ieq $UiStateProfile })
         if ($uiDefinition.Count -eq 0) { throw "Unknown UI-state profile '$UiStateProfile'." }
         if ($uiDefinition.Count -gt 1) { throw "UI-state profile ID '$UiStateProfile' is ambiguous." }
+        $uiStateSource = "explicit-profile:$($uiDefinition[0].Id)"
         Get-StoredUiStateSeedPath -RepositoryRoot $root -Profile $uiDefinition[0].Id
     }
-    else { Resolve-UiStateSeedPath -RepositoryRoot $root -UiStateFromProfile $UiStateFromProfile }
+    elseif ($UiStateFromProfile) {
+        $uiStateSource = 'explicit-export'
+        Resolve-UiStateSeedPath -RepositoryRoot $root -UiStateFromProfile $UiStateFromProfile
+    }
+    elseif ($configuredUiStateProfile) {
+        $configuredSeedPath = Get-StoredUiStateSeedPath -RepositoryRoot $root -Profile $configuredUiStateProfile
+        if (Test-Path -LiteralPath $configuredSeedPath -PathType Leaf) {
+            $uiStateSource = "configured-default:$configuredUiStateProfile"
+            $configuredSeedPath
+        }
+        else {
+            $uiStateSource = "configured-default-missing:$configuredUiStateProfile"
+            $null
+        }
+    }
+    else { $null }
     $uiState = if ($resolvedUiStateSeed) { Read-CodeProfileGlobalState -Path $resolvedUiStateSeed } else { $null }
-    $uiStateHash = if ($null -ne $uiState) { Get-StringHashValue $uiState } else { $null }
-    $profileId = $definition[0].Id
     $recipe = Read-ProfileRecipe $definition[0].Path
     $inputFiles = [System.Collections.Generic.List[object]]::new()
     $settingsLayers = [System.Collections.Generic.List[object]]::new()
@@ -3785,9 +3844,9 @@ function Invoke-ProfileComposition {
         }
     }
     $targetDirectory = [System.IO.Path]::GetFullPath((Join-Path $root "build/profiles/$profileId"))
-    $codeProfileFileName = if ($ExportCodeProfile) { Get-CodeProfileFileName -DisplayName $recipe.Name } else { $null }
-    $codeProfileTargetPath = if ($codeProfileFileName) { [System.IO.Path]::GetFullPath((Join-Path $targetDirectory $codeProfileFileName)) } else { $null }
-    if ($codeProfileTargetPath -and -not (Test-PathWithinDirectory $codeProfileTargetPath $targetDirectory)) {
+    $codeProfileFileName = Get-CodeProfileFileName -DisplayName $recipe.Name
+    $codeProfileTargetPath = [System.IO.Path]::GetFullPath((Join-Path $targetDirectory $codeProfileFileName))
+    if (-not (Test-PathWithinDirectory $codeProfileTargetPath $targetDirectory)) {
         throw "VS Code profile export path '$codeProfileTargetPath' escapes its generated profile directory."
     }
 
@@ -3796,8 +3855,9 @@ function Invoke-ProfileComposition {
             profileId = $profileId
             displayName = $recipe.Name
             outputDirectory = Get-RelativeDisplayPath $root $targetDirectory
-            codeProfileExportPath = if ($codeProfileTargetPath) { Get-RelativeDisplayPath $root $codeProfileTargetPath } else { $null }
+            codeProfileExportPath = Get-RelativeDisplayPath $root $codeProfileTargetPath
             uiStateSeeded = ($null -ne $uiState)
+            uiStateSource = $uiStateSource
             machineId = $machineId
             inputFiles = [object[]]$inputFiles.ToArray()
             counts = [pscustomobject][ordered]@{
@@ -3816,120 +3876,28 @@ function Invoke-ProfileComposition {
     $temporaryDirectory = Join-Path $buildRoot ".$profileId.$([guid]::NewGuid().ToString('N')).tmp"
     [System.IO.Directory]::CreateDirectory($temporaryDirectory) | Out-Null
     try {
-        Write-Utf8File (Join-Path $temporaryDirectory 'settings.json') (ConvertTo-PrettyJson -Value $settings)
-        $extensionText = if ($extensions.Count -gt 0) { ($extensions -join "`n") + "`n" } else { '' }
-        Write-Utf8File (Join-Path $temporaryDirectory 'extensions.txt') $extensionText
-        Write-Utf8File (Join-Path $temporaryDirectory 'keybindings.json') (ConvertTo-PrettyJson -Value ([object[]]$keybindings))
-        $overrideReport = [ordered]@{
-            profileId = $profileId
-            overrides = [object[]]$overrides.ToArray()
-            warnings = [object[]]$mergeWarnings
-        }
-        Write-Utf8File (Join-Path $temporaryDirectory 'overrides.json') (ConvertTo-PrettyJson -Value $overrideReport)
-        Write-Utf8File (Join-Path $temporaryDirectory 'validation.json') (ConvertTo-PrettyJson -Value $validation)
-
-        $generatedSettings = Read-JsonCFile (Join-Path $temporaryDirectory 'settings.json')
+        $settingsJson = ConvertTo-PrettyJson -Value $settings
+        $keybindingsJson = ConvertTo-PrettyJson -Value ([object[]]$keybindings)
+        $generatedSettings = ConvertFrom-JsonC -Content $settingsJson -Source '<composed settings>'
         if (-not (Test-IsDictionary $generatedSettings)) { throw 'Generated settings did not validate as a JSON object.' }
-        $generatedKeybindings = Read-JsonCFile (Join-Path $temporaryDirectory 'keybindings.json')
+        $generatedKeybindings = ConvertFrom-JsonC -Content $keybindingsJson -Source '<composed keybindings>'
         if ($generatedKeybindings -isnot [System.Array]) { throw 'Generated keybindings did not validate as a JSON array.' }
 
-        $codeProfileTemporaryPath = $null
-        $codeProfileHash = $null
-        if ($ExportCodeProfile) {
-            $codeProfileTemporaryPath = Join-Path $temporaryDirectory $codeProfileFileName
-            if (-not (Test-PathWithinDirectory $codeProfileTemporaryPath $temporaryDirectory)) {
-                throw "VS Code profile export path '$codeProfileTemporaryPath' escapes the temporary profile directory."
-            }
-            $templateParameters = @{
-                DisplayName = $recipe.Name
-                SettingsJson = [System.IO.File]::ReadAllText((Join-Path $temporaryDirectory 'settings.json'))
-                Extensions = [string[]]$extensions
-                KeybindingsJson = [System.IO.File]::ReadAllText((Join-Path $temporaryDirectory 'keybindings.json'))
-                Platform = $Platform
-            }
-            if ($null -ne $uiState) { $templateParameters.GlobalState = $uiState }
-            $template = New-CodeProfileTemplate @templateParameters
-            Write-Utf8File $codeProfileTemporaryPath (ConvertTo-PrettyJson -Value $template)
-            Test-CodeProfileTemplate $codeProfileTemporaryPath | Out-Null
-            $codeProfileHash = Get-FileHashValue $codeProfileTemporaryPath
+        $codeProfileTemporaryPath = Join-Path $temporaryDirectory $codeProfileFileName
+        if (-not (Test-PathWithinDirectory $codeProfileTemporaryPath $temporaryDirectory)) {
+            throw "VS Code profile export path '$codeProfileTemporaryPath' escapes the temporary profile directory."
         }
-
-        $hashes = New-OrderedMap
-        foreach ($name in @('settings.json', 'extensions.txt', 'keybindings.json', 'overrides.json', 'validation.json')) {
-            $hashes[$name] = Get-FileHashValue (Join-Path $temporaryDirectory $name)
+        $templateParameters = @{
+            DisplayName = $recipe.Name
+            SettingsJson = $settingsJson
+            Extensions = [string[]]$extensions
+            KeybindingsJson = $keybindingsJson
+            Platform = $Platform
         }
-        if ($ExportCodeProfile) { $hashes[$codeProfileFileName] = $codeProfileHash }
-        $machineDisplay = if ($resolvedMachine) { Get-RelativeDisplayPath $root $resolvedMachine } else { $null }
-        $manifest = [ordered]@{
-            manifestVersion = $script:ManifestVersion
-            profileId = $profileId
-            displayName = $recipe.Name
-            generatedAtUtc = [DateTimeOffset]::UtcNow.ToString('o')
-            composerVersion = $script:ComposerVersion
-            gitCommit = Get-GitCommit $root
-            declaredComponents = [string[]]$recipe.Components
-            inputFiles = [object[]]$inputFiles.ToArray()
-            platformOverlay = if ($Platform) { [ordered]@{ id = $Platform; path = Get-RelativeDisplayPath $root $platformPath } } else { $null }
-            machineOverlayPath = $machineDisplay
-            machineOverlay = if ($resolvedMachine) {
-                [ordered]@{
-                    id = $machineId
-                    path = $machineDisplay
-                    selection = if ($Machine) { 'named-machine' } else { 'explicit-file' }
-                    settingCount = $machineSettingIds.Count
-                    appliedTo = 'build/global/settings.json'
-                    includedInProfileSettings = $false
-                    includedInCodeProfile = $false
-                }
-            }
-            else { $null }
-            codeProfileExportRequested = [bool]$ExportCodeProfile
-            codeProfileExport = if ($ExportCodeProfile) {
-                [ordered]@{
-                    fileName = $codeProfileFileName
-                    sha256 = $codeProfileHash
-                    schema = $script:CodeProfileSchema
-                    schemaVersion = $script:CodeProfileSchemaVersion
-                    verifiedAgainst = [ordered]@{
-                        version = $script:CodeProfileVerifiedVersion
-                        commit = $script:CodeProfileVerifiedCommit
-                    }
-                    machineOverlayIncluded = $false
-                    machineSettingsDelivery = if ($resolvedMachine) { 'built-in-default-application-settings' } else { 'not-requested' }
-                    portability = if ($null -ne $uiState) { 'ui-state-seed-included' }
-                        else { 'portable' }
-                    uiStatePolicy = if ($null -ne $uiState) { 'seed-on-import-then-managed-by-vscode' } else { 'managed-by-vscode' }
-                    uiStateSeeded = ($null -ne $uiState)
-                    uiStateSeed = if ($null -ne $uiState) {
-                        [ordered]@{
-                            sha256 = $uiStateHash
-                            sourcePathRecorded = $false
-                            source = if ($UiStateProfile) { 'stored-local-profile-ui-state' } else { 'explicit-profile-export' }
-                            profileId = if ($UiStateProfile) { $UiStateProfile } else { $null }
-                        }
-                    }
-                    else { $null }
-                    importMethod = 'manual-vscode-profile-import'
-                }
-            }
-            else { $null }
-            outputHashes = $hashes
-            validation = [ordered]@{
-                result = 'passed'
-                errors = $validation.errors.Count
-                warnings = $validation.warnings.Count + $mergeWarnings.Count
-                information = $validation.information.Count
-            }
-            counts = [ordered]@{
-                settings = $settings.Count
-                extensions = $extensions.Count
-                keybindings = $keybindings.Count
-                overrides = $overrides.Count
-                warnings = $validation.warnings.Count + $mergeWarnings.Count
-            }
-        }
-        Write-Utf8File (Join-Path $temporaryDirectory 'manifest.json') (ConvertTo-PrettyJson -Value $manifest)
-        Read-JsonCFile (Join-Path $temporaryDirectory 'manifest.json') | Out-Null
+        if ($null -ne $uiState) { $templateParameters.GlobalState = $uiState }
+        $template = New-CodeProfileTemplate @templateParameters
+        Write-Utf8File $codeProfileTemporaryPath (ConvertTo-PrettyJson -Value $template)
+        Test-CodeProfileTemplate $codeProfileTemporaryPath | Out-Null
         Invoke-SafeDirectoryReplace $temporaryDirectory $targetDirectory
     }
     catch {
@@ -3941,10 +3909,17 @@ function Invoke-ProfileComposition {
         profileId = $profileId
         displayName = $recipe.Name
         outputDirectory = Get-RelativeDisplayPath $root $targetDirectory
-        codeProfileExportPath = if ($codeProfileTargetPath) { Get-RelativeDisplayPath $root $codeProfileTargetPath } else { $null }
+        codeProfileExportPath = Get-RelativeDisplayPath $root $codeProfileTargetPath
         uiStateSeeded = ($null -ne $uiState)
+        uiStateSource = $uiStateSource
         machineId = $machineId
-        counts = $manifest.counts
+        counts = [pscustomobject][ordered]@{
+            settings = $settings.Count
+            extensions = $extensions.Count
+            keybindings = $keybindings.Count
+            overrides = $overrides.Count
+            warnings = $validation.warnings.Count + $mergeWarnings.Count
+        }
         dryRun = $false
     }
 }

@@ -3,14 +3,16 @@
 ## Implemented now
 
 - The unified PowerShell 7 CLI is implemented in `scripts/ProfileComposer.ps1`; the two original entry scripts remain compatibility wrappers.
-- It validates repository inputs, generates built-in Default settings under ignored `build/global/`, and composes named-profile settings, extensions, keybindings, manifests, override reports, and validation reports under ignored `build/profiles/`.
+- It validates repository inputs, generates built-in Default settings at
+  ignored `build/global/settings.json`, and composes one finished importable
+  `.code-profile` per recipe under ignored `build/profiles/`.
 - Composition is temporary-directory-first, validated before replacement, idempotent, and isolated from live VS Code user data.
 - Platform and explicitly supplied ignored machine overlays are supported.
 - Named machine IDs under `machine/local/` can be listed and selected explicitly. Their values are generated only into the built-in Default/application artifact, automatically applied to every profile, and excluded from Settings Sync; private overlays remain outside Git.
 - Reviewed `.code-profile` artifacts can be generated explicitly for manual import through VS Code.
 - Exported resources are limited to composed settings, extensions, keybindings, profile identity, and an optional opaque UI-state seed captured from a manual export; VS Code owns live UI state after import.
 - Pester tests cover CLI dispatch/errors, wrappers, merge behavior, validation, safe replacement, source rename/default/sync transactions, rollback, guarded live-profile guidance, automatic UI-state recipe selection, and current core profiles.
-- `composer.jsonc` declares the shared default component, and the CLI safely normalizes or renames that ownership without introducing a dependency graph.
+- `composer.jsonc` declares the shared default component and default UI-state seed profile; profile rename safely updates the latter reference.
 - A conservative read-only `Main` profile ownership audit is recorded under `docs/audits/`.
 - The `vscode` command group can list profile names/opaque IDs read-only, open a verified existing profile with `code --profile`, compose guided import/replacement packages, and verify deletion targets without writing live storage.
 - `capture-ui-state` can infer its recipe only when `code --status` yields exactly one recipe ID/display-name match; ambiguous or absent matches require an explicit recipe.
@@ -29,7 +31,7 @@
 - Settings Sync remains the primary cross-machine delivery mechanism after a profile is imported.
 - This repository is the canonical human-readable configuration and composition source.
 - Live VS Code profiles remain the runtime source of truth for UI placement and other VS Code-owned state.
-- `ProfileComposer.ps1 capture-ui-state [<profile-id>] <export-path>` can extract and retain only the opaque UI resource from a manually exported profile under ignored local data. Automatic recipe selection reads status text only and fails closed. `-UiStateProfile` reuses that copy-on-create starting point during composition. Direct live capture, layout parsing or merging, and continuing inheritance remain deferred.
+- `ProfileComposer.ps1 capture-ui-state [<profile-id>] <export-path>` can extract and retain only the opaque UI resource from a manually exported profile under ignored local data. Automatic recipe selection reads status text only and fails closed. Normal composition automatically copies the configured default seed; explicit overrides and `-NoUiState` remain available. Direct live capture, layout parsing or merging, and continuing inheritance remain deferred.
 - `ProfileComposer.ps1 sync [<profile-id>] <export-path>` is the reviewed reverse path for the repository-owned resources in that export. Flattened differences remain recipe-specific unless a human deliberately promotes them into a shared component.
 - Stable profiles may be exported and stored privately.
 - Main is the shared base and already provides everyday shell-language support to every profile.

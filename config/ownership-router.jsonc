@@ -45,6 +45,36 @@
       "source": "repository-policy",
       "status": "approved",
       "reason": "The Microsoft Python extension is owned by the Python component."
+    },
+    {
+      "id": "user-extension-github.copilot-chat",
+      "kind": "extension",
+      "match": {
+        "type": "exact",
+        "value": "github.copilot-chat"
+      },
+      "destination": {
+        "type": "component",
+        "name": "main"
+      },
+      "source": "user-confirmed",
+      "status": "approved",
+      "reason": "Confirmed during interactive synchronization."
+    },
+    {
+      "id": "user-extension-sandcastle.vscode-open",
+      "kind": "extension",
+      "match": {
+        "type": "exact",
+        "value": "sandcastle.vscode-open"
+      },
+      "destination": {
+        "type": "component",
+        "name": "main"
+      },
+      "source": "user-confirmed",
+      "status": "approved",
+      "reason": "Confirmed during interactive synchronization."
     }
   ]
 }

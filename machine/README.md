@@ -28,7 +28,10 @@ pwsh ./scripts/ProfileComposer.ps1 list-machines
 pwsh ./scripts/ProfileComposer.ps1 compose unreal -Platform windows -Machine main-windows
 ```
 
-The filename without `.jsonc` is the `-Machine` ID. This makes the intended target explicit and records it in the manifest. `-MachineFile` remains an explicit-path escape hatch; do not use both switches together.
+The filename without `.jsonc` is the `-Machine` ID. This makes the intended
+target explicit in the command and generated application-settings result.
+`-MachineFile` remains an explicit-path escape hatch; do not use both switches
+together.
 
 `sync` accepts the same `-Machine` syntax. When a reviewed export contains a
 safe absolute path, classification overrides portable routes, moves ownership

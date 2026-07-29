@@ -32,6 +32,30 @@ VS Code setting values retain the complete JSON domain: string, number,
 boolean, object, array, or null. Arrays and nested objects are inspected
 recursively for path and sensitive leaves.
 
+## Composer configuration
+
+`composer.jsonc` uses profile/component IDs and currently contains:
+
+```jsonc
+{
+  "sharedDefaultComponent": "main",
+  "defaultUiStateProfile": "main"
+}
+```
+
+- `sharedDefaultComponent` is required, must resolve to a component, and must
+  appear exactly once and first in every recipe.
+- `defaultUiStateProfile` is optional. When present, it must resolve to a
+  recipe. Normal composition copies that recipe's ignored
+  `machine/local/ui-state/<id>/seed.code-profile` into every generated profile.
+- The ignored seed may legitimately be absent on a new checkout. Composition
+  then succeeds without `globalState` and reports the unavailable seed.
+- One opaque seed is copied without parsing or merging. `-UiStateProfile` and
+  `-UiStateFromProfile` are explicit one-run overrides; `-NoUiState` disables
+  seeding.
+- Renaming the referenced profile updates `defaultUiStateProfile`
+  transactionally.
+
 ## Versioned machine definition
 
 New machine files use schema version 1:
@@ -176,5 +200,5 @@ failure rolls back every swapped path. Repeating the same sync produces no
 source changes.
 
 The VS Code `.code-profile` template remains an unversioned external format
-verified against the version recorded in generated manifests. Unknown outer
-fields fail closed so a newer VS Code resource cannot be silently lost.
+verified against the version documented by the composer. Unknown outer fields
+fail closed so a newer VS Code resource cannot be silently lost.

@@ -47,6 +47,8 @@ foreach ($file in $markdownFiles) {
 }
 
 $helpTopics = @(
+    'compose',
+    'compose-all',
     'sync',
     'route',
     'route list',
@@ -72,7 +74,20 @@ foreach ($topic in $helpTopics) {
 }
 
 $syncHelp = @(& pwsh -NoProfile -NonInteractive -File $cli help sync 2>&1) -join "`n"
+$composeHelp = @(& pwsh -NoProfile -NonInteractive -File $cli help compose 2>&1) -join "`n"
 $routerDoc = [System.IO.File]::ReadAllText((Join-Path $root 'docs/OWNERSHIP-ROUTER.md'))
+if ($composeHelp -notmatch '\.code-profile' -or $composeHelp -match 'ExportCodeProfile') {
+    Add-DocError 'compose help must describe the default finished .code-profile output without a legacy export switch.'
+}
+if ($composeHelp -notmatch [regex]::Escape('-NoUiState') -or
+    $composeHelp -notmatch 'defaultUiStateProfile') {
+    Add-DocError 'compose help must describe the configured default UI seed and explicit -NoUiState opt-out.'
+}
+if ($syncHelp -notmatch 'Every top-level Application setting' -or
+    $syncHelp -notmatch 'global/settings\.jsonc' -or
+    $syncHelp -notmatch 'machine overlay') {
+    Add-DocError 'sync help must describe automatic application ownership normalization and global/machine routing.'
+}
 foreach ($parameter in @(
     '-Platform', '-Machine', '-RoutingFile', '-RoutingMode', '-NonInteractive',
     '-WriteUnresolved', '-SkipGlobal', '-SkipUiState', '-PersistDryRunDecisions',
@@ -98,7 +113,15 @@ $allCurrentDocs = @($markdownFiles | ForEach-Object { [System.IO.File]::ReadAllT
 foreach ($obsolete in @(
     'writes only recipe-specific deltas',
     'remaining flattened settings continue to become recipe-specific deltas',
-    'Portable differences become exact recipe replacements'
+    'Portable differences become exact recipe replacements',
+    'updates only values explicitly named by `workbench.settings.applyToAllProfiles`',
+    'treats `workbench.settings.applyToAllProfiles` as the explicit global ownership list',
+    '-ExportCodeProfile',
+    'build/profiles/<id>/extensions.txt',
+    'The six core files are always generated',
+    'By default, UI placement is not included',
+    'The generated `.code-profile` contains composed settings, extension identifiers, and keybindings. It omits `globalState` by default.',
+    'The export has no `globalState` resource by default.'
 )) {
     if ($allCurrentDocs -match [regex]::Escape($obsolete)) {
         Add-DocError "Current documentation retains obsolete sync claim: $obsolete"

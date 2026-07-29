@@ -1,5 +1,4 @@
 {
-  // Shared portable and daily-driver behavior used by every profile.
   "[jsonc]": {
     "editor.defaultFormatter": "vscode.json-language-features"
   },
@@ -88,6 +87,11 @@
   "vsicons.dontShowNewVersionMessage": true,
   "window.zoomLevel": 2,
   "workbench.colorTheme": "One Dark Pro Darker",
+  "workbench.editorAssociations": {
+    "{hexdiff}:/**/*.*": "hexEditor.hexedit",
+    "*.copilotmd": "vscode.markdown.preview.editor",
+    "*.md": "vscode.markdown.preview.editor"
+  },
   "workbench.editorLargeFileConfirmation": 4096,
   "workbench.iconTheme": "vscode-icons",
   "workbench.settings.enableNaturalLanguageSearch": false,

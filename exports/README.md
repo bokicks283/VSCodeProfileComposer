@@ -1,6 +1,6 @@
 # Private live-profile exports
 
-Composer-generated `.code-profile` files do not belong here. Generate them under ignored `build/profiles/<id>/` with `pwsh ./scripts/ProfileComposer.ps1 compose <profile-id> -ExportCodeProfile`, the equivalent `compose-all` command, or the guided `vscode import <recipe>` command.
+Composer-generated `.code-profile` files do not belong here. Generate them under ignored `build/profiles/<id>/` with `pwsh ./scripts/ProfileComposer.ps1 compose <profile-id>`, the equivalent `compose-all` command, or the guided `vscode import <recipe>` command.
 
 This directory is reserved for deliberately retained exports created from live VS Code profiles. A live export may contain runtime-owned resources, personal paths, machine values, account-related state, or other data not represented by the composer.
 

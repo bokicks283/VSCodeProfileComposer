@@ -42,16 +42,16 @@ param(
 
     [Parameter(ParameterSetName = 'One')]
     [Parameter(ParameterSetName = 'All')]
-    [switch]$ExportCodeProfile,
-
-    [Parameter(ParameterSetName = 'One')]
-    [Parameter(ParameterSetName = 'All')]
     [string]$UiStateFromProfile,
 
     [Parameter(ParameterSetName = 'One')]
     [Parameter(ParameterSetName = 'All')]
     [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9._-]*$')]
     [string]$UiStateProfile,
+
+    [Parameter(ParameterSetName = 'One')]
+    [Parameter(ParameterSetName = 'All')]
+    [switch]$NoUiState,
 
     [Parameter(ParameterSetName = 'One')]
     [Parameter(ParameterSetName = 'All')]
@@ -78,10 +78,8 @@ function Write-ValidationSummary {
 }
 
 try {
-    if (($UiStateFromProfile -or $UiStateProfile) -and -not $ExportCodeProfile) {
-        throw 'UI-state seeding requires -ExportCodeProfile.'
-    }
     if ($UiStateFromProfile -and $UiStateProfile) { throw '-UiStateFromProfile and -UiStateProfile cannot be used together.' }
+    if ($NoUiState -and ($UiStateFromProfile -or $UiStateProfile)) { throw '-NoUiState cannot be combined with an explicit UI-state source.' }
     if ($Machine -and $MachineFile) { throw '-Machine and -MachineFile cannot be used together.' }
 
     if ($ListMachines) {
@@ -111,7 +109,7 @@ try {
         if ($MachineFile) { $globalParameters.MachineFile = $MachineFile }
         $globalResult = Invoke-GlobalSettingsComposition @globalParameters
         $prefix = if ($DryRun) { 'DRY RUN: planned' } else { 'Generated' }
-        Write-Host "$prefix built-in Default settings at $($globalResult.outputDirectory): $($globalResult.settingCount) globally applied settings."
+        Write-Host "$prefix application settings: $($globalResult.settingsPath)"
         if ($globalResult.machineId) { Write-Host "  Machine '$($globalResult.machineId)': $($globalResult.machineSettingCount) local setting(s), ignored by Settings Sync." }
         exit 0
     }
@@ -126,7 +124,7 @@ try {
     if ($MachineFile) { $globalParameters.MachineFile = $MachineFile }
     $globalResult = Invoke-GlobalSettingsComposition @globalParameters
     $globalPrefix = if ($DryRun) { 'DRY RUN: planned' } else { 'Generated' }
-    Write-Host "$globalPrefix built-in Default settings at $($globalResult.outputDirectory): $($globalResult.settingCount) globally applied settings."
+    Write-Host "$globalPrefix application settings: $($globalResult.settingsPath)"
     if ($globalResult.machineId) { Write-Host "  Machine '$($globalResult.machineId)': $($globalResult.machineSettingCount) local setting(s), ignored by Settings Sync." }
 
     $profiles = if ($All) {
@@ -139,8 +137,8 @@ try {
             RepositoryRoot = $repositoryRoot
             Profile = $profileId
             DryRun = $DryRun
+            NoUiState = $NoUiState
             Strict = $Strict
-            ExportCodeProfile = $ExportCodeProfile
         }
         if ($Platform) { $parameters.Platform = $Platform }
         if ($Machine) { $parameters.Machine = $Machine }
@@ -149,21 +147,17 @@ try {
         if ($UiStateProfile) { $parameters.UiStateProfile = $UiStateProfile }
         $result = Invoke-ProfileComposition @parameters
         if ($DryRun) {
-            Write-Host "DRY RUN: $($result.profileId) ($($result.displayName))"
-            Write-Host "  Planned output: $($result.outputDirectory)"
-            if ($result.codeProfileExportPath) { Write-Host "  Planned .code-profile: $($result.codeProfileExportPath)" }
+            Write-Host "DRY RUN '$($result.profileId)': $($result.codeProfileExportPath)"
             if ($result.uiStateSeeded) {
-                $sourceDescription = if ($UiStateProfile) { "stored local profile '$UiStateProfile'" } else { 'explicitly supplied profile export' }
-                Write-Host "  UI state seed: copied from $sourceDescription"
+                Write-Host "  UI state seed: $($result.uiStateSource)"
             }
             if ($result.machineId) { Write-Host "  Machine: $($result.machineId) (delivered through built-in Default settings, not this named profile)" }
-            Write-Host "  Inputs:"
-            foreach ($input in $result.inputFiles) { Write-Host "    $($input.type): $($input.path)" }
-            Write-Host "  Counts: $($result.counts.settings) settings, $($result.counts.extensions) extensions, $($result.counts.keybindings) keybindings, $($result.counts.overrides) overrides, $($result.counts.warnings) warnings"
         }
         else {
-            Write-Host "Composed '$($result.profileId)' at $($result.outputDirectory): $($result.counts.settings) settings, $($result.counts.extensions) extensions, $($result.counts.keybindings) keybindings, $($result.counts.overrides) overrides."
-            if ($result.codeProfileExportPath) { Write-Host "VS Code profile export: $($result.codeProfileExportPath)" }
+            $uiLabel = if ($result.uiStateSeeded) { " [UI: $($result.uiStateSource)]" }
+                elseif ($result.uiStateSource -like 'configured-default-missing:*') { " [UI seed unavailable: $($result.uiStateSource.Split(':', 2)[1])]" }
+                else { '' }
+            Write-Host "Composed '$($result.profileId)': $($result.codeProfileExportPath)$uiLabel"
         }
     }
 }

@@ -2,7 +2,7 @@
 
 ## Components and profiles
 
-A component is a focused reusable unit with portable `settings.jsonc`, an extension list, and ownership documentation. `composer.jsonc` names the shared default component; it currently points to `main`.
+A component is a focused reusable unit with portable `settings.jsonc`, an extension list, and ownership documentation. `composer.jsonc` names both the shared default component and the default UI-state seed profile; both currently point to `main`.
 
 A profile is an explicit YAML recipe. Profiles do not inherit other profiles. The composer parses the narrow current recipe schema and rejects unsupported YAML structures.
 
@@ -24,11 +24,18 @@ The global and selected machine layers are generated separately under `build/glo
 
 ## Global settings
 
-`global/settings.jsonc` owns settings intentionally configured through `workbench.settings.applyToAllProfiles`. VS Code stores their effective values in its built-in Default profile and ignores duplicate values in named profile settings. Repository validation requires each global value to appear exactly once in the apply-to-all list and rejects those settings from components, profile overrides, and platform overlays.
+`global/settings.jsonc` owns settings intentionally configured through `workbench.settings.applyToAllProfiles`. VS Code stores their effective values in its built-in Default profile and ignores duplicate values in named profile settings. The array is derived ownership metadata: composition and synchronization normalize it from every other top-level application setting. Repository validation still requires the canonical source to contain each global value exactly once and rejects those settings from components, profile overrides, and platform overlays.
 
 `ProfileComposer.ps1 fix global` provides a deliberately narrow repair for mechanically safe list problems: create the missing list, retain the first copy of duplicate IDs, and append unlisted values. Missing values and cross-layer conflicts remain human decisions. Repairs use the same staged validation and rollback-safe commit as other source transformations.
 
 `build/global/settings.json` is a reviewable manual-merge artifact. The composer does not write the live Application Settings file.
+
+During `sync`, every top-level live application setting is considered even when
+its apply-to-all entry is missing. Portable values update the tracked global
+source. Settings Sync-ignored values and values classified as machine-local
+update the selected ignored machine overlay; machine classification also adds
+the key to `settingsSync.ignoredSettings`. Sensitive application values are
+excluded from repository storage.
 
 ## Main shared base
 
@@ -90,7 +97,17 @@ Repositories own generated-folder exclusions, include paths, compile commands, t
 
 `scripts/ProfileComposer.ps1` is the unified command surface. It materializes reviewable artifacts under ignored `build/global/` and `build/profiles/`, lists repository definitions, captures an opaque UI-state seed, synchronizes reviewed exports into recipe deltas, performs safe source-ID/default-ownership transactions, and exposes guarded `vscode` guidance. All documented workflows use its subcommands. `Compose-Profile.ps1` and `Save-ProfileUiState.ps1` remain compatibility wrappers for existing automation only.
 
-When explicitly requested with `-ExportCodeProfile`, composition creates a manual-import `.code-profile` containing composed settings, extension identifiers, and keybindings. UI-state capture may retain one opaque `globalState` snapshot per recipe under ignored `machine/local/ui-state/`; `-UiStateProfile` reuses a stored snapshot and `-UiStateFromProfile` supports a one-off source. When the capture recipe is omitted, only `code --status` is read to resolve one exact recipe match.
+Composition always creates a manual-import `.code-profile` containing composed
+settings, extension identifiers, and keybindings. It does not emit those
+resources as redundant standalone files. UI-state capture may retain one opaque
+`globalState` snapshot per recipe under ignored `machine/local/ui-state/`.
+Normal composition copies the seed named by
+`composer.jsonc.defaultUiStateProfile` when present. `-UiStateProfile` overrides
+that source, `-UiStateFromProfile` supplies a one-off compatibility source, and
+`-NoUiState` disables seeding. Exactly one opaque snapshot is copied; layouts
+are never parsed or merged. Updating the default seed changes future composed
+artifacts, not already imported profiles. When the capture recipe is omitted,
+only `code --status` is read to resolve one exact recipe match.
 
 `sync` consumes a manually exported private profile and uses an explicit
 ownership model. It indexes component, selected platform, selected machine, and

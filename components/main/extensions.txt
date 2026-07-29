@@ -32,3 +32,5 @@ vscode-icons-team.vscode-icons
 wmaurer.change-case
 yzhang.markdown-all-in-one
 zhuangtongfa.one-dark-pro
+github.copilot-chat
+sandcastle.vscode-open

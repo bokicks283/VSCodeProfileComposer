@@ -82,24 +82,28 @@ Examples:
         'compose' {
             @'
 compose <profile>
-  Generates built-in Default/application settings and one portable named profile.
+  Generates one finished, importable .code-profile plus the separate
+  built-in Default/application settings required by VS Code.
 
 Options:
   -Platform <id>              Apply a committed platform overlay.
   -Machine <id>               Apply ignored machine/local/<id>.jsonc to application settings.
   -MachineFile <path>         Backward-compatible explicit machine overlay path.
-  -ExportCodeProfile          Also create an importable .code-profile artifact.
-  -UiStateProfile <id>        Reuse a stored local opaque UI-state seed.
-  -UiStateFromProfile <path>  Copy globalState from an explicit private export.
+  -NoUiState                  Omit UI state even when a configured default seed exists.
+  -UiStateProfile <id>        Advanced: override the configured default with a stored seed.
+  -UiStateFromProfile <path>  Compatibility: use one private export without storing it.
   -DryRun                     Validate and print planned output without writing build/.
   -Strict                     Treat warnings as errors.
 
+  Without an explicit UI option, composition uses the stored seed named by
+  composer.jsonc defaultUiStateProfile when that local seed exists.
+
 Example:
-  pwsh ./scripts/ProfileComposer.ps1 compose python-database -Platform windows -ExportCodeProfile -DryRun
+  pwsh ./scripts/ProfileComposer.ps1 compose python-database -Platform windows -DryRun
 '@ | Write-Host
         }
         'compose-all' {
-            Write-Host 'compose-all: same options as compose, but generates every recipe. Example: ProfileComposer.ps1 compose-all -Platform windows -ExportCodeProfile -DryRun'
+            Write-Host 'compose-all: same options as compose, but generates every finished profile. Example: ProfileComposer.ps1 compose-all -Platform windows -DryRun'
         }
         'compose-global' {
             Write-Host 'compose-global: generates only build/global. Options: -Machine, -MachineFile, -DryRun, -Strict. Example: ProfileComposer.ps1 compose-global -DryRun'
@@ -129,9 +133,10 @@ sync [<profile>] <private-export> [-Platform <id>] [-Machine <id>]
   applies managed/custom routes, classifies values, resolves unknown ownership,
   validates one complete mutation plan, and updates authoritative sources.
   When <profile> is omitted, the export name must match exactly one recipe ID
-  or display name. Application settings explicitly listed by
-  workbench.settings.applyToAllProfiles are synced from the selected VS Code
-  User directory; Sync-ignored machine values are excluded.
+  or display name. Every top-level Application setting is automatically added
+  to the in-memory workbench.settings.applyToAllProfiles ownership list.
+  Portable values update global/settings.jsonc; ignored or machine-local values
+  update the selected machine overlay; sensitive values are excluded.
 
   Existing exact ownership wins over broad rules. Security classification forces
   exclusion; machine-local path classification forces machine ownership.
@@ -268,7 +273,7 @@ Actions:
       Verify the target and print the supported Profiles: Delete Profile step.
 
 Import/replace options:
-  -Platform, -Machine, -MachineFile, -UiStateFromProfile, -UiStateProfile,
+  -Platform, -Machine, -MachineFile, -NoUiState, -UiStateFromProfile, -UiStateProfile,
   -Strict, -DryRun, -RepositoryRoot, -VSCodeUserDataPath
 
 The import, replace, and delete actions never edit VS Code's private profile
@@ -417,7 +422,7 @@ function Invoke-VSCodeCompositionPreparation {
         [string[]]$Arguments
     )
 
-    $parsed = Read-CommandOptions $Arguments @('DryRun', 'Strict') @(
+    $parsed = Read-CommandOptions $Arguments @('DryRun', 'Strict', 'NoUiState') @(
         'Platform', 'Machine', 'MachineFile', 'UiStateFromProfile', 'UiStateProfile',
         'RepositoryRoot', 'LiveProfile', 'VSCodeUserDataPath'
     )
@@ -428,6 +433,10 @@ function Invoke-VSCodeCompositionPreparation {
     }
     if ($parsed.Options.ContainsKey('uistatefromprofile') -and $parsed.Options.ContainsKey('uistateprofile')) {
         throw '-UiStateFromProfile and -UiStateProfile cannot be used together.'
+    }
+    if ($parsed.Options.nouistate -and
+        ($parsed.Options.ContainsKey('uistatefromprofile') -or $parsed.Options.ContainsKey('uistateprofile'))) {
+        throw '-NoUiState cannot be combined with an explicit UI-state source.'
     }
     if ($Action -eq 'import' -and $parsed.Options.ContainsKey('liveprofile')) {
         throw '-LiveProfile is valid only with vscode replace.'
@@ -455,8 +464,8 @@ function Invoke-VSCodeCompositionPreparation {
     $profileParameters = @{
         RepositoryRoot = $root
         Profile = $recipeId
-        ExportCodeProfile = $true
         DryRun = [bool]$parsed.Options.dryrun
+        NoUiState = [bool]$parsed.Options.nouistate
         Strict = [bool]$parsed.Options.strict
     }
     foreach ($key in @('machine', 'machinefile')) {
@@ -680,14 +689,14 @@ function Invoke-RouteCommand {
 
 function Invoke-Compose {
     param([bool]$AllProfiles, [string[]]$Arguments)
-    $parsed = Read-CommandOptions $Arguments @('DryRun', 'Strict', 'ExportCodeProfile') @('Platform', 'Machine', 'MachineFile', 'UiStateFromProfile', 'UiStateProfile', 'RepositoryRoot')
+    $parsed = Read-CommandOptions $Arguments @('DryRun', 'Strict', 'NoUiState') @('Platform', 'Machine', 'MachineFile', 'UiStateFromProfile', 'UiStateProfile', 'RepositoryRoot')
     if ($parsed.Options.Help) { Write-CommandHelp $(if ($AllProfiles) { 'compose-all' } else { 'compose' }); return }
     if ($AllProfiles -and $parsed.Positionals.Count -ne 0) { throw 'compose-all does not accept a profile ID.' }
     if (-not $AllProfiles -and $parsed.Positionals.Count -ne 1) { throw 'compose requires exactly one profile ID. Example: ProfileComposer.ps1 compose main -Platform windows' }
     $root = Get-RepositoryRootFromOptions $parsed.Options
     if ($parsed.Options.ContainsKey('machine') -and $parsed.Options.ContainsKey('machinefile')) { throw '-Machine and -MachineFile cannot be used together.' }
-    if (($parsed.Options.ContainsKey('uistatefromprofile') -or $parsed.Options.ContainsKey('uistateprofile')) -and -not $parsed.Options.exportcodeprofile) { throw 'UI-state seeding requires -ExportCodeProfile.' }
     if ($parsed.Options.ContainsKey('uistatefromprofile') -and $parsed.Options.ContainsKey('uistateprofile')) { throw '-UiStateFromProfile and -UiStateProfile cannot be used together.' }
+    if ($parsed.Options.nouistate -and ($parsed.Options.ContainsKey('uistatefromprofile') -or $parsed.Options.ContainsKey('uistateprofile'))) { throw '-NoUiState cannot be combined with an explicit UI-state source.' }
     $validationParameters = @{ RepositoryRoot = $root }
     foreach ($key in @('platform', 'machine', 'machinefile')) { if ($parsed.Options.ContainsKey($key)) { $validationParameters[$key] = $parsed.Options[$key] } }
     $validation = Test-ComposerRepository @validationParameters
@@ -698,25 +707,27 @@ function Invoke-Compose {
     $globalParameters = @{ RepositoryRoot = $root; DryRun = [bool]$parsed.Options.dryrun; Strict = [bool]$parsed.Options.strict }
     foreach ($key in @('machine', 'machinefile')) { if ($parsed.Options.ContainsKey($key)) { $globalParameters[$key] = $parsed.Options[$key] } }
     $globalResult = Invoke-GlobalSettingsComposition @globalParameters
-    $globalVerb = if ($parsed.Options.dryrun) { 'DRY RUN: planned' } else { 'Generated' }
-    Write-Host "$globalVerb built-in Default settings at $($globalResult.outputDirectory)."
     $profileIds = if ($AllProfiles) { @(Get-ProfileDefinitions $root | ForEach-Object Id) } else { @($parsed.Positionals[0]) }
     foreach ($profileId in $profileIds) {
         $parameters = @{
             RepositoryRoot = $root
             Profile = $profileId
             DryRun = [bool]$parsed.Options.dryrun
+            NoUiState = [bool]$parsed.Options.nouistate
             Strict = [bool]$parsed.Options.strict
-            ExportCodeProfile = [bool]$parsed.Options.exportcodeprofile
         }
         foreach ($key in @('platform', 'machine', 'machinefile', 'uistatefromprofile', 'uistateprofile')) {
             if ($parsed.Options.ContainsKey($key)) { $parameters[$key] = $parsed.Options[$key] }
         }
         $result = Invoke-ProfileComposition @parameters
-        $verb = if ($result.dryRun) { 'DRY RUN: planned' } else { 'Composed' }
-        Write-Host "$verb '$($result.profileId)' at $($result.outputDirectory): $($result.counts.settings) settings, $($result.counts.extensions) extensions, $($result.counts.keybindings) keybindings."
-        if ($result.codeProfileExportPath) { Write-Host "  VS Code profile export: $($result.codeProfileExportPath)" }
+        $verb = if ($result.dryRun) { 'DRY RUN' } else { 'Composed' }
+        $uiLabel = if ($result.uiStateSeeded) { " [UI: $($result.uiStateSource)]" }
+            elseif ($result.uiStateSource -like 'configured-default-missing:*') { " [UI seed unavailable: $($result.uiStateSource.Split(':', 2)[1])]" }
+            else { '' }
+        Write-Host "$verb '$($result.profileId)': $($result.codeProfileExportPath)$uiLabel"
     }
+    $globalLabel = if ($parsed.Options.dryrun) { 'DRY RUN application settings' } else { 'Application settings' }
+    Write-Host "$globalLabel`: $($globalResult.settingsPath)"
 }
 
 try {
@@ -856,7 +867,7 @@ try {
             Write-Host "  Settings routed: $($result.counts.settingsRouted); extensions routed: $($result.counts.extensionsRouted); excluded: $($result.counts.excluded)"
             Write-Host "  Conservative removal policy: no shared setting or extension was removed because it was absent from this export."
             Write-Host "  Keybindings: $($result.counts.keybindingAdditions) addition(s), exact-order replacement=$($result.counts.keybindingsReplacedForOrder)"
-            Write-Host "  Global: $($result.counts.globalSettings) tracked setting(s); $($result.counts.machineOwnedGlobalSettingsSkipped) Sync-ignored machine value(s) skipped"
+            Write-Host "  Application: $($result.counts.globalSettings) global; $($result.counts.machineOwnedGlobalSettingsSkipped) machine; $($result.counts.applicationSettingsAddedToApplyToAll) apply-to-all entry(s) derived; $($result.counts.applicationSensitiveSettingsExcluded) sensitive excluded"
             Write-Host "  Ownership filters: $($result.counts.exportGlobalSettingsIgnored) global/machine setting(s) and $($result.counts.platformSettingsIgnored) platform setting(s) excluded from recipe deltas"
             Write-Host "  Machine routing: $($result.counts.machineSettingsAdded) addition(s), $($result.counts.machineSettingsUpdated) update(s), $($result.counts.machineSettingsRetained) retained"
             if ($result.machine) {

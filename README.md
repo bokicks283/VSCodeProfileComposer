@@ -9,7 +9,7 @@ For a complete first-run walkthrough, profile-selection guide, import procedure,
 Requirements:
 
 - PowerShell 7.0 or newer (`pwsh`)
-- Git, optional, for recording the current commit in manifests
+- Git, optional, for normal source-control workflows
 - Pester 5.5 or newer, only for running the test suite
 
 The composer has no external runtime dependencies and never installs modules automatically.
@@ -39,10 +39,10 @@ pwsh ./scripts/ProfileComposer.ps1 compose-global
 pwsh ./scripts/ProfileComposer.ps1 compose-all -Platform windows
 
 # Compose and create a file for manual import through VS Code Profiles.
-pwsh ./scripts/ProfileComposer.ps1 compose main -Platform windows -ExportCodeProfile
+pwsh ./scripts/ProfileComposer.ps1 compose main -Platform windows
 
 # Inspect inputs and planned output without writing build files.
-pwsh ./scripts/ProfileComposer.ps1 compose main -Platform windows -ExportCodeProfile -DryRun
+pwsh ./scripts/ProfileComposer.ps1 compose main -Platform windows -DryRun
 
 # Explain and audit ownership routing.
 pwsh ./scripts/ProfileComposer.ps1 route explain "python.analysis.typeCheckingMode" -Platform windows
@@ -78,15 +78,17 @@ directly. New items use the managed registry at
 grouped terminal decision. Unknown items never fall back to profile JSON.
 Classification runs before portability validation: sensitive/private values
 are excluded and machine paths route to the selected ignored machine file. It
-also reads the built-in Default/application `settings.json` and updates only
-values explicitly named by `workbench.settings.applyToAllProfiles`;
-Sync-ignored machine values are not copied into tracked settings. Add
+also reads the built-in Default/application `settings.json`, automatically
+derives `workbench.settings.applyToAllProfiles` from every top-level setting,
+updates portable values in `global/settings.jsonc`, and routes ignored or
+machine-classified values to the selected private machine overlay. Add
 `-NonInteractive -WriteUnresolved <path>` for deterministic automation.
 
-Reuse that stored layout for the same profile or as the starting layout for another profile:
+After `sync` or `capture-ui-state` updates Main's stored layout, ordinary
+composition uses it automatically:
 
 ```powershell
-pwsh ./scripts/ProfileComposer.ps1 compose python-database -Platform windows -Machine excalibur117-w -ExportCodeProfile -UiStateProfile main
+pwsh ./scripts/ProfileComposer.ps1 compose-all -Platform windows -Machine excalibur117-w
 ```
 
 Warnings are informational by default. Add `-Strict` to make warnings fail validation or composition.
@@ -110,7 +112,12 @@ Later layers win. Settings objects merge recursively, while scalar values, array
 
 Workspace settings are not materialized into personal profiles. `workspace-examples/` remains project guidance only.
 
-`composer.jsonc` declares the shared default component. It currently uses `main`, which remains first in every recipe, so its portable settings and extensions are present in every generated profile. Use `default show` or `default set <component> -DryRun`; setting ownership normalizes every recipe without duplicates while preserving the remaining order.
+`composer.jsonc` declares both the shared default component and the default
+UI-state seed profile. Both currently use `main`. The shared component remains
+first in every recipe, while the UI setting copies Main's ignored local seed
+into each new export when that seed exists. Use `default show` or
+`default set <component> -DryRun`; setting ownership normalizes every recipe
+without duplicates while preserving the remaining order.
 
 Repository IDs can be maintained without hand-editing references:
 
@@ -123,34 +130,46 @@ Sync, global ownership repair, rename, and shared-default changes are validated 
 
 ## Output and safety
 
-Composition writes global settings to `build/global/` and named profiles to `build/profiles/<id>/`:
+Composition produces only the two end-user deliverables:
 
 ```text
-settings.json
-extensions.txt
-keybindings.json
-manifest.json
-overrides.json
-validation.json
-# Optional when -ExportCodeProfile is supplied:
-<Display-Name>.code-profile
+build/global/settings.json
+build/profiles/<id>/<Display-Name>.code-profile
 ```
+
+The `.code-profile` is the finished importable named profile. The separate
+application settings file is necessary because VS Code stores apply-to-all and
+machine-local values in the built-in Default profile instead of a named-profile
+import. Intermediate settings, extension, keybinding, validation, and override
+data is kept in memory and is not emitted.
 
 Generated JSON is standard JSON. Each build is first written and validated in a temporary directory. The prior target is replaced only after the new package is complete; a failed composition preserves the previous valid output. Build output is ignored and is never canonical source.
 
 Settings listed in `global/settings.jsonc` are deliberately absent from named-profile output. VS Code ignores copies of those settings and uses the built-in Default profile's value instead. Edit the repository global source, generate `build/global/settings.json`, and manually merge it into **Preferences: Open Application Settings (JSON)**.
 
-`overrides.json` records replaced setting paths, values, and source layers. Values whose paths look sensitive are redacted in reports. Explicitly selected machine-local values remain intact only in `build/global/settings.json`; they are never written to named-profile settings or exports.
+`workbench.settings.applyToAllProfiles` is derived ownership metadata. Every
+other top-level key in generated application settings is included exactly once.
+During `sync`, the same normalization runs before ownership routing, so a value
+cannot become orphaned merely because its array entry was missing.
+
+Explicitly selected machine-local values remain intact only in
+`build/global/settings.json`; they are never written to named-profile settings
+or exports.
 
 Repository validation checks recipes, JSONC/YAML structure, extension IDs and duplicates, portable personal paths and likely secrets, requested overlays, ignored machine-local boundaries, profile IDs, and output containment.
 
 ## VS Code profile export
 
-Add `-ExportCodeProfile` to `compose <profile-id>` or `compose-all`. For example, Main writes `build/profiles/main/Main.code-profile`; Unreal writes `build/profiles/unreal/Unreal-Engine.code-profile`. The export contains the fully composed settings, recipe-owned extension identifiers, and generated keybindings. VS Code handles extension acquisition during its normal import workflow—composition never installs extensions.
+`compose <profile-id>` and `compose-all` always create finished importable
+profiles. For example, Main writes `build/profiles/main/Main.code-profile`;
+Unreal writes `build/profiles/unreal/Unreal-Engine.code-profile`. The export
+contains the fully composed settings, recipe-owned extension identifiers, and
+generated keybindings. VS Code handles extension acquisition during its normal
+import workflow—composition never installs extensions.
 
-Machine overlays are deliberately excluded from named-profile settings and `.code-profile` exports. Selecting `-Machine` or `-MachineFile` instead adds those keys to `build/global/settings.json`, `workbench.settings.applyToAllProfiles`, and `settingsSync.ignoredSettings`. This makes the values effective on the selected computer without sending its paths through Settings Sync. Exports remain portable unless `-UiStateFromProfile` adds a private UI snapshot.
+Machine overlays are deliberately excluded from named-profile settings and `.code-profile` exports. Selecting `-Machine` or `-MachineFile` instead adds those keys to `build/global/settings.json`, `workbench.settings.applyToAllProfiles`, and `settingsSync.ignoredSettings`. This makes the values effective on the selected computer without sending its paths through Settings Sync. A generated export containing any UI seed is private and non-portable; use `-NoUiState` when a portable UI-free artifact is required.
 
-`ProfileComposer.ps1 capture-ui-state [<profile-id>] <export-path>` validates a manually exported `.code-profile` and stores only its opaque `globalState` resource at `machine/local/ui-state/<profile>/seed.code-profile`. When the recipe ID is omitted, the CLI reads `code --status` and accepts exactly one active profile name matching a recipe ID or display name. Zero or multiple matches fail safely. The source settings, extensions, keybindings, name, and path are not copied. `-UiStateProfile <id>` reuses a stored seed during `compose` or `compose-all`; `-UiStateFromProfile <path>` remains available for a one-off build. This is copy-on-create, not inheritance: VS Code owns each profile's UI after import, later layout changes do not propagate, and views introduced by other extensions use their defaults. Stored and generated UI-seeded files are private because `globalState` can include extension or account-related state.
+`ProfileComposer.ps1 capture-ui-state [<profile-id>] <export-path>` validates a manually exported `.code-profile` and stores only its opaque `globalState` resource at `machine/local/ui-state/<profile>/seed.code-profile`. When the recipe ID is omitted, the CLI reads `code --status` and accepts exactly one active profile name matching a recipe ID or display name. Zero or multiple matches fail safely. The source settings, extensions, keybindings, name, and path are not copied. Normal composition automatically uses the stored seed named by `composer.jsonc.defaultUiStateProfile`; `-UiStateProfile <id>` is an advanced per-run override, `-UiStateFromProfile <path>` is a one-off compatibility source, and `-NoUiState` explicitly omits UI state. This is copy-on-compose, not live inheritance: updating Main's seed and rerunning `compose-all` updates every generated artifact, but already imported profiles remain unchanged until reviewed re-import or replacement. Views introduced by other extensions use their defaults. Stored and generated UI-seeded files are private because `globalState` can include extension or account-related state.
 
 `ProfileComposer.ps1 sync [<profile-id>] <export-path>` is the reviewed reverse
 path. It consumes settings, extensions, keybindings, and optional
@@ -186,7 +205,12 @@ File → Preferences → Profiles
 → Create Profile
 ```
 
-By default, UI placement is not included. When an explicit UI seed is supplied, the composer passes the snapshot through without interpreting or merging it. After import, VS Code owns and syncs the resulting live UI state. Review every import preview: re-importing may create a profile or replace selected profile resources according to VS Code's current import workflow.
+When the configured local default seed exists, UI placement is included
+automatically. The composer passes one opaque snapshot through without
+interpreting or merging it. After import, VS Code owns and syncs the resulting
+live UI state. Review every import preview: re-importing may create a profile or
+replace selected profile resources according to VS Code's current import
+workflow.
 
 Portable custom keybindings are canonical component inputs. `components/main/keybindings.jsonc` supplies the editor, notebook, panel, Markdown, and spelling shortcuts inherited by every recipe, including `Ctrl+Shift+S` for cSpell suggestions; focused extension commands such as SQL Server's IntelliSense-cache rebuild shortcut stay in their owning component. A reviewed sync can add, remove, or exactly order recipe-specific bindings without changing those shared sources.
 

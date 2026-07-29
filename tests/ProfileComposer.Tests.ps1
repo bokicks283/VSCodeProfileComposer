@@ -12,6 +12,7 @@ BeforeAll {
         Get-ChildItem -LiteralPath (Join-Path $fixture 'machine/local') -Filter '*.jsonc' -File -ErrorAction SilentlyContinue |
             Remove-Item -Force
         Remove-Item -LiteralPath (Join-Path $fixture 'machine/local/.default-machine') -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath (Join-Path $fixture 'machine/local/ui-state') -Recurse -Force -ErrorAction SilentlyContinue
         Copy-Item -LiteralPath (Join-Path $script:RepositoryRoot 'composer.jsonc') -Destination $fixture
         return $fixture
     }
@@ -77,6 +78,18 @@ BeforeAll {
         $template = New-CodeProfileTemplate @parameters
         Write-TestFile $Path (ConvertTo-Json -InputObject $template -Depth 100)
         return $Path
+    }
+
+    function Read-ComposedProfileResources {
+        param(
+            [Parameter(Mandatory)][string]$RepositoryRoot,
+            [Parameter(Mandatory)][string]$Profile
+        )
+        $definition = @(Get-ProfileDefinitions $RepositoryRoot | Where-Object Id -ieq $Profile)
+        if ($definition.Count -ne 1) { throw "Expected one profile definition for '$Profile'." }
+        $recipe = Read-ProfileRecipe $definition[0].Path
+        $fileName = Get-CodeProfileFileName $recipe.Name
+        return Read-CodeProfileResources (Join-Path $RepositoryRoot "build/profiles/$($definition[0].Id)/$fileName")
     }
 }
 
@@ -185,10 +198,12 @@ Describe 'Global settings ownership' {
         $result = Invoke-GlobalSettingsComposition $fixture
         $output = Join-Path $fixture 'build/global'
         Test-Path -LiteralPath (Join-Path $output 'settings.json') | Should -BeTrue
-        Test-Path -LiteralPath (Join-Path $output 'manifest.json') | Should -BeTrue
-        Test-Path -LiteralPath (Join-Path $output 'overrides.json') | Should -BeTrue
+        @(Get-ChildItem -LiteralPath $output -File).Count | Should -Be 1
         $settings = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $output 'settings.json')))
         $result.settingCount | Should -Be @($settings['workbench.settings.applyToAllProfiles']).Count
+        foreach ($key in @($settings.Keys | Where-Object { $_ -ne 'workbench.settings.applyToAllProfiles' })) {
+            $settings['workbench.settings.applyToAllProfiles'] | Should -Contain $key
+        }
         $settings['terminal.integrated.confirmOnKill'] | Should -Be 'never'
     }
 
@@ -198,8 +213,6 @@ Describe 'Global settings ownership' {
         Write-TestFile $machine '{ "machine.tool.path": "D:\\Tools\\tool.exe", "window.zoomLevel": 2, "terminal.integrated.confirmOnKill": "always" }'
         $result = Invoke-GlobalSettingsComposition $fixture -MachineFile $machine
         $settings = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'build/global/settings.json')))
-        $manifest = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'build/global/manifest.json')))
-        $overrideReport = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'build/global/overrides.json')))
 
         $settings['machine.tool.path'] | Should -Be 'D:\Tools\tool.exe'
         $settings['window.zoomLevel'] | Should -Be 2
@@ -211,10 +224,7 @@ Describe 'Global settings ownership' {
         $settings['settingsSync.ignoredSettings'] | Should -Not -Contain '-window.zoomLevel'
         $result.machineSettingCount | Should -Be 3
         $result.overrideCount | Should -Be 1
-        $overrideReport.overrides[0].path | Should -Be '/terminal.integrated.confirmOnKill'
-        $overrideReport.overrides[0].previousSource | Should -Be 'global/settings.jsonc'
-        $manifest.machineOverlay.valuesRecorded | Should -BeFalse
-        $manifest.settingsSyncPolicy | Should -Be 'machine-settings-ignored-and-applied-to-all-profiles'
+        @(Get-ChildItem -LiteralPath (Join-Path $fixture 'build/global') -File).Name | Should -Be @('settings.json')
     }
 
     It 'rejects machine overlays that try to manage composer-owned lists' {
@@ -226,7 +236,7 @@ Describe 'Global settings ownership' {
     It 'omits globally applied settings from generated named profiles' {
         $fixture = New-ComposerFixture 'global-not-in-profile'
         Invoke-ProfileComposition $fixture main -Platform windows | Out-Null
-        $settings = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'build/profiles/main/settings.json')))
+        $settings = (Read-ComposedProfileResources $fixture main).Settings
         $settings.Contains('terminal.integrated.confirmOnKill') | Should -BeFalse
         $settings.Contains('workbench.settings.applyToAllProfiles') | Should -BeFalse
     }
@@ -305,7 +315,7 @@ Describe 'Repository keybinding ownership' {
     It 'inherits the shared custom bindings through Main' {
         $fixture = New-ComposerFixture 'shared-keybindings'
         Invoke-ProfileComposition $fixture main -Platform windows | Out-Null
-        $bindings = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'build/profiles/main/keybindings.json')))
+        $bindings = (Read-ComposedProfileResources $fixture main).Keybindings
         $bindings.Count | Should -Be 22
         $bindings.command | Should -Contain 'cSpell.suggestSpellingCorrections'
         $bindings.command | Should -Contain 'editor.foldAll'
@@ -321,8 +331,8 @@ Describe 'Repository keybinding ownership' {
         $fixture = New-ComposerFixture 'focused-keybindings'
         Invoke-ProfileComposition $fixture sql-server -Platform windows | Out-Null
         Invoke-ProfileComposition $fixture python -Platform windows | Out-Null
-        $sqlBindings = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'build/profiles/sql-server/keybindings.json')))
-        $pythonBindings = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'build/profiles/python/keybindings.json')))
+        $sqlBindings = (Read-ComposedProfileResources $fixture sql-server).Keybindings
+        $pythonBindings = (Read-ComposedProfileResources $fixture python).Keybindings
         $sqlBindings.Count | Should -Be 23
         $sqlBindings.command | Should -Contain 'mssql.rebuildIntelliSenseCache'
         $pythonBindings.command | Should -Not -Contain 'mssql.rebuildIntelliSenseCache'
@@ -338,6 +348,7 @@ Describe 'Safe repository transformations' {
         Write-TestFile (Join-Path $fixture 'profiles/python.extensions.jsonc') '{ "add": ["sample.extension"], "remove": [] }'
         Write-TestFile (Join-Path $fixture 'profiles/python.keybindings.jsonc') '{ "add": [{"key":"ctrl+alt+p","command":"sample.command"}], "remove": [] }'
         Write-TestFile (Join-Path $fixture 'machine/local/ui-state/python/seed.code-profile') '{ "name": "seed", "globalState": "{\"layout\":true}" }'
+        Write-TestFile (Join-Path $fixture 'composer.jsonc') '{ "sharedDefaultComponent": "main", "defaultUiStateProfile": "python" }'
 
         $plan = Rename-ComposerProfile $fixture python python-work -DryRun
         $plan.changes.source | Should -Contain 'profiles/python.yaml'
@@ -347,6 +358,7 @@ Describe 'Safe repository transformations' {
         $plan.changes.source | Should -Contain 'profiles/python.extensions.jsonc'
         $plan.changes.source | Should -Contain 'profiles/python.keybindings.jsonc'
         $plan.changes.source | Should -Contain 'machine/local/ui-state/python'
+        $plan.changes.source | Should -Contain 'composer.jsonc'
         Test-Path -LiteralPath (Join-Path $fixture 'profiles/python.yaml') | Should -BeTrue
         Test-Path -LiteralPath (Join-Path $fixture 'profiles/python-work.yaml') | Should -BeFalse
 
@@ -359,6 +371,8 @@ Describe 'Safe repository transformations' {
         Test-Path -LiteralPath (Join-Path $fixture 'profiles/python-work.extensions.jsonc') | Should -BeTrue
         Test-Path -LiteralPath (Join-Path $fixture 'profiles/python-work.keybindings.jsonc') | Should -BeTrue
         Test-Path -LiteralPath (Join-Path $fixture 'machine/local/ui-state/python-work/seed.code-profile') | Should -BeTrue
+        $renamedConfiguration = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'composer.jsonc')))
+        $renamedConfiguration['defaultUiStateProfile'] | Should -BeExactly 'python-work'
         (Test-ComposerRepository $fixture).errors.Count | Should -Be 0
     }
 
@@ -430,9 +444,11 @@ Describe 'Safe repository transformations' {
 
     It 'detects missing configured defaults and recipe/default inconsistencies' {
         $fixture = New-ComposerFixture 'invalid-default-ownership'
-        Write-TestFile (Join-Path $fixture 'composer.jsonc') '{ "sharedDefaultComponent": "missing" }'
+        Write-TestFile (Join-Path $fixture 'composer.jsonc') '{ "sharedDefaultComponent": "missing", "defaultUiStateProfile": "main" }'
         (Test-ComposerRepository $fixture).errors.code | Should -Contain 'missing-shared-default-component'
-        Write-TestFile (Join-Path $fixture 'composer.jsonc') '{ "sharedDefaultComponent": "main" }'
+        Write-TestFile (Join-Path $fixture 'composer.jsonc') '{ "sharedDefaultComponent": "main", "defaultUiStateProfile": "missing" }'
+        (Test-ComposerRepository $fixture).errors.code | Should -Contain 'missing-default-ui-state-profile'
+        Write-TestFile (Join-Path $fixture 'composer.jsonc') '{ "sharedDefaultComponent": "main", "defaultUiStateProfile": "main" }'
         Write-TestFile (Join-Path $fixture 'profiles/python.yaml') "name: Python`ncomponents:`n  - python`n  - main`n"
         (Test-ComposerRepository $fixture).errors.code | Should -Contain 'shared-default-not-first'
     }
@@ -558,7 +574,7 @@ Describe 'Layer ordering and safe output' {
         $fixture = New-ComposerFixture 'platform-order'
         Write-TestFile (Join-Path $fixture 'profiles/main.settings.jsonc') '{ "terminal.integrated.defaultProfile.windows": "Profile Shell" }'
         Invoke-ProfileComposition $fixture main -Platform windows | Out-Null
-        $settings = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'build/profiles/main/settings.json')))
+        $settings = (Read-ComposedProfileResources $fixture main).Settings
         $settings['terminal.integrated.defaultProfile.windows'] | Should -Be 'PowerShell 7'
     }
 
@@ -567,7 +583,7 @@ Describe 'Layer ordering and safe output' {
         $machine = Join-Path $fixture 'machine/local/test.jsonc'
         Write-TestFile $machine '{ "terminal.integrated.defaultProfile.windows": "Machine Shell" }'
         Invoke-ProfileComposition $fixture main -Platform windows -MachineFile $machine | Out-Null
-        $settings = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'build/profiles/main/settings.json')))
+        $settings = (Read-ComposedProfileResources $fixture main).Settings
         $settings.Contains('terminal.integrated.defaultProfile.windows') | Should -BeFalse
     }
 
@@ -575,14 +591,9 @@ Describe 'Layer ordering and safe output' {
         $fixture = New-ComposerFixture 'named-machine'
         Write-TestFile (Join-Path $fixture 'machine/local/gaming-server.jsonc') '{ "todo-tree.ripgrep.ripgrep": "D:\\Tools\\rg.exe" }'
         $result = Invoke-ProfileComposition $fixture main -Platform windows -Machine gaming-server
-        $settings = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'build/profiles/main/settings.json')))
-        $manifest = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'build/profiles/main/manifest.json')))
+        $settings = (Read-ComposedProfileResources $fixture main).Settings
         $settings.Contains('todo-tree.ripgrep.ripgrep') | Should -BeFalse
         $result.machineId | Should -Be 'gaming-server'
-        $manifest.machineOverlay.id | Should -Be 'gaming-server'
-        $manifest.machineOverlay.selection | Should -Be 'named-machine'
-        $manifest.machineOverlay.appliedTo | Should -Be 'build/global/settings.json'
-        $manifest.machineOverlay.includedInProfileSettings | Should -BeFalse
     }
 
     It 'lists named machines and rejects missing or conflicting selections' {
@@ -600,17 +611,18 @@ Describe 'Layer ordering and safe output' {
         Write-TestFile $sentinel 'stale'
         Invoke-ProfileComposition $fixture main | Out-Null
         Test-Path -LiteralPath $sentinel | Should -BeFalse
-        Test-Path -LiteralPath (Join-Path $fixture 'build/profiles/main/manifest.json') | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $fixture 'build/profiles/main/Main.code-profile') | Should -BeTrue
+        @(Get-ChildItem -LiteralPath (Join-Path $fixture 'build/profiles/main') -File).Count | Should -Be 1
     }
 
     It 'preserves the previous valid output when composition fails' {
         $fixture = New-ComposerFixture 'failed-preserves'
         Invoke-ProfileComposition $fixture main | Out-Null
-        $settingsPath = Join-Path $fixture 'build/profiles/main/settings.json'
-        $before = [System.IO.File]::ReadAllText($settingsPath)
+        $exportPath = Join-Path $fixture 'build/profiles/main/Main.code-profile'
+        $before = [System.IO.File]::ReadAllText($exportPath)
         Write-TestFile (Join-Path $fixture 'components/main/settings.jsonc') '{ invalid jsonc'
         { Invoke-ProfileComposition $fixture main } | Should -Throw
-        [System.IO.File]::ReadAllText($settingsPath) | Should -BeExactly $before
+        [System.IO.File]::ReadAllText($exportPath) | Should -BeExactly $before
     }
 
     It 'does not create output during dry run' {
@@ -642,14 +654,12 @@ Describe 'Current profile acceptance compositions' {
         { Invoke-ProfileComposition $fixture python -Platform windows } | Should -Not -Throw
     }
 
-    It 'writes the complete expected output structure' {
+    It 'writes only the finished importable profile artifact' {
         $fixture = New-ComposerFixture 'output-structure'
         Invoke-ProfileComposition $fixture main -Platform windows | Out-Null
         $output = Join-Path $fixture 'build/profiles/main'
-        foreach ($name in @('settings.json', 'extensions.txt', 'keybindings.json', 'manifest.json', 'overrides.json', 'validation.json')) {
-            Test-Path -LiteralPath (Join-Path $output $name) | Should -BeTrue
-        }
-        (ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $output 'keybindings.json')))) -is [System.Array] | Should -BeTrue
+        @(Get-ChildItem -LiteralPath $output -File).Name | Should -Be @('Main.code-profile')
+        Test-CodeProfileTemplate (Join-Path $output 'Main.code-profile') | Should -BeTrue
     }
 }
 
@@ -673,34 +683,34 @@ Describe 'VS Code .code-profile export' {
 
     It 'generates an export for Main' {
         $fixture = New-ComposerFixture 'export-main'
-        $result = Invoke-ProfileComposition $fixture main -Platform windows -ExportCodeProfile
+        $result = Invoke-ProfileComposition $fixture main -Platform windows
         $result.codeProfileExportPath | Should -Be 'build/profiles/main/Main.code-profile'
         Test-Path -LiteralPath (Join-Path $fixture $result.codeProfileExportPath) | Should -BeTrue
     }
 
     It 'generates an export for Unreal' {
         $fixture = New-ComposerFixture 'export-unreal'
-        $result = Invoke-ProfileComposition $fixture unreal -Platform windows -ExportCodeProfile
+        $result = Invoke-ProfileComposition $fixture unreal -Platform windows
         $result.codeProfileExportPath | Should -Be 'build/profiles/unreal/Unreal-Engine.code-profile'
         { Test-CodeProfileTemplate (Join-Path $fixture $result.codeProfileExportPath) } | Should -Not -Throw
     }
 
-    It 'embeds the complete generated settings JSON' {
+    It 'embeds the complete composed settings resource' {
         $fixture = New-ComposerFixture 'export-settings'
-        Invoke-ProfileComposition $fixture main -Platform windows -ExportCodeProfile | Out-Null
-        $output = Join-Path $fixture 'build/profiles/main'
-        $profile = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $output 'Main.code-profile')))
-        $resource = ConvertFrom-JsonC $profile.settings
-        $resource.settings | Should -BeExactly ([System.IO.File]::ReadAllText((Join-Path $output 'settings.json')))
+        Invoke-ProfileComposition $fixture main -Platform windows | Out-Null
+        $resources = Read-ComposedProfileResources $fixture main
+        $firstOwnedSetting = [string]@((ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'components/main/settings.jsonc')))).Keys)[0]
+        $resources.Settings.Contains($firstOwnedSetting) | Should -BeTrue
+        $resources.Settings.Contains('workbench.settings.applyToAllProfiles') | Should -BeFalse
     }
 
     It 'converts extension IDs to VS Code identifier resources' {
         $fixture = New-ComposerFixture 'export-extensions'
-        Invoke-ProfileComposition $fixture main -Platform windows -ExportCodeProfile | Out-Null
+        Invoke-ProfileComposition $fixture main -Platform windows | Out-Null
         $output = Join-Path $fixture 'build/profiles/main'
         $profile = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $output 'Main.code-profile')))
         $resources = ConvertFrom-JsonC $profile.extensions
-        $expected = [System.IO.File]::ReadAllLines((Join-Path $output 'extensions.txt'))[0]
+        $expected = [System.IO.File]::ReadAllLines((Join-Path $fixture 'components/main/extensions.txt'))[0]
         $resources[0].identifier.id | Should -BeExactly $expected
         $resources[0].identifier.Contains('uuid') | Should -BeFalse
     }
@@ -708,7 +718,7 @@ Describe 'VS Code .code-profile export' {
     It 'embeds generated keybindings and Windows platform metadata' {
         $fixture = New-ComposerFixture 'export-keybindings'
         Write-TestFile (Join-Path $fixture 'components/main/keybindings.jsonc') '[{ "key": "ctrl+alt+t", "command": "workbench.action.files.newUntitledFile" }]'
-        Invoke-ProfileComposition $fixture main -Platform windows -ExportCodeProfile | Out-Null
+        Invoke-ProfileComposition $fixture main -Platform windows | Out-Null
         $output = Join-Path $fixture 'build/profiles/main'
         $profile = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $output 'Main.code-profile')))
         $resource = ConvertFrom-JsonC $profile.keybindings
@@ -720,7 +730,8 @@ Describe 'VS Code .code-profile export' {
     It 'uses VS Code empty-array keybinding representation when no bindings exist' {
         $fixture = New-ComposerFixture 'export-empty-keybindings'
         Write-TestFile (Join-Path $fixture 'components/main/keybindings.jsonc') '[]'
-        Invoke-ProfileComposition $fixture main -Platform windows -ExportCodeProfile | Out-Null
+        Remove-Item -LiteralPath (Join-Path $fixture 'profiles/main.keybindings.jsonc') -Force -ErrorAction SilentlyContinue
+        Invoke-ProfileComposition $fixture main -Platform windows | Out-Null
         $profile = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'build/profiles/main/Main.code-profile')))
         $resource = ConvertFrom-JsonC $profile.keybindings
         $keys = ConvertFrom-JsonC $resource.keybindings
@@ -732,24 +743,20 @@ Describe 'VS Code .code-profile export' {
         $fixture = New-ComposerFixture 'export-machine'
         $machine = Join-Path $fixture 'machine/local/test.jsonc'
         Write-TestFile $machine '{ "terminal.integrated.defaultProfile.windows": "Machine Shell" }'
-        Invoke-ProfileComposition $fixture main -Platform windows -MachineFile $machine -ExportCodeProfile | Out-Null
+        Invoke-ProfileComposition $fixture main -Platform windows -MachineFile $machine | Out-Null
         $output = Join-Path $fixture 'build/profiles/main'
         $profile = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $output 'Main.code-profile')))
         $settingsResource = ConvertFrom-JsonC $profile.settings
         $settings = ConvertFrom-JsonC $settingsResource.settings
-        $manifest = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $output 'manifest.json')))
         $settings.Contains('terminal.integrated.defaultProfile.windows') | Should -BeFalse
-        $manifest.codeProfileExport.machineOverlayIncluded | Should -BeFalse
-        $manifest.codeProfileExport.machineSettingsDelivery | Should -Be 'built-in-default-application-settings'
-        $manifest.codeProfileExport.portability | Should -Be 'portable'
+        @(Get-ChildItem -LiteralPath $output -File).Name | Should -Be @('Main.code-profile')
     }
 
-    It 'classifies an export without a machine overlay as portable' {
+    It 'keeps the default export portable and free of UI state' {
         $fixture = New-ComposerFixture 'export-portable'
-        Invoke-ProfileComposition $fixture main -Platform windows -ExportCodeProfile | Out-Null
-        $manifest = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'build/profiles/main/manifest.json')))
-        $manifest.codeProfileExport.machineOverlayIncluded | Should -BeFalse
-        $manifest.codeProfileExport.portability | Should -Be 'portable'
+        Invoke-ProfileComposition $fixture main -Platform windows | Out-Null
+        $profile = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'build/profiles/main/Main.code-profile')))
+        $profile.Keys | Should -Be @('name', 'settings', 'keybindings', 'extensions')
     }
 
     It 'creates deterministic safe filenames' {
@@ -768,35 +775,33 @@ Describe 'VS Code .code-profile export' {
 
     It 'reports the planned export but writes nothing during dry run' {
         $fixture = New-ComposerFixture 'export-dry-run'
-        $result = Invoke-ProfileComposition $fixture main -Platform windows -ExportCodeProfile -DryRun
+        $result = Invoke-ProfileComposition $fixture main -Platform windows -DryRun
         $result.codeProfileExportPath | Should -Be 'build/profiles/main/Main.code-profile'
         Test-Path -LiteralPath (Join-Path $fixture 'build') | Should -BeFalse
     }
 
     It 'preserves the previous valid export when a later generation fails' {
         $fixture = New-ComposerFixture 'export-failed-preserves'
-        Invoke-ProfileComposition $fixture main -Platform windows -ExportCodeProfile | Out-Null
+        Invoke-ProfileComposition $fixture main -Platform windows | Out-Null
         $exportPath = Join-Path $fixture 'build/profiles/main/Main.code-profile'
         $before = [System.IO.File]::ReadAllText($exportPath)
         Write-TestFile (Join-Path $fixture 'components/main/settings.jsonc') '{ invalid jsonc'
-        { Invoke-ProfileComposition $fixture main -Platform windows -ExportCodeProfile } | Should -Throw
+        { Invoke-ProfileComposition $fixture main -Platform windows } | Should -Throw
         [System.IO.File]::ReadAllText($exportPath) | Should -BeExactly $before
     }
 
-    It 'records the exact export hash and schema metadata in the manifest' {
+    It 'produces deterministic finished profile content' {
         $fixture = New-ComposerFixture 'export-hash'
-        Invoke-ProfileComposition $fixture main -Platform windows -ExportCodeProfile | Out-Null
-        $output = Join-Path $fixture 'build/profiles/main'
-        $manifest = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $output 'manifest.json')))
-        $actual = (Get-FileHash -LiteralPath (Join-Path $output 'Main.code-profile') -Algorithm SHA256).Hash.ToLowerInvariant()
-        $manifest.codeProfileExport.sha256 | Should -BeExactly $actual
-        $manifest.codeProfileExport.schema | Should -Be 'vscode-user-data-profile-template'
-        $manifest.codeProfileExport.schemaVersion | Should -Be 'unversioned'
+        Invoke-ProfileComposition $fixture main -Platform windows | Out-Null
+        $path = Join-Path $fixture 'build/profiles/main/Main.code-profile'
+        $before = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash
+        Invoke-ProfileComposition $fixture main -Platform windows | Out-Null
+        (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash | Should -BeExactly $before
     }
 
     It 'parses generated exports as valid JSON and validates nested resources' {
         $fixture = New-ComposerFixture 'export-valid-json'
-        Invoke-ProfileComposition $fixture main -Platform windows -ExportCodeProfile | Out-Null
+        Invoke-ProfileComposition $fixture main -Platform windows | Out-Null
         $path = Join-Path $fixture 'build/profiles/main/Main.code-profile'
         { [System.Text.Json.JsonDocument]::Parse([System.IO.File]::ReadAllText($path)).Dispose() } | Should -Not -Throw
         Test-CodeProfileTemplate $path | Should -BeTrue
@@ -830,22 +835,75 @@ Describe 'VS Code .code-profile export' {
         { Test-CodeProfileTemplate $path } | Should -Throw '*unsupported metadata field*futureResource*'
     }
 
-    It 'omits UI state and rejects accidental UI-state source files' {
+    It 'omits UI state when the configured local seed is unavailable and rejects component UI sources' {
         $fixture = New-ComposerFixture 'export-no-ui-state'
-        Invoke-ProfileComposition $fixture main -Platform windows -ExportCodeProfile | Out-Null
+        $result = Invoke-ProfileComposition $fixture main -Platform windows
         $profile = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'build/profiles/main/Main.code-profile')))
         $profile.Contains('globalState') | Should -BeFalse
-        $manifest = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'build/profiles/main/manifest.json')))
-        $manifest.codeProfileExport.uiStatePolicy | Should -Be 'managed-by-vscode'
+        $result.uiStateSource | Should -BeExactly 'configured-default-missing:main'
         Write-TestFile (Join-Path $fixture 'components/main/ui-state.jsonc') '{}'
         (Test-ComposerRepository $fixture).errors.code | Should -Contain 'unsupported-ui-state-source'
+    }
+
+    It 'automatically propagates the configured default UI seed to every composed profile' {
+        $fixture = New-ComposerFixture 'automatic-default-ui-state'
+        $sourcePath = Join-Path $TestDrive 'default-layout.code-profile'
+        $firstGlobalState = New-UiStateSeedExport $sourcePath -GlobalState '{"layout":"first"}'
+        Save-ProfileUiStateSeed -RepositoryRoot $fixture -Profile main -SourceProfileExport $sourcePath | Out-Null
+
+        $cli = Join-Path $script:RepositoryRoot 'scripts/ProfileComposer.ps1'
+        $composeAll = @(& pwsh -NoProfile -NonInteractive -File $cli compose-all -RepositoryRoot $fixture -Platform windows 2>&1)
+        $LASTEXITCODE | Should -Be 0 -Because ($composeAll -join ' | ')
+        $composeAll -join "`n" | Should -Match '\[UI: configured-default:main\]'
+        $composedProfiles = @(Get-ChildItem (Join-Path $fixture 'build/profiles') -Recurse -File -Filter '*.code-profile')
+        $composedProfiles.Count | Should -Be (Get-ProfileDefinitions $fixture).Count
+        foreach ($composedProfile in $composedProfiles) {
+            (ConvertFrom-JsonC ([System.IO.File]::ReadAllText($composedProfile.FullName))).globalState |
+                Should -BeExactly $firstGlobalState
+        }
+
+        & pwsh -NoProfile -NonInteractive -File $cli compose-all -RepositoryRoot $fixture -Platform windows -NoUiState 2>&1 |
+            Out-Null
+        $LASTEXITCODE | Should -Be 0
+        foreach ($composedProfile in @(Get-ChildItem (Join-Path $fixture 'build/profiles') -Recurse -File -Filter '*.code-profile')) {
+            (ConvertFrom-JsonC ([System.IO.File]::ReadAllText($composedProfile.FullName))).Contains('globalState') |
+                Should -BeFalse
+        }
+
+        $updatedGlobalState = New-UiStateSeedExport $sourcePath -GlobalState '{"layout":"updated"}'
+        Save-ProfileUiStateSeed -RepositoryRoot $fixture -Profile main -SourceProfileExport $sourcePath | Out-Null
+        $updated = Invoke-ProfileComposition $fixture python -Platform windows
+        (ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture $updated.codeProfileExportPath)))).globalState |
+            Should -BeExactly $updatedGlobalState
+    }
+
+    It 'supports explicit UI overrides and an explicit no-UI opt-out' {
+        $fixture = New-ComposerFixture 'automatic-ui-state-precedence'
+        $mainSource = Join-Path $TestDrive 'main-layout.code-profile'
+        $pythonSource = Join-Path $TestDrive 'python-layout.code-profile'
+        New-UiStateSeedExport $mainSource -GlobalState '{"layout":"main"}' | Out-Null
+        $pythonGlobalState = New-UiStateSeedExport $pythonSource -GlobalState '{"layout":"python"}'
+        Save-ProfileUiStateSeed $fixture main $mainSource | Out-Null
+        Save-ProfileUiStateSeed $fixture python $pythonSource | Out-Null
+
+        $override = Invoke-ProfileComposition $fixture unreal -UiStateProfile python
+        $override.uiStateSource | Should -BeExactly 'explicit-profile:python'
+        (ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture $override.codeProfileExportPath)))).globalState |
+            Should -BeExactly $pythonGlobalState
+
+        $disabled = Invoke-ProfileComposition $fixture unreal -NoUiState
+        $disabled.uiStateSource | Should -BeExactly 'disabled'
+        (ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture $disabled.codeProfileExportPath)))).Contains('globalState') |
+            Should -BeFalse
+        { Invoke-ProfileComposition $fixture unreal -NoUiState -UiStateProfile main } |
+            Should -Throw '*cannot be combined*'
     }
 
     It 'copies an explicitly supplied UI-state seed without copying other resources' {
         $fixture = New-ComposerFixture 'export-ui-seed'
         $seedPath = Join-Path $TestDrive 'layout-seed.code-profile'
         $expectedGlobalState = New-UiStateSeedExport $seedPath
-        Invoke-ProfileComposition $fixture main -Platform windows -ExportCodeProfile -UiStateFromProfile $seedPath | Out-Null
+        Invoke-ProfileComposition $fixture main -Platform windows -UiStateFromProfile $seedPath | Out-Null
 
         $output = Join-Path $fixture 'build/profiles/main'
         $profile = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $output 'Main.code-profile')))
@@ -870,13 +928,10 @@ Describe 'VS Code .code-profile export' {
         $stored.globalState | Should -BeExactly $expectedGlobalState
         $storedText | Should -Not -Match ([regex]::Escape($sourcePath))
 
-        Invoke-ProfileComposition $fixture python-database -Platform windows -ExportCodeProfile -UiStateProfile main | Out-Null
+        Invoke-ProfileComposition $fixture python-database -Platform windows -UiStateProfile main | Out-Null
         $output = Join-Path $fixture 'build/profiles/python-database'
         $profile = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $output 'Python-Database.code-profile')))
-        $manifest = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $output 'manifest.json')))
         $profile.globalState | Should -BeExactly $expectedGlobalState
-        $manifest.codeProfileExport.uiStateSeed.source | Should -Be 'stored-local-profile-ui-state'
-        $manifest.codeProfileExport.uiStateSeed.profileId | Should -Be 'main'
     }
 
     It 'validates stored UI-state capture and selection without partial writes' {
@@ -894,52 +949,46 @@ Describe 'VS Code .code-profile export' {
         (Test-Path -LiteralPath $storedPath -PathType Leaf) | Should -Be $existedBefore
         if ($existedBefore) { [System.IO.File]::ReadAllText($storedPath) | Should -BeExactly $contentBefore }
         { Save-ProfileUiStateSeed -RepositoryRoot $fixture -Profile missing -SourceProfileExport $sourcePath } | Should -Throw '*Unknown profile*'
-        { Invoke-ProfileComposition $fixture main -UiStateProfile main } | Should -Throw '*requires -ExportCodeProfile*'
+        Save-ProfileUiStateSeed -RepositoryRoot $fixture -Profile main -SourceProfileExport $sourcePath | Out-Null
+        { Invoke-ProfileComposition $fixture main -UiStateProfile main } | Should -Not -Throw
         Write-TestFile (Join-Path $fixture 'profiles/no-ui-seed.yaml') "name: No UI Seed`ncomponents:`n  - main`n"
-        { Invoke-ProfileComposition $fixture no-ui-seed -ExportCodeProfile -UiStateProfile no-ui-seed } | Should -Throw '*does not exist*'
-        { Invoke-ProfileComposition $fixture main -ExportCodeProfile -UiStateProfile main -UiStateFromProfile $sourcePath } | Should -Throw '*cannot be used together*'
+        { Invoke-ProfileComposition $fixture no-ui-seed -UiStateProfile no-ui-seed } | Should -Throw '*does not exist*'
+        { Invoke-ProfileComposition $fixture main -UiStateProfile main -UiStateFromProfile $sourcePath } | Should -Throw '*cannot be used together*'
     }
 
-    It 'records only UI-state seed policy and content hash, never its source path' {
+    It 'never records a UI-state seed source path in the finished artifact' {
         $fixture = New-ComposerFixture 'export-ui-seed-manifest'
         $privateDirectory = Join-Path $TestDrive 'personal-private-location'
         $seedPath = Join-Path $privateDirectory 'signed-in-layout.code-profile'
         $globalState = New-UiStateSeedExport $seedPath
-        Invoke-ProfileComposition $fixture main -Platform windows -ExportCodeProfile -UiStateFromProfile $seedPath | Out-Null
+        Invoke-ProfileComposition $fixture main -Platform windows -UiStateFromProfile $seedPath | Out-Null
 
         $output = Join-Path $fixture 'build/profiles/main'
-        $manifestText = [System.IO.File]::ReadAllText((Join-Path $output 'manifest.json'))
-        $manifest = ConvertFrom-JsonC $manifestText
-        $expectedHash = [Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData([System.Text.UTF8Encoding]::new($false).GetBytes($globalState))).ToLowerInvariant()
-        $manifest.codeProfileExport.uiStateSeeded | Should -BeTrue
-        $manifest.codeProfileExport.uiStatePolicy | Should -Be 'seed-on-import-then-managed-by-vscode'
-        $manifest.codeProfileExport.portability | Should -Be 'ui-state-seed-included'
-        $manifest.codeProfileExport.uiStateSeed.sha256 | Should -BeExactly $expectedHash
-        $manifest.codeProfileExport.uiStateSeed.sourcePathRecorded | Should -BeFalse
-        $manifestText | Should -Not -Match ([regex]::Escape($seedPath))
-        $manifestText | Should -Not -Match 'personal-private-location'
+        $profileText = [System.IO.File]::ReadAllText((Join-Path $output 'Main.code-profile'))
+        (ConvertFrom-JsonC $profileText).globalState | Should -BeExactly $globalState
+        $profileText | Should -Not -Match ([regex]::Escape($seedPath))
+        $profileText | Should -Not -Match 'personal-private-location'
     }
 
-    It 'requires export mode and a valid profile export containing globalState' {
+    It 'requires a valid profile export containing globalState' {
         $fixture = New-ComposerFixture 'export-ui-seed-validation'
         $missing = Join-Path $TestDrive 'missing.code-profile'
-        { Invoke-ProfileComposition $fixture main -UiStateFromProfile $missing } | Should -Throw '*requires -ExportCodeProfile*'
-        { Invoke-ProfileComposition $fixture main -ExportCodeProfile -UiStateFromProfile $missing } | Should -Throw '*does not exist*'
+        { Invoke-ProfileComposition $fixture main -UiStateFromProfile $missing } | Should -Throw '*does not exist*'
 
         $noState = Join-Path $TestDrive 'no-state.code-profile'
         Write-TestFile $noState '{"name":"No State"}'
-        { Invoke-ProfileComposition $fixture main -ExportCodeProfile -UiStateFromProfile $noState } | Should -Throw '*does not contain*globalState*'
+        { Invoke-ProfileComposition $fixture main -UiStateFromProfile $noState } | Should -Throw '*does not contain*globalState*'
 
         $malformedState = Join-Path $TestDrive 'malformed-state.code-profile'
         New-UiStateSeedExport $malformedState -GlobalState '{bad json' | Out-Null
-        { Invoke-ProfileComposition $fixture main -ExportCodeProfile -UiStateFromProfile $malformedState } | Should -Throw '*Invalid JSONC*globalState*'
+        { Invoke-ProfileComposition $fixture main -UiStateFromProfile $malformedState } | Should -Throw '*Invalid JSONC*globalState*'
     }
 
     It 'validates a UI-state seed during dry run without writing output' {
         $fixture = New-ComposerFixture 'export-ui-seed-dry-run'
         $seedPath = Join-Path $TestDrive 'dry-layout.code-profile'
         New-UiStateSeedExport $seedPath | Out-Null
-        $result = Invoke-ProfileComposition $fixture main -Platform windows -ExportCodeProfile -UiStateFromProfile $seedPath -DryRun
+        $result = Invoke-ProfileComposition $fixture main -Platform windows -UiStateFromProfile $seedPath -DryRun
         $result.uiStateSeeded | Should -BeTrue
         Test-Path -LiteralPath (Join-Path $fixture 'build') | Should -BeFalse
     }
@@ -948,24 +997,21 @@ Describe 'VS Code .code-profile export' {
         $fixture = New-ComposerFixture 'export-ui-seed-failed-preserves'
         $seedPath = Join-Path $TestDrive 'valid-layout.code-profile'
         New-UiStateSeedExport $seedPath | Out-Null
-        Invoke-ProfileComposition $fixture main -Platform windows -ExportCodeProfile -UiStateFromProfile $seedPath | Out-Null
+        Invoke-ProfileComposition $fixture main -Platform windows -UiStateFromProfile $seedPath | Out-Null
         $exportPath = Join-Path $fixture 'build/profiles/main/Main.code-profile'
         $before = [System.IO.File]::ReadAllText($exportPath)
 
         $badSeedPath = Join-Path $TestDrive 'bad-layout.code-profile'
         New-UiStateSeedExport $badSeedPath -GlobalState '[]' | Out-Null
-        { Invoke-ProfileComposition $fixture main -Platform windows -ExportCodeProfile -UiStateFromProfile $badSeedPath } | Should -Throw '*must be an object*'
+        { Invoke-ProfileComposition $fixture main -Platform windows -UiStateFromProfile $badSeedPath } | Should -Throw '*must be an object*'
         [System.IO.File]::ReadAllText($exportPath) | Should -BeExactly $before
     }
 
-    It 'keeps ordinary composition export-free and otherwise unchanged' {
-        $fixture = New-ComposerFixture 'non-export-unchanged'
+    It 'always emits only the finished importable profile' {
+        $fixture = New-ComposerFixture 'default-finished-output'
         Invoke-ProfileComposition $fixture main -Platform windows | Out-Null
         $output = Join-Path $fixture 'build/profiles/main'
-        @(Get-ChildItem -LiteralPath $output -Filter '*.code-profile').Count | Should -Be 0
-        $manifest = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $output 'manifest.json')))
-        $manifest.codeProfileExportRequested | Should -BeFalse
-        $manifest.codeProfileExport | Should -BeNullOrEmpty
+        @(Get-ChildItem -LiteralPath $output -File).Name | Should -Be @('Main.code-profile')
     }
 }
 
@@ -995,7 +1041,9 @@ Describe 'Unified CLI and compatibility wrappers' {
         $validation -join "`n" | Should -Match '0 error'
         $compose = @(& pwsh -NoProfile -File $cli compose main -RepositoryRoot $fixture -Platform windows -DryRun 2>&1)
         $LASTEXITCODE | Should -Be 0
-        $compose -join "`n" | Should -Match "planned 'main'"
+        $compose | Should -HaveCount 2
+        $compose -join "`n" | Should -Match "DRY RUN 'main': build/profiles/main/Main\.code-profile"
+        $compose -join "`n" | Should -Match 'DRY RUN application settings: build/global/settings\.json'
         $rename = @(& pwsh -NoProfile -File $cli rename profile python python-work -RepositoryRoot $fixture -DryRun 2>&1)
         $LASTEXITCODE | Should -Be 0
         $rename -join "`n" | Should -Match 'MOVE profiles/python.yaml -> profiles/python-work.yaml'
@@ -1129,7 +1177,7 @@ Describe 'VS Code profile guidance and automatic UI-state capture selection' {
 Describe 'Profile export synchronization' {
     It 'syncs recipe deltas, application-owned settings, and opaque UI state transactionally' {
         $fixture = New-ComposerFixture 'sync-profile-export'
-        Invoke-ProfileComposition $fixture python -Platform windows -ExportCodeProfile | Out-Null
+        Invoke-ProfileComposition $fixture python -Platform windows | Out-Null
         $generatedExport = Join-Path $fixture 'build/profiles/python/Python.code-profile'
         $template = ConvertFrom-JsonC ([System.IO.File]::ReadAllText($generatedExport))
 
@@ -1168,15 +1216,7 @@ Describe 'Profile export synchronization' {
         $applicationSettings['terminal.integrated.confirmOnKill'] = 'editor'
         $applicationSettings['sync.fixture.global'] = 42
         $applicationSettings['machine.fixture.path'] = 'C:\Private\tool.exe'
-        $applicationSettings['workbench.settings.applyToAllProfiles'] = [string[]]@(
-            $applicationSettings['workbench.settings.applyToAllProfiles']
-            'sync.fixture.global'
-            'machine.fixture.path'
-        )
-        $applicationSettings['settingsSync.ignoredSettings'] = [string[]]@(
-            $applicationSettings['settingsSync.ignoredSettings']
-            'machine.fixture.path'
-        )
+        $applicationSettings['sync.fixture.apiToken'] = 'do-not-track'
         Write-TestFile (Join-Path $userDataPath 'settings.json') (ConvertTo-Json -InputObject $applicationSettings -Depth 100)
         New-MachineDefinition -RepositoryRoot $fixture -Id test-windows -Platform windows -Settings ([ordered]@{}) | Out-Null
 
@@ -1196,6 +1236,9 @@ Describe 'Profile export synchronization' {
         $result.counts.extensionRemovals | Should -Be 0
         $result.counts.keybindingsReplacedForOrder | Should -BeTrue
         $result.counts.machineOwnedGlobalSettingsSkipped | Should -Be 1
+        $result.counts.applicationSettingsAddedToApplyToAll | Should -Be 3
+        $result.counts.applicationSettingsClassifiedAsMachine | Should -Be 1
+        $result.counts.applicationSensitiveSettingsExcluded | Should -Be 1
         Test-Path -LiteralPath (Join-Path $fixture 'profiles/python.settings.replace.jsonc') | Should -BeFalse
         Test-Path -LiteralPath (Join-Path $fixture 'profiles/python.settings.remove.jsonc') | Should -BeFalse
         Test-Path -LiteralPath (Join-Path $fixture 'profiles/python.extensions.jsonc') | Should -BeFalse
@@ -1206,7 +1249,9 @@ Describe 'Profile export synchronization' {
         $global['terminal.integrated.confirmOnKill'] | Should -BeExactly 'editor'
         $global['sync.fixture.global'] | Should -Be 42
         $global.Contains('machine.fixture.path') | Should -BeFalse
+        $global.Contains('sync.fixture.apiToken') | Should -BeFalse
         $global['workbench.settings.applyToAllProfiles'] | Should -Not -Contain 'machine.fixture.path'
+        $global['settingsSync.ignoredSettings'] | Should -Contain 'machine.fixture.path'
         $pythonSettings = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'components/python/settings.jsonc')))
         $pythonSettings['sync.fixture.setting'].enabled | Should -BeTrue
         $pythonSettings.Contains('machine.fixture.path') | Should -BeFalse
@@ -1215,13 +1260,14 @@ Describe 'Profile export synchronization' {
         $result.counts.machineSettingsAdded | Should -Be 1
 
         Invoke-ProfileComposition $fixture python -Platform windows | Out-Null
-        $composedSettings = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'build/profiles/python/settings.json')))
+        $composed = Read-ComposedProfileResources $fixture python
+        $composedSettings = $composed.Settings
         $composedSettings.Contains($removedSetting) | Should -BeTrue
         $composedSettings['sync.fixture.setting'].enabled | Should -BeTrue
-        $composedExtensions = [System.IO.File]::ReadAllLines((Join-Path $fixture 'build/profiles/python/extensions.txt'))
+        $composedExtensions = $composed.Extensions
         $composedExtensions | Should -Contain 'sample.synced-extension'
         $composedExtensions | Should -Contain $removedExtension
-        $composedKeybindings = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'build/profiles/python/keybindings.json')))
+        $composedKeybindings = $composed.Keybindings
         @($composedKeybindings | ForEach-Object { $_ | ConvertTo-Json -Depth 100 -Compress }) |
             Should -Be @($liveKeybindings | ForEach-Object { $_ | ConvertTo-Json -Depth 100 -Compress })
         (Test-ComposerRepository $fixture -Platform windows).errors.Count | Should -Be 0
@@ -1805,7 +1851,7 @@ Describe 'Router help, documentation consistency, and headless guarantees' {
             [System.IO.File]::ReadAllText((Join-Path $script:RepositoryRoot 'scripts/OwnershipRouter.ps1'))
             [System.IO.File]::ReadAllText((Join-Path $script:RepositoryRoot 'scripts/Test-Documentation.ps1'))
         ) -join "`n"
-        $content | Should -Not -Match '(?i)Start-Process|\bcode(?:\.cmd)?\b|ProcessStartInfo|UseShellExecute'
+        $content | Should -Not -Match '(?im)Start-Process|^\s*(?:&\s*)?code(?:\.cmd)?(?:\s|$)|ProcessStartInfo|UseShellExecute'
         $content | Should -Not -Match '(?i)--watch|showdialog|openbrowser|explorer\.exe'
     }
 }
