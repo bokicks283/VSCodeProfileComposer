@@ -2,4 +2,5 @@ name: "Unreal Engine"
 components:
   - main
   - cpp
+  - csharp
   - unreal

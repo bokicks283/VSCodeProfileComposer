@@ -2,3 +2,4 @@ name: "Database"
 components:
   - main
   - database
+  - sql-server

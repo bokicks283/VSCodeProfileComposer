@@ -14,7 +14,10 @@ Portable files must not contain usernames, home paths, drive-specific SDK paths,
 
 Portable settings intentionally applied to every profile live in `global/settings.jsonc`. They are generated separately because VS Code takes their values from the built-in Default profile and ignores duplicate values stored in named profiles. The composer derives `workbench.settings.applyToAllProfiles` from every other top-level application setting, including values discovered by `sync`. Apply `build/global/settings.json` manually through **Preferences: Open Application Settings (JSON)**; merge it with any other intentional application settings instead of replacing the entire live file.
 
-The global source includes `settingsSync.ignoredSettings` for `todo-tree.ripgrep.ripgrep`. When a machine is selected, the composer also adds every machine-owned key to both the ignored-settings list and `workbench.settings.applyToAllProfiles`. A matching `-setting.name` force-sync entry is removed. Machine values therefore stay in that computer's built-in Default profile while remaining effective in every named profile. The composer still never enables, disables, resets, or otherwise operates Settings Sync.
+The global source includes `settingsSync.ignoredSettings` for
+`todo-tree.ripgrep.ripgrep`. A selected machine adds every machine key to that
+ignored list. Application-scoped keys are also added to
+`workbench.settings.applyToAllProfiles`; component/profile keys remain scoped.
 
 ## Platform settings
 
@@ -29,7 +32,11 @@ Database command-line clients, native drivers, and certificate behavior may vary
 
 ## Machine-local settings
 
-Real machine values live under ignored `machine/local/<machine-id>.jsonc`. Committed examples use schema 1 placeholders with stable ID, display name, platform, optional hostnames, and a `settings` object. Legacy plain setting maps remain compatible. Use `ProfileComposer.ps1 list-machines` to see available local IDs and `-Machine <machine-id>` on a validating, composing, or syncing subcommand to choose the computer being targeted. The selected values are written only to `build/global/settings.json`; named profiles and `.code-profile` exports remain portable.
+Real machine values live under ignored `machine/local/<machine-id>.jsonc`.
+Committed examples use schema 2 with explicit `application`, `components`, and
+`profiles` settings scopes. Schema 0/1 remain application-only compatible.
+Application values enter `build/global/settings.json`; scoped values enter the
+matching named profile and make that export machine-specific.
 
 PowerShell executable overrides, module locations, database client paths, and shell-specific environment adjustments are machine-local when they cannot be expressed portably. Credentials, signing/private-key material, saved connections, private hosts, account IDs, and authentication state are excluded private state; do not put them in an ordinary machine definition.
 
@@ -69,7 +76,11 @@ Select this computer's machine overlay while composing a portable .code-profile
 → repeat the local machine overlay and Application Settings merge on each computer
 ```
 
-Settings Sync can synchronize settings, keyboard shortcuts, snippets, tasks, UI state, extensions, and profiles. Generated exports always omit machine values. When the configured local UI seed exists, its opaque state is included automatically and the artifact is private and non-portable; `-NoUiState` creates a UI-free artifact. Explicit `-UiStateFromProfile` and `-UiStateProfile` sources have the same privacy boundary even though VS Code owns the live UI after import.
+Settings Sync can synchronize settings, keyboard shortcuts, snippets, tasks,
+UI state, extensions, and profiles. Portable exports omit `-Machine`.
+Machine-selected exports may contain scoped machine values and are reported as
+`machine-overlay-included`; all such setting keys are added to the generated
+Sync-ignore list.
 
 When adding a second machine, review **Settings Sync: Configure** even if synchronization is already enabled. If unexpected changes occur, identify the affected resource, inspect **Settings Sync: Show Synced Data**, and back up both machines before restoring or resetting anything. The machine-ownership workflow above is designed to keep Sync on while excluding local paths. The composer never controls Settings Sync.
 
@@ -95,7 +106,7 @@ Composition always generates portable `.code-profile` artifacts under ignored
 composer-generated database profile contains only repository-owned settings and
 extension identifiers, but still review it before use.
 
-Separately, a profile exported from live VS Code can contain additional runtime-owned resources or machine/account state. Treat live exports as sensitive until inspected and store them privately. `ProfileComposer.ps1 capture-ui-state [<profile-id>] <export-path>` discards every resource except the opaque `globalState` and stores it under ignored `machine/local/ui-state/<profile>/`; that resource can itself contain extension or account-related state. Omitting the recipe reads only `code --status` and succeeds for one exact recipe match. Normal composition uses the configured default seed automatically; `-UiStateProfile` is an advanced one-run override, not a portable component source.
+Separately, a profile exported from live VS Code can contain additional runtime-owned resources or machine/account state. Treat live exports as sensitive until inspected and store them privately. `ProfileComposer.ps1 capture-ui-state [<profile-id>] <export-path>` discards every resource except the opaque `globalState` and stores it under ignored `machine/local/ui-state/<profile>/`; that resource can itself contain extension or account-related state. Omitting the recipe reads only `code --status` and succeeds for one exact recipe match. Normal composition uses the target profile's seed when available and the configured default seed as its fallback; `-UiStateProfile` is an advanced one-run override, not a portable component source.
 
 `ProfileComposer.ps1 sync [<profile-id>] <export-path>` deliberately broadens
 that import path for reviewed maintenance. It validates settings, extension

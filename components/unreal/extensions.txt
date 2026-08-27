@@ -1,4 +1,1 @@
-cschlosser.doxdocgen
-hugocabel.uvch
-ms-vscode.cpp-devtools
 timgjones.hlsltools

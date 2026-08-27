@@ -47,8 +47,14 @@ foreach ($file in $markdownFiles) {
 }
 
 $helpTopics = @(
+    'validate',
+    'fix',
     'compose',
     'compose-all',
+    'compose-global',
+    'list-profiles',
+    'list-machines',
+    'capture-ui-state',
     'sync',
     'route',
     'route list',
@@ -63,7 +69,11 @@ $helpTopics = @(
     'route enable',
     'route disable',
     'route import',
-    'migrate'
+    'migrate',
+    'rename-profile',
+    'rename-component',
+    'default',
+    'vscode'
 )
 foreach ($topic in $helpTopics) {
     $arguments = @('help') + ($topic -split ' ')
@@ -76,6 +86,7 @@ foreach ($topic in $helpTopics) {
 $syncHelp = @(& pwsh -NoProfile -NonInteractive -File $cli help sync 2>&1) -join "`n"
 $composeHelp = @(& pwsh -NoProfile -NonInteractive -File $cli help compose 2>&1) -join "`n"
 $routerDoc = [System.IO.File]::ReadAllText((Join-Path $root 'docs/OWNERSHIP-ROUTER.md'))
+$cliGuide = [System.IO.File]::ReadAllText((Join-Path $root 'docs/CLI-GUIDE.md'))
 if ($composeHelp -notmatch '\.code-profile' -or $composeHelp -match 'ExportCodeProfile') {
     Add-DocError 'compose help must describe the default finished .code-profile output without a legacy export switch.'
 }
@@ -107,6 +118,34 @@ foreach ($command in @(
     'route enable', 'route disable', 'route import', 'migrate legacy-sync'
 )) {
     if ($routerDoc -notmatch [regex]::Escape($command)) { Add-DocError "Command reference omits '$command'." }
+}
+
+foreach ($command in @(
+    'help', 'validate', 'fix global', 'compose <profile>', 'compose-all',
+    'compose-global', 'list-profiles', 'list-machines', 'capture-ui-state',
+    'sync', 'route list', 'route show', 'route explain', 'route audit',
+    'route add-setting', 'route add-extension', 'route add-prefix',
+    'route add-publisher', 'route enable', 'route disable', 'route remove',
+    'route import', 'migrate legacy-sync', 'rename-profile',
+    'rename-component', 'default show', 'default set', 'vscode list',
+    'vscode open', 'vscode import', 'vscode replace', 'vscode delete'
+)) {
+    if ($cliGuide -notmatch [regex]::Escape($command)) {
+        Add-DocError "Complete CLI guide omits '$command'."
+    }
+}
+
+foreach ($parameter in @(
+    '-RepositoryRoot', '-Platform', '-Machine', '-MachineFile', '-DryRun',
+    '-Strict', '-NoUiState', '-UiStateProfile', '-UiStateFromProfile',
+    '-VSCodeUserDataPath', '-CodeCommand', '-RoutingFile', '-RoutingMode',
+    '-NonInteractive', '-WriteUnresolved', '-SkipGlobal', '-SkipUiState',
+    '-PersistDryRunDecisions', '-MachineComponent', '-MachineProfile',
+    '-ConfirmBroadRule', '-ConfirmArchive', '-BackupName', '-LiveProfile'
+)) {
+    if ($cliGuide -notmatch [regex]::Escape($parameter)) {
+        Add-DocError "Complete CLI guide omits $parameter."
+    }
 }
 
 $allCurrentDocs = @($markdownFiles | ForEach-Object { [System.IO.File]::ReadAllText($_.FullName) }) -join "`n"

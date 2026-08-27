@@ -60,6 +60,35 @@ BeforeAll {
         return $path
     }
 
+    function New-ScopedMachineDefinition {
+        param(
+            [Parameter(Mandatory)][string]$RepositoryRoot,
+            [Parameter(Mandatory)][string]$Id,
+            [Parameter(Mandatory)][string]$Platform,
+            [System.Collections.IDictionary]$Application = ([ordered]@{}),
+            [System.Collections.IDictionary]$Components = ([ordered]@{}),
+            [System.Collections.IDictionary]$Profiles = ([ordered]@{}),
+            [string]$Name = $Id
+        )
+        $path = Join-Path $RepositoryRoot "machine/local/$Id.jsonc"
+        $value = [ordered]@{
+            schemaVersion = 2
+            machine = [ordered]@{
+                id = $Id
+                name = $Name
+                platform = $Platform
+                hostnames = @()
+            }
+            settings = [ordered]@{
+                application = $Application
+                components = $Components
+                profiles = $Profiles
+            }
+        }
+        Write-TestFile $path (ConvertTo-Json -InputObject $value -Depth 100)
+        return $path
+    }
+
     function New-SyncExport {
         param(
             [Parameter(Mandatory)][string]$Path,
@@ -256,7 +285,7 @@ Describe 'Recipe parsing and repository validation' {
     It 'parses the current ordered recipe format' {
         $recipe = Read-ProfileRecipe (Join-Path $script:RepositoryRoot 'profiles/unreal.yaml')
         $recipe.Name | Should -Be 'Unreal Engine'
-        $recipe.Components | Should -Be @('main', 'cpp', 'unreal')
+        $recipe.Components | Should -Be @('main', 'cpp', 'csharp', 'unreal')
     }
 
     It 'uses the configured shared default as the first component in every recipe' {
@@ -329,9 +358,9 @@ Describe 'Repository keybinding ownership' {
 
     It 'adds SQL Server-only bindings only to recipes that declare that component' {
         $fixture = New-ComposerFixture 'focused-keybindings'
-        Invoke-ProfileComposition $fixture sql-server -Platform windows | Out-Null
+        Invoke-ProfileComposition $fixture database -Platform windows | Out-Null
         Invoke-ProfileComposition $fixture python -Platform windows | Out-Null
-        $sqlBindings = (Read-ComposedProfileResources $fixture sql-server).Keybindings
+        $sqlBindings = (Read-ComposedProfileResources $fixture database).Keybindings
         $pythonBindings = (Read-ComposedProfileResources $fixture python).Keybindings
         $sqlBindings.Count | Should -Be 23
         $sqlBindings.command | Should -Contain 'mssql.rebuildIntelliSenseCache'
@@ -392,7 +421,8 @@ Describe 'Safe repository transformations' {
         Test-Path -LiteralPath (Join-Path $fixture 'components/shared') | Should -BeTrue
         Get-SharedDefaultComponent $fixture | Should -BeExactly 'shared'
         $after = (Read-ProfileRecipe (Join-Path $fixture 'profiles/unreal.yaml')).Components
-        $after | Should -Be @('shared', $before[1], $before[2])
+        $expectedComponents = @('shared') + @($before | Select-Object -Skip 1)
+        $after | Should -Be $expectedComponents
         @((Get-ManagedOwnershipRouter $fixture).routes | Where-Object {
             $_.destination.type -eq 'component' -and $_.destination.name -ieq 'main'
         }).Count | Should -Be 0
@@ -652,6 +682,23 @@ Describe 'Current profile acceptance compositions' {
     It 'composes the current Unreal profile in isolation' {
         $fixture = New-ComposerFixture 'compose-unreal'
         { Invoke-ProfileComposition $fixture unreal -Platform windows } | Should -Not -Throw
+        $resources = Read-ComposedProfileResources $fixture unreal
+        $resources.Settings['C_Cpp.default.browse.limitSymbolsToIncludedHeaders'] | Should -BeTrue
+        $resources.Settings['C_Cpp.exclusionPolicy'] | Should -BeExactly 'checkFolders'
+        $resources.Settings['C_Cpp.workspaceSymbols'] | Should -BeExactly 'All'
+        $resources.Settings['C_Cpp.codeAnalysis.runAutomatically'] | Should -BeFalse
+        $resources.Settings['C_Cpp.files.exclude']['**/Intermediate'] | Should -BeNullOrEmpty
+        $resources.Settings['files.associations']['*.usf'] | Should -BeExactly 'hlsl'
+        $resources.Settings['files.associations']['*.ush'] | Should -BeExactly 'hlsl'
+        $resources.Settings['files.exclude']['**/*.uasset'] | Should -BeTrue
+        $resources.Settings['files.exclude']['**/*.umap'] | Should -BeTrue
+        $resources.Settings['files.watcherExclude']['**/Content/**'] | Should -BeTrue
+        $resources.Settings['files.watcherExclude']['**/Intermediate/**'] | Should -BeNullOrEmpty
+        $resources.Settings['search.exclude']['**/Intermediate/**'] | Should -BeTrue
+        $resources.Settings['git.autoRepositoryDetection'] | Should -BeExactly 'openEditors'
+        $resources.Extensions | Should -Contain 'ms-dotnettools.csharp'
+        $resources.Extensions | Should -Contain 'timgjones.hlsltools'
+        $resources.Extensions | Should -Not -Contain 'hugocabel.uvch'
     }
 
     It 'composes the current Web profile in isolation' {
@@ -891,15 +938,25 @@ Describe 'VS Code .code-profile export' {
         $fixture = New-ComposerFixture 'automatic-ui-state-precedence'
         $mainSource = Join-Path $TestDrive 'main-layout.code-profile'
         $pythonSource = Join-Path $TestDrive 'python-layout.code-profile'
-        New-UiStateSeedExport $mainSource -GlobalState '{"layout":"main"}' | Out-Null
+        $mainGlobalState = New-UiStateSeedExport $mainSource -GlobalState '{"layout":"main"}'
         $pythonGlobalState = New-UiStateSeedExport $pythonSource -GlobalState '{"layout":"python"}'
         Save-ProfileUiStateSeed $fixture main $mainSource | Out-Null
         Save-ProfileUiStateSeed $fixture python $pythonSource | Out-Null
 
-        $override = Invoke-ProfileComposition $fixture unreal -UiStateProfile python
-        $override.uiStateSource | Should -BeExactly 'explicit-profile:python'
-        (ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture $override.codeProfileExportPath)))).globalState |
+        $profileDefault = Invoke-ProfileComposition $fixture python
+        $profileDefault.uiStateSource | Should -BeExactly 'profile-seed:python'
+        (ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture $profileDefault.codeProfileExportPath)))).globalState |
             Should -BeExactly $pythonGlobalState
+
+        $configuredFallback = Invoke-ProfileComposition $fixture unreal
+        $configuredFallback.uiStateSource | Should -BeExactly 'configured-default:main'
+        (ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture $configuredFallback.codeProfileExportPath)))).globalState |
+            Should -BeExactly $mainGlobalState
+
+        $override = Invoke-ProfileComposition $fixture python -UiStateProfile main
+        $override.uiStateSource | Should -BeExactly 'explicit-profile:main'
+        (ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture $override.codeProfileExportPath)))).globalState |
+            Should -BeExactly $mainGlobalState
 
         $disabled = Invoke-ProfileComposition $fixture unreal -NoUiState
         $disabled.uiStateSource | Should -BeExactly 'disabled'
@@ -1038,6 +1095,34 @@ Describe 'Unified CLI and compatibility wrappers' {
         $fixHelp = @(& pwsh -NoProfile -File $cli help fix 2>&1)
         $LASTEXITCODE | Should -Be 0
         $fixHelp -join "`n" | Should -Match 'removes duplicate'
+
+        foreach ($arguments in @(
+            @('compose', 'help'),
+            @('compose', '-Help'),
+            @('route', 'explain', 'help'),
+            @('route', 'explain', '-Help')
+        )) {
+            $commandFirst = @(& pwsh -NoProfile -File $cli @arguments 2>&1)
+            $LASTEXITCODE | Should -Be 0 -Because ($commandFirst -join ' | ')
+            ($commandFirst -join "`n").Length | Should -BeGreaterThan 20
+        }
+    }
+
+    It 'lists every validation error when a command preflight fails' {
+        $fixture = New-ComposerFixture 'cli-all-validation-errors'
+        Write-TestFile (Join-Path $fixture 'profiles/python.yaml') "name: Python`ncomponents:`n  - missing-python-component`n"
+        Write-TestFile (Join-Path $fixture 'profiles/database.yaml') "name: Database`ncomponents:`n  - missing-database-component`n"
+        $validation = Test-ComposerRepository $fixture
+        $validation.errors.Count | Should -BeGreaterThan 1
+
+        $cli = Join-Path $script:RepositoryRoot 'scripts/ProfileComposer.ps1'
+        $output = @(& pwsh -NoProfile -File $cli rename-profile main renamed-main -RepositoryRoot $fixture -DryRun 2>&1)
+        $LASTEXITCODE | Should -Be 1
+        $text = $output -join "`n"
+        $text | Should -Match "found $($validation.errors.Count) error"
+        foreach ($diagnostic in $validation.errors) {
+            $text | Should -Match ([regex]::Escape([string]$diagnostic.message))
+        }
     }
 
     It 'dispatches list, validation, and dry-run rename commands against an isolated fixture' {
@@ -1077,6 +1162,18 @@ Describe 'Unified CLI and compatibility wrappers' {
         $LASTEXITCODE | Should -Be 1
         $output -join "`n" | Should -Match 'Unknown command'
         $output -join "`n" | Should -Match 'help'
+    }
+
+    It 'accepts schema 2 machine component and profile route destinations' {
+        $fixture = New-ComposerFixture 'cli-machine-scope-routes'
+        $cli = Join-Path $script:RepositoryRoot 'scripts/ProfileComposer.ps1'
+        $componentRoute = @(& pwsh -NoProfile -File $cli route add-setting fixture.machineCompiler -MachineComponent cpp -RepositoryRoot $fixture -DryRun 2>&1)
+        $LASTEXITCODE | Should -Be 0 -Because ($componentRoute -join ' | ')
+        $componentRoute -join "`n" | Should -Match 'config/ownership-router.jsonc'
+
+        $profileRoute = @(& pwsh -NoProfile -File $cli route add-setting fixture.machineEngine -MachineProfile unreal -RepositoryRoot $fixture -DryRun 2>&1)
+        $LASTEXITCODE | Should -Be 0 -Because ($profileRoute -join ' | ')
+        $profileRoute -join "`n" | Should -Match 'config/ownership-router.jsonc'
     }
 
     It 'keeps both legacy entry scripts usable as dry-run wrappers' {
@@ -1249,6 +1346,10 @@ Describe 'Profile export synchronization' {
         $result.counts.applicationSettingsAddedToApplyToAll | Should -Be 3
         $result.counts.applicationSettingsClassifiedAsMachine | Should -Be 1
         $result.counts.applicationSensitiveSettingsExcluded | Should -Be 1
+        $result.uiStateDelivery.captured | Should -BeTrue
+        $result.uiStateDelivery.seedPath | Should -BeExactly 'machine/local/ui-state/python/seed.code-profile'
+        $result.uiStateDelivery.generatedArtifactsUpdated | Should -BeFalse
+        $result.uiStateDelivery.liveProfilesUpdated | Should -BeFalse
         Test-Path -LiteralPath (Join-Path $fixture 'profiles/python.settings.replace.jsonc') | Should -BeFalse
         Test-Path -LiteralPath (Join-Path $fixture 'profiles/python.settings.remove.jsonc') | Should -BeFalse
         Test-Path -LiteralPath (Join-Path $fixture 'profiles/python.extensions.jsonc') | Should -BeFalse
@@ -1325,6 +1426,15 @@ Describe 'Profile export synchronization' {
         $output -join "`n" | Should -Match "planned sync.*recipe 'python'"
         $output -join "`n" | Should -Match 'Settings routed:'
         Test-Path -LiteralPath (Join-Path $fixture 'profiles/python.settings.replace.jsonc') | Should -BeFalse
+
+        $template.globalState = '{"layout":"cli-synced"}'
+        Write-TestFile $sourceExport (ConvertTo-Json -InputObject $template -Depth 100)
+        $uiOutput = @(& pwsh -NoProfile -File $cli sync $sourceExport -RepositoryRoot $fixture -Platform windows -SkipGlobal -DryRun 2>&1)
+        $LASTEXITCODE | Should -Be 0
+        $uiText = $uiOutput -join "`n"
+        $uiText | Should -Match "UI state: would store or retain target seed at 'machine/local/ui-state/python/seed.code-profile'"
+        $uiText | Should -Match "Generated artifacts: unchanged; run 'vscomp compose python'"
+        $uiText | Should -Match 'Live VS Code profiles: unchanged until reviewed import or replacement'
     }
 }
 
@@ -1387,8 +1497,8 @@ Describe 'Sync classification, machine schema, and routed planning' {
         ((Test-ComposerRepository $unknown).errors.message -join "`n") | Should -Match 'unknown schema field'
 
         $newer = New-ComposerFixture 'machine-schema-newer'
-        Write-TestFile (Join-Path $newer 'machine/local/broken.jsonc') '{"schemaVersion":2,"machine":{"id":"broken","name":"Broken","platform":"windows"},"settings":{}}'
-        ((Test-ComposerRepository $newer).errors.message -join "`n") | Should -Match 'supported schemaVersion 1'
+        Write-TestFile (Join-Path $newer 'machine/local/broken.jsonc') '{"schemaVersion":3,"machine":{"id":"broken","name":"Broken","platform":"windows"},"settings":{}}'
+        ((Test-ComposerRepository $newer).errors.message -join "`n") | Should -Match 'supported schemaVersion 1 or 2'
 
         $mismatch = New-ComposerFixture 'machine-schema-id-mismatch'
         Write-TestFile (Join-Path $mismatch 'machine/local/file-id.jsonc') '{"schemaVersion":1,"machine":{"id":"other-id","name":"Other","platform":"windows"},"settings":{}}'
@@ -1403,6 +1513,95 @@ Describe 'Sync classification, machine schema, and routed planning' {
             'service.token' = 'must-not-live-in-machine-json'
         }) | Out-Null
         (Test-ComposerRepository $private).errors.code | Should -Contain 'machine-sensitive-setting'
+    }
+
+    It 'parses schema 2 scopes and composes application, component, and profile settings separately' {
+        $fixture = New-ComposerFixture 'machine-schema-two-composition'
+        New-ScopedMachineDefinition -RepositoryRoot $fixture -Id scoped-windows -Platform windows `
+            -Application ([ordered]@{ 'fixture.machine.application' = 'C:\Machine\application.exe' }) `
+            -Components ([ordered]@{
+                cpp = [ordered]@{
+                    'fixture.machine.cpp' = 'C:\Machine\compiler.exe'
+                    'fixture.machine.precedence' = 'component'
+                }
+            }) `
+            -Profiles ([ordered]@{
+                unreal = [ordered]@{
+                    'fixture.machine.unreal' = 'C:\Machine\UnrealEngine'
+                    'fixture.machine.precedence' = 'profile'
+                }
+            }) | Out-Null
+
+        $configuration = Read-MachineConfiguration (Join-Path $fixture 'machine/local/scoped-windows.jsonc') scoped-windows
+        $configuration.SchemaVersion | Should -Be 2
+        $configuration.ApplicationSettings['fixture.machine.application'] | Should -BeExactly 'C:\Machine\application.exe'
+        $configuration.ComponentSettings.cpp['fixture.machine.cpp'] | Should -BeExactly 'C:\Machine\compiler.exe'
+        $configuration.ProfileSettings.unreal['fixture.machine.unreal'] | Should -BeExactly 'C:\Machine\UnrealEngine'
+        (Test-ComposerRepository $fixture -Machine scoped-windows).errors.Count | Should -Be 0
+
+        Invoke-GlobalSettingsComposition $fixture -Machine scoped-windows | Out-Null
+        $global = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture 'build/global/settings.json')))
+        $global['fixture.machine.application'] | Should -BeExactly 'C:\Machine\application.exe'
+        $global.Contains('fixture.machine.cpp') | Should -BeFalse
+        $global.Contains('fixture.machine.unreal') | Should -BeFalse
+        $global['workbench.settings.applyToAllProfiles'] | Should -Contain 'fixture.machine.application'
+        $global['workbench.settings.applyToAllProfiles'] | Should -Not -Contain 'fixture.machine.cpp'
+        $global['settingsSync.ignoredSettings'] | Should -Contain 'fixture.machine.application'
+        $global['settingsSync.ignoredSettings'] | Should -Contain 'fixture.machine.cpp'
+        $global['settingsSync.ignoredSettings'] | Should -Contain 'fixture.machine.unreal'
+
+        $cpp = Invoke-ProfileComposition $fixture cpp -Platform windows -Machine scoped-windows -NoUiState
+        $cppTemplate = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture $cpp.codeProfileExportPath)))
+        $cppSettings = ConvertFrom-JsonC (ConvertFrom-JsonC $cppTemplate.settings).settings
+        $cppSettings['fixture.machine.cpp'] | Should -BeExactly 'C:\Machine\compiler.exe'
+        $cppSettings.Contains('fixture.machine.application') | Should -BeFalse
+        $cppSettings.Contains('fixture.machine.unreal') | Should -BeFalse
+        $cpp.portability | Should -BeExactly 'machine-overlay-included'
+
+        $unreal = Invoke-ProfileComposition $fixture unreal -Platform windows -Machine scoped-windows -NoUiState
+        $unrealTemplate = ConvertFrom-JsonC ([System.IO.File]::ReadAllText((Join-Path $fixture $unreal.codeProfileExportPath)))
+        $unrealSettings = ConvertFrom-JsonC (ConvertFrom-JsonC $unrealTemplate.settings).settings
+        $unrealSettings['fixture.machine.cpp'] | Should -BeExactly 'C:\Machine\compiler.exe'
+        $unrealSettings['fixture.machine.unreal'] | Should -BeExactly 'C:\Machine\UnrealEngine'
+        $unrealSettings['fixture.machine.precedence'] | Should -BeExactly 'profile'
+    }
+
+    It 'rejects invalid schema 2 scopes and global versus profile scope conflicts' {
+        $missingOwner = New-ComposerFixture 'machine-schema-two-missing-owner'
+        New-ScopedMachineDefinition -RepositoryRoot $missingOwner -Id scoped-windows -Platform windows `
+            -Components ([ordered]@{ missing = [ordered]@{ 'fixture.path' = 'C:\Missing\tool.exe' } }) | Out-Null
+        (Test-ComposerRepository $missingOwner).errors.code | Should -Contain 'machine-missing-component'
+
+        $scopeConflict = New-ComposerFixture 'machine-schema-two-scope-conflict'
+        New-ScopedMachineDefinition -RepositoryRoot $scopeConflict -Id scoped-windows -Platform windows `
+            -Application ([ordered]@{ 'fixture.path' = 'C:\Global\tool.exe' }) `
+            -Profiles ([ordered]@{ cpp = [ordered]@{ 'fixture.path' = 'C:\Profile\tool.exe' } }) | Out-Null
+        (Test-ComposerRepository $scopeConflict).errors.code | Should -Contain 'machine-scope-conflict'
+
+        $unknownScope = New-ComposerFixture 'machine-schema-two-unknown-scope'
+        Write-TestFile (Join-Path $unknownScope 'machine/local/broken.jsonc') '{"schemaVersion":2,"machine":{"id":"broken","name":"Broken","platform":"windows"},"settings":{"application":{},"components":{},"profiles":{},"future":{}}}'
+        ((Test-ComposerRepository $unknownScope).errors.message -join "`n") | Should -Match 'unknown settings scope'
+    }
+
+    It 'routes machine paths from portable components into matching schema 2 component scopes' {
+        $fixture = New-ComposerFixture 'machine-schema-two-sync-component'
+        $cppPath = Join-Path $fixture 'components/cpp/settings.jsonc'
+        $cppSettings = ConvertFrom-JsonC ([System.IO.File]::ReadAllText($cppPath))
+        $cppSettings['fixture.compilerPath'] = 'clang++'
+        Write-TestFile $cppPath (ConvertTo-Json -InputObject $cppSettings -Depth 100)
+        New-ScopedMachineDefinition -RepositoryRoot $fixture -Id scoped-windows -Platform windows | Out-Null
+        $export = New-SyncExport -Path (Join-Path $TestDrive 'schema-two-component-sync.code-profile') -Name 'C++' -Settings ([ordered]@{
+            'fixture.compilerPath' = 'C:\Toolchains\clang++.exe'
+            'fixture.profileOnlyPath' = 'C:\Projects\CppOnly'
+        })
+
+        $result = Sync-ComposerProfileFromExport $fixture cpp $export -Platform windows -Machine scoped-windows -SkipGlobal -SkipUiState
+        ($result.routes | Where-Object item -eq 'fixture.compilerPath').destination | Should -BeExactly 'machine-component/cpp'
+        ($result.routes | Where-Object item -eq 'fixture.profileOnlyPath').destination | Should -BeExactly 'machine-profile/cpp'
+        (ConvertFrom-JsonC ([System.IO.File]::ReadAllText($cppPath)))['fixture.compilerPath'] | Should -BeExactly 'clang++'
+        $machine = Read-MachineConfiguration (Join-Path $fixture 'machine/local/scoped-windows.jsonc') scoped-windows
+        $machine.ComponentSettings.cpp['fixture.compilerPath'] | Should -BeExactly 'C:\Toolchains\clang++.exe'
+        $machine.ProfileSettings.cpp['fixture.profileOnlyPath'] | Should -BeExactly 'C:\Projects\CppOnly'
     }
 
     It 'routes an explicit machine path, preserves portable changes, and is idempotent' {
@@ -1820,6 +2019,29 @@ exit `$LASTEXITCODE
         $unknown = @(& pwsh -NoProfile -File $wrapper sync $export -NoSuchOption 2>&1)
         $LASTEXITCODE | Should -Be 1
         $unknown -join "`n" | Should -Match "Unknown option '-NoSuchOption'"
+
+    }
+
+    It 'forwards command-first help without changing its output' {
+        $cli = Join-Path $script:RepositoryRoot 'scripts/ProfileComposer.ps1'
+        $wrapper = Join-Path $TestDrive 'invoke-vscomp-help-wrapper.ps1'
+        $escapedCli = $cli.Replace("'", "''")
+        Write-TestFile $wrapper @"
+function composer {
+    & '$escapedCli' @args
+}
+Set-Alias vscomp composer
+vscomp @args
+exit `$LASTEXITCODE
+"@
+
+        $direct = @(& pwsh -NoProfile -File $cli compose help 2>&1)
+        $directExit = $LASTEXITCODE
+        $wrapped = @(& pwsh -NoProfile -File $wrapper compose help 2>&1)
+        $wrappedExit = $LASTEXITCODE
+        $directExit | Should -Be 0
+        $wrappedExit | Should -Be 0
+        ($wrapped -join "`n") | Should -BeExactly ($direct -join "`n")
     }
 }
 

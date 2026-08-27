@@ -6,8 +6,7 @@
     "editor.defaultFormatter": "ms-vscode.cpptools",
     "editor.semanticHighlighting.enabled": true,
     "editor.stickyScroll.defaultModel": "foldingProviderModel",
-    "editor.suggest.insertMode": "replace",
-    "editor.wordBasedSuggestions": "allDocuments"
+    "editor.suggest.insertMode": "replace"
   },
   "[cuda-cpp]": {
     "editor.defaultFormatter": "ms-vscode.cpptools"
@@ -15,6 +14,9 @@
 
   "C_Cpp.autoAddFileAssociations": true,
   "C_Cpp.autocompleteAddParentheses": true,
+  "C_Cpp.default.browse.limitSymbolsToIncludedHeaders": true,
   "C_Cpp.default.recursiveIncludes.priority": "afterSystemIncludes",
-  "C_Cpp.intelliSenseEngine": "default"
+  "C_Cpp.exclusionPolicy": "checkFolders",
+  "C_Cpp.intelliSenseEngine": "default",
+  "C_Cpp.workspaceSymbols": "All"
 }

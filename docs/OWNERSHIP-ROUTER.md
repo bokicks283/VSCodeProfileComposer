@@ -149,7 +149,9 @@ item individually, or leave the group unresolved. A decision can be:
 - saved as an explicitly confirmed prefix/publisher rule.
 
 Destinations use `component/<name>`, `platform/<name>`, `machine`,
-`profile/<name>`, `exclude`, or `unresolved`.
+`machine-component/<name>`, `machine-profile/<name>`, `profile/<name>`,
+`exclude`, or `unresolved`. Machine-scoped destinations require a selected
+schema 2 machine and apply only to settings.
 
 Before a broad rule is saved, the preview shows its proposed match, all
 currently imported matches, existing repository items that also match, and

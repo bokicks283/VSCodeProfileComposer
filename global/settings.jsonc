@@ -51,7 +51,8 @@
     "workbench.editor.untitled.labelFormat",
     "workbench.editor.wrapTabs",
     "terminal.integrated.persistentSessionScrollback",
-    "window.newWindowProfile"
+    "window.newWindowProfile",
+    "yaml.disableSchemaDetection"
   ],
   "accessibility.dimUnfocused.enabled": true,
   "accessibility.signals.terminalBell": {
@@ -117,5 +118,13 @@
   "workbench.editor.untitled.labelFormat": "name",
   "workbench.editor.wrapTabs": true,
   "terminal.integrated.persistentSessionScrollback": 1000,
-  "window.newWindowProfile": "Main"
+  "window.newWindowProfile": "Main",
+  "yaml.disableSchemaDetection": [
+    "**/.github/workflows/*.yml",
+    "**/.github/workflows/*.yaml",
+    "**/.gitea/workflows/*.yml",
+    "**/.gitea/workflows/*.yaml",
+    "**/.forgejo/workflows/*.yml",
+    "**/.forgejo/workflows/*.yaml"
+  ]
 }

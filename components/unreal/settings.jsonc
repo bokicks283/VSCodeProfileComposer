@@ -1,4 +1,54 @@
 {
-  // Unreal-specific portable settings remain intentionally minimal.
-  // Add only values validated across more than one Unreal repository.
+  // Keep semantic IntelliSense and generated headers available while avoiding
+  // code-navigation scans of trees that cannot contain useful Unreal C++.
+  "C_Cpp.codeAnalysis.runAutomatically": false,
+  "C_Cpp.files.exclude": {
+    "**/.trunk": true,
+    "**/.vs": true,
+    "**/.vscode": true,
+    "**/Binaries": true,
+    "**/Content": true,
+    "**/DerivedDataCache": true,
+    "**/Saved": true,
+    "**/node_modules": true
+  },
+
+  // These directories either contain binary assets, generated output, caches,
+  // or dependency trees. Intermediate remains watchable because it contains
+  // UnrealHeaderTool output required by semantic IntelliSense.
+  "files.exclude": {
+    "**/.trunk": true,
+    "**/.vs": true,
+    "**/Binaries": true,
+    "**/DerivedDataCache": true,
+    "**/Saved": true,
+    "**/node_modules": true,
+    "**/*.uasset": true,
+    "**/*.umap": true
+  },
+  "files.watcherExclude": {
+    "**/.trunk/**": true,
+    "**/.vs/**": true,
+    "**/Binaries/**": true,
+    "**/Content/**": true,
+    "**/DerivedDataCache/**": true,
+    "**/Saved/**": true,
+    "**/node_modules/**": true
+  },
+  "search.exclude": {
+    "**/.trunk/**": true,
+    "**/.vs/**": true,
+    "**/Binaries/**": true,
+    "**/Content/**": true,
+    "**/DerivedDataCache/**": true,
+    "**/Intermediate/**": true,
+    "**/Saved/**": true,
+    "**/node_modules/**": true
+  },
+
+  // The archived audit recorded very slow repository discovery for both the
+  // project and the engine workspace folder. Root repositories still open
+  // normally; recursive discovery is unnecessary for an Unreal workspace.
+  "git.autoRepositoryDetection": "openEditors",
+  "git.repositoryScanMaxDepth": 1
 }

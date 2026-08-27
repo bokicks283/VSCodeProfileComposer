@@ -2,3 +2,5 @@ name: "C++"
 components:
   - main
   - cpp
+  - cmake
+  - makefile

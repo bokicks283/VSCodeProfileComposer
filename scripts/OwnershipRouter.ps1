@@ -1,7 +1,7 @@
 $script:OwnershipRouterSchemaVersion = 1
 $script:OwnershipRouteKinds = @('setting', 'extension')
 $script:OwnershipMatchTypes = @('exact', 'prefix', 'publisher')
-$script:OwnershipDestinationTypes = @('component', 'platform', 'machine', 'profile', 'exclude', 'unresolved')
+$script:OwnershipDestinationTypes = @('component', 'platform', 'machine', 'machine-component', 'machine-profile', 'profile', 'exclude', 'unresolved')
 $script:OwnershipRouteSources = @('repository-policy', 'user-confirmed', 'custom-file', 'inferred', 'migration')
 $script:OwnershipRouteStatuses = @('approved', 'provisional', 'disabled')
 $script:OwnershipRoutingModes = @('Supplement', 'Override', 'Isolated')
@@ -173,7 +173,7 @@ function Write-OwnershipRouterFile {
 
 function New-OwnershipDestination {
     param(
-        [Parameter(Mandatory)][ValidateSet('component', 'platform', 'machine', 'profile', 'exclude', 'unresolved')][string]$Type,
+        [Parameter(Mandatory)][ValidateSet('component', 'platform', 'machine', 'machine-component', 'machine-profile', 'profile', 'exclude', 'unresolved')][string]$Type,
         [string]$Name
     )
 
@@ -320,7 +320,7 @@ function Test-OwnershipRouterDocument {
         if ($destinationType -notin $script:OwnershipDestinationTypes) {
             Add-ValidationItem $result errors 'router-destination-type' "Route '$id' has invalid destination type '$destinationType'." $Source
         }
-        if ($destinationType -in @('component', 'platform', 'profile') -and [string]::IsNullOrWhiteSpace($destinationName)) {
+        if ($destinationType -in @('component', 'platform', 'profile', 'machine-component', 'machine-profile') -and [string]::IsNullOrWhiteSpace($destinationName)) {
             Add-ValidationItem $result errors 'router-destination-name' "Route '$id' destination '$destinationType' requires a name." $Source
         }
         if ($destinationType -in @('machine', 'exclude', 'unresolved') -and $destinationName) {
@@ -329,6 +329,12 @@ function Test-OwnershipRouterDocument {
         if ($RepositoryRoot) {
             if ($destinationType -eq 'component' -and $components -inotcontains $destinationName) {
                 Add-ValidationItem $result errors 'router-missing-component' "Route '$id' references missing component '$destinationName'." $Source
+            }
+            if ($destinationType -eq 'machine-component' -and $components -inotcontains $destinationName) {
+                Add-ValidationItem $result errors 'router-missing-component' "Route '$id' references missing machine component '$destinationName'." $Source
+            }
+            if ($destinationType -eq 'machine-profile' -and $profiles -inotcontains $destinationName) {
+                Add-ValidationItem $result errors 'router-missing-profile' "Route '$id' references missing machine profile '$destinationName'." $Source
             }
             if ($destinationType -eq 'profile' -and $profiles -inotcontains $destinationName) {
                 Add-ValidationItem $result errors 'router-missing-profile' "Route '$id' references missing profile '$destinationName'." $Source
@@ -408,7 +414,8 @@ function Resolve-OwnershipItem {
         [Parameter(Mandatory)]$ManagedRouter,
         $CustomRouter,
         [ValidateSet('Supplement', 'Override', 'Isolated')][string]$RoutingMode = 'Supplement',
-        $ExplicitDestination
+        $ExplicitDestination,
+        $MachineDefaultDestination
     )
 
     $candidates = [System.Collections.Generic.List[object]]::new()
@@ -485,10 +492,23 @@ function Resolve-OwnershipItem {
         }
     }
     elseif ($Kind -eq 'setting' -and $classification.classification -eq 'machine-local-path') {
+        $machineDestination = if (-not $MachineDefaultDestination) {
+            New-OwnershipDestination machine
+        }
+        elseif ($winner -and [string]$winner.destination.type -like 'machine*') {
+            $winner.destination
+        }
+        elseif ($winner -and [string]$winner.destination.type -eq 'component') {
+            New-OwnershipDestination machine-component ([string]$winner.destination.name)
+        }
+        elseif ($winner -and [string]$winner.destination.type -eq 'profile') {
+            New-OwnershipDestination machine-profile ([string]$winner.destination.name)
+        }
+        else { $MachineDefaultDestination }
         $override = [pscustomobject]@{
-            destination = New-OwnershipDestination machine
+            destination = $machineDestination
             id = 'machine-path-classification'
-            reason = 'Machine-local path classification overrides portable routing.'
+            reason = 'Machine-local path classification preserves the narrowest applicable component/profile scope and overrides portable storage.'
         }
     }
     if ($override) {

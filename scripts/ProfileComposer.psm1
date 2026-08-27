@@ -1,6 +1,6 @@
 Set-StrictMode -Version Latest
 
-$script:MachineSchemaVersion = 1
+$script:MachineSchemaVersion = 2
 $script:Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 $script:SensitivePattern = '(?i)(password|(?<!semantic)token|secret|credential|connectionstring|api[_-]?key|private[_-]?key)'
 $script:PrivateResourcePattern = '(?i)(saved.?connections?|connection.?profiles?|(^|[._/-])connections?($|[._/-])|user(name)?|account.?id|private.?host|remote.?endpoint|remote\.ssh\.(remoteplatform|serverinstallpath)|certificate|identity.?file|ssh.?key|authentication.?state)'
@@ -614,12 +614,17 @@ function Read-MachineConfiguration {
     $isEnvelope = $value.Contains('schemaVersion') -or $value.Contains('machine') -or $value.Contains('settings')
     if (-not $isEnvelope) {
         $legacyId = if ($ExpectedId) { $ExpectedId } else { [System.IO.Path]::GetFileNameWithoutExtension($Path) }
+        $emptyComponents = New-OrderedMap
+        $emptyProfiles = New-OrderedMap
         return [pscustomobject][ordered]@{
             Id = $legacyId
             Name = $legacyId
             Platform = $null
             Hostnames = [string[]]@()
             Settings = $value
+            ApplicationSettings = $value
+            ComponentSettings = $emptyComponents
+            ProfileSettings = $emptyProfiles
             SchemaVersion = 0
             Legacy = $true
             Document = $value
@@ -633,14 +638,49 @@ function Read-MachineConfiguration {
     }
     if (-not $value.Contains('schemaVersion') -or
         ($value.schemaVersion -isnot [long] -and $value.schemaVersion -isnot [int]) -or
-        [int]$value.schemaVersion -ne $script:MachineSchemaVersion) {
-        throw "Machine definition '$Path' requires supported schemaVersion $($script:MachineSchemaVersion)."
+        [int]$value.schemaVersion -notin @(1, $script:MachineSchemaVersion)) {
+        throw "Machine definition '$Path' requires supported schemaVersion 1 or $($script:MachineSchemaVersion)."
     }
     if (-not $value.Contains('machine') -or -not (Test-IsDictionary $value.machine)) {
         throw "Machine definition '$Path' requires an object 'machine'."
     }
     if (-not $value.Contains('settings') -or -not (Test-IsDictionary $value.settings)) {
         throw "Machine definition '$Path' requires an object 'settings'."
+    }
+    $schemaVersion = [int]$value.schemaVersion
+    $applicationSettings = $null
+    $componentSettings = New-OrderedMap
+    $profileSettings = New-OrderedMap
+    if ($schemaVersion -eq 1) {
+        $applicationSettings = $value.settings
+    }
+    else {
+        foreach ($scope in $value.settings.Keys) {
+            if ([string]$scope -notin @('application', 'components', 'profiles')) {
+                throw "Machine definition '$Path' contains unknown settings scope '$scope'."
+            }
+        }
+        foreach ($scope in @('application', 'components', 'profiles')) {
+            if (-not $value.settings.Contains($scope) -or -not (Test-IsDictionary $value.settings[$scope])) {
+                throw "Machine definition '$Path' schemaVersion 2 requires an object 'settings.$scope'."
+            }
+        }
+        $applicationSettings = $value.settings.application
+        $componentSettings = $value.settings.components
+        $profileSettings = $value.settings.profiles
+        foreach ($scopeEntry in @(
+            @{ Name = 'components'; Value = $componentSettings },
+            @{ Name = 'profiles'; Value = $profileSettings }
+        )) {
+            foreach ($ownerId in $scopeEntry.Value.Keys) {
+                if (-not (Test-ComposerId ([string]$ownerId))) {
+                    throw "Machine definition '$Path' has invalid settings.$($scopeEntry.Name) owner ID '$ownerId'."
+                }
+                if (-not (Test-IsDictionary $scopeEntry.Value[$ownerId])) {
+                    throw "Machine definition '$Path' requires settings.$($scopeEntry.Name).$ownerId to be an object."
+                }
+            }
+        }
     }
     foreach ($key in $value.machine.Keys) {
         if ([string]$key -notin @('id', 'name', 'platform', 'hostnames')) {
@@ -686,8 +726,11 @@ function Read-MachineConfiguration {
         Name = [string]$value.machine.name
         Platform = $platform
         Hostnames = $hostnames
-        Settings = $value.settings
-        SchemaVersion = [int]$value.schemaVersion
+        Settings = $applicationSettings
+        ApplicationSettings = $applicationSettings
+        ComponentSettings = $componentSettings
+        ProfileSettings = $profileSettings
+        SchemaVersion = $schemaVersion
         Legacy = $false
         Document = $value
     }
@@ -701,6 +744,63 @@ function Write-MachineConfiguration {
 
     $value = if ($Configuration.Legacy) { $Configuration.Settings } else { $Configuration.Document }
     Write-Utf8File $Path (ConvertTo-PrettyJson $value)
+}
+
+function Get-MachineScopeSettings {
+    param(
+        [Parameter(Mandatory)]$Configuration,
+        [Parameter(Mandatory)]$Destination,
+        [switch]$Create
+    )
+
+    $type = [string]$Destination.type
+    if ($type -eq 'machine') { return $Configuration.ApplicationSettings }
+    $name = if ($Destination.Contains('name')) { [string]$Destination.name } else { $null }
+    $owners = if ($type -eq 'machine-component') { $Configuration.ComponentSettings }
+        elseif ($type -eq 'machine-profile') { $Configuration.ProfileSettings }
+        else { throw "Destination '$type' is not a machine setting scope." }
+    if (-not $owners.Contains($name)) {
+        if (-not $Create) { return $null }
+        $owners[$name] = New-OrderedMap
+    }
+    return $owners[$name]
+}
+
+function Get-AllMachineSettingIds {
+    param([Parameter(Mandatory)]$Configuration)
+
+    $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    $ids = [System.Collections.Generic.List[string]]::new()
+    foreach ($map in @($Configuration.ApplicationSettings)) {
+        foreach ($key in Get-MachineSettingIds $map) { if ($seen.Add($key)) { $ids.Add($key) } }
+    }
+    foreach ($owners in @($Configuration.ComponentSettings, $Configuration.ProfileSettings)) {
+        foreach ($ownerId in $owners.Keys) {
+            foreach ($key in Get-MachineSettingIds $owners[$ownerId]) { if ($seen.Add($key)) { $ids.Add($key) } }
+        }
+    }
+    return [string[]]$ids.ToArray()
+}
+
+function Get-MachineProfileSettings {
+    param(
+        [Parameter(Mandatory)]$Configuration,
+        [Parameter(Mandatory)][string[]]$Components,
+        [Parameter(Mandatory)][string]$Profile,
+        [Parameter(Mandatory)][string]$Source,
+        [Parameter(Mandatory)][hashtable]$SourceMap,
+        [Parameter(Mandatory)][AllowEmptyCollection()][System.Collections.Generic.List[object]]$Overrides
+    )
+
+    $settings = New-OrderedMap
+    foreach ($component in $Components) {
+        if (-not $Configuration.ComponentSettings.Contains($component)) { continue }
+        Merge-Settings $settings $Configuration.ComponentSettings[$component] "$Source#settings.components.$component" $SourceMap $Overrides | Out-Null
+    }
+    if ($Configuration.ProfileSettings.Contains($Profile)) {
+        Merge-Settings $settings $Configuration.ProfileSettings[$Profile] "$Source#settings.profiles.$Profile" $SourceMap $Overrides | Out-Null
+    }
+    return $settings
 }
 
 function Get-LocalDefaultMachinePath {
@@ -834,6 +934,55 @@ function Add-MachinePrivacyValidation {
         $classification = Get-SettingValueClassification -SettingKey $key -Value $Settings[$key]
         if ($classification.classification -eq 'secret-or-private') {
             Add-ValidationItem $Result errors 'machine-sensitive-setting' "Machine setting '$key' contains excluded credential or private-resource state. Use the owning extension or a dedicated secret store." $Source "/$key"
+        }
+    }
+}
+
+function Add-MachineConfigurationValidation {
+    param(
+        [Parameter(Mandatory)]$Configuration,
+        [Parameter(Mandatory)]$Result,
+        [Parameter(Mandatory)][string]$Source,
+        [Parameter(Mandatory)]$ComponentIds,
+        [Parameter(Mandatory)]$ProfileIds,
+        [Parameter(Mandatory)]$GlobalSettingIds
+    )
+
+    $applicationIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    foreach ($key in Get-MachineSettingIds $Configuration.ApplicationSettings) { $applicationIds.Add($key) | Out-Null }
+    Add-MachineOwnershipValidation $Configuration.ApplicationSettings $Result "$Source#settings.application"
+    Add-MachinePrivacyValidation $Configuration.ApplicationSettings $Result "$Source#settings.application"
+
+    $scopedOwners = @{}
+    foreach ($scope in @(
+        @{ Name = 'components'; Owners = $Configuration.ComponentSettings; Known = $ComponentIds; Code = 'machine-missing-component' },
+        @{ Name = 'profiles'; Owners = $Configuration.ProfileSettings; Known = $ProfileIds; Code = 'machine-missing-profile' }
+    )) {
+        foreach ($ownerIdValue in $scope.Owners.Keys) {
+            $ownerId = [string]$ownerIdValue
+            $scopeSource = "$Source#settings.$($scope.Name).$ownerId"
+            if (-not $scope.Known.Contains($ownerId)) {
+                Add-ValidationItem $Result errors $scope.Code "Machine definition references missing $($scope.Name.TrimEnd('s')) '$ownerId'." $Source
+            }
+            $settings = $scope.Owners[$ownerId]
+            Add-MachineOwnershipValidation $settings $Result $scopeSource
+            Add-MachinePrivacyValidation $settings $Result $scopeSource
+            foreach ($key in Get-MachineSettingIds $settings) {
+                if ($applicationIds.Contains($key)) {
+                    Add-ValidationItem $Result errors 'machine-scope-conflict' "Machine setting '$key' cannot be both application-scoped and $($scope.Name.TrimEnd('s'))-scoped." $Source "/settings/$($scope.Name)/$ownerId/$key"
+                }
+                if ($GlobalSettingIds.Contains($key)) {
+                    Add-ValidationItem $Result errors 'machine-scoped-global-conflict' "Machine setting '$key' cannot be component/profile-scoped because global application ownership would override it." $Source "/settings/$($scope.Name)/$ownerId/$key"
+                }
+                if (-not $scopedOwners.ContainsKey($key)) { $scopedOwners[$key] = [System.Collections.Generic.List[string]]::new() }
+                $scopedOwners[$key].Add("$($scope.Name.TrimEnd('s'))/$ownerId")
+            }
+        }
+    }
+    foreach ($entry in $scopedOwners.GetEnumerator()) {
+        $owners = @($entry.Value | Select-Object -Unique)
+        if ($owners.Count -gt 1) {
+            Add-ValidationItem $Result warnings 'machine-scoped-setting-duplicate' "Machine setting '$($entry.Key)' is declared in multiple scoped owners: $($owners -join ', '). Recipe component order applies first and an explicit profile scope wins last." $Source
         }
     }
 }
@@ -1174,8 +1323,7 @@ function Test-ComposerRepository {
             }
             else { $null }
             $configuration = Read-MachineConfiguration -Path $path -ExpectedId $expectedId
-            Add-MachineOwnershipValidation -Settings $configuration.Settings -Result $result -Source $source
-            Add-MachinePrivacyValidation -Settings $configuration.Settings -Result $result -Source $source
+            Add-MachineConfigurationValidation -Configuration $configuration -Result $result -Source $source -ComponentIds $componentIds -ProfileIds $profileIds -GlobalSettingIds $globalSettingIds
         }
         catch { Add-ValidationItem $result errors 'invalid-jsonc' $_.Exception.Message $source }
     }
@@ -1211,8 +1359,7 @@ function Test-ComposerRepository {
             $source = Get-RelativeDisplayPath $root $resolvedMachine
             try {
                 $machineConfiguration = Read-MachineConfiguration -Path $resolvedMachine -ExpectedId $Machine
-                Add-MachineOwnershipValidation -Settings $machineConfiguration.Settings -Result $result -Source $source
-                Add-MachinePrivacyValidation -Settings $machineConfiguration.Settings -Result $result -Source $source
+                Add-MachineConfigurationValidation -Configuration $machineConfiguration -Result $result -Source $source -ComponentIds $componentIds -ProfileIds $profileIds -GlobalSettingIds $globalSettingIds
             }
             catch { Add-ValidationItem $result errors 'invalid-jsonc' $_.Exception.Message $source }
         }
@@ -1846,6 +1993,23 @@ function Assert-StagedRepositoryValid {
     }
 }
 
+function Format-ValidationDiagnostics {
+    param(
+        [Parameter(Mandatory)]$Validation,
+        [string[]]$Levels = @('errors')
+    )
+
+    $diagnostics = [System.Collections.Generic.List[string]]::new()
+    foreach ($level in $Levels) {
+        foreach ($item in @($Validation.$level)) {
+            $source = if ($item.PSObject.Properties.Name -contains 'source' -and $item.source) { " [$($item.source)]" } else { '' }
+            $path = if ($item.PSObject.Properties.Name -contains 'path' -and $item.path) { " $($item.path)" } else { '' }
+            $diagnostics.Add("$($level.ToUpperInvariant()): $($item.code)$source$path - $($item.message)")
+        }
+    }
+    return @($diagnostics) -join "`n  "
+}
+
 function Invoke-StagedRepositoryCommit {
     param(
         [Parameter(Mandatory)][string]$RepositoryRoot,
@@ -1908,7 +2072,9 @@ function Rename-ComposerProfile {
     if (-not (Test-ComposerId $NewId)) { throw "Invalid target profile ID '$NewId'." }
     if ($OldId -ceq $NewId) { throw 'Source and target profile IDs are identical.' }
     $preflight = Test-ComposerRepository -RepositoryRoot $root
-    if ($preflight.errors.Count -gt 0) { throw "Profile rename requires a valid repository; found $($preflight.errors.Count) error(s)." }
+    if ($preflight.errors.Count -gt 0) {
+        throw "Profile rename requires a valid repository; found $($preflight.errors.Count) error(s):`n  $(Format-ValidationDiagnostics $preflight)"
+    }
     $definitions = @(Get-ProfileDefinitions $root)
     $source = @($definitions | Where-Object Id -ieq $OldId)
     if ($source.Count -eq 0) { throw "Profile '$OldId' does not exist." }
@@ -2005,7 +2171,9 @@ function Rename-ComposerComponent {
     if (-not (Test-ComposerId $NewId)) { throw "Invalid target component ID '$NewId'." }
     if ($OldId -ceq $NewId) { throw 'Source and target component IDs are identical.' }
     $preflight = Test-ComposerRepository $root
-    if ($preflight.errors.Count -gt 0) { throw "Component rename requires a valid repository; found $($preflight.errors.Count) error(s)." }
+    if ($preflight.errors.Count -gt 0) {
+        throw "Component rename requires a valid repository; found $($preflight.errors.Count) error(s):`n  $(Format-ValidationDiagnostics $preflight)"
+    }
     $directories = @(Get-ChildItem -LiteralPath (Join-Path $root 'components') -Directory)
     $source = @($directories | Where-Object Name -ieq $OldId)
     if ($source.Count -eq 0) { throw "Component '$OldId' does not exist." }
@@ -2076,7 +2244,9 @@ function Set-SharedDefaultComponent {
     $root = [System.IO.Path]::GetFullPath($RepositoryRoot)
     if (-not (Test-ComposerId $Component)) { throw "Invalid component ID '$Component'." }
     $preflight = Test-ComposerRepository $root
-    if ($preflight.errors.Count -gt 0) { throw "Changing the shared default requires a valid repository; found $($preflight.errors.Count) error(s)." }
+    if ($preflight.errors.Count -gt 0) {
+        throw "Changing the shared default requires a valid repository; found $($preflight.errors.Count) error(s):`n  $(Format-ValidationDiagnostics $preflight)"
+    }
     $componentDirectory = @(Get-ChildItem -LiteralPath (Join-Path $root 'components') -Directory | Where-Object Name -ieq $Component)
     if ($componentDirectory.Count -eq 0) { throw "Component '$Component' does not exist." }
     if ($componentDirectory.Count -gt 1) { throw "Component ID '$Component' is ambiguous." }
@@ -2335,9 +2505,19 @@ function Get-RepositoryOwnershipIndex {
 
     if ($MachinePath) {
         $configuration = Read-MachineConfiguration $MachinePath ([System.IO.Path]::GetFileNameWithoutExtension($MachinePath))
-        $destination = New-OwnershipDestination machine
-        foreach ($key in $configuration.Settings.Keys) {
-            Add-OwnershipIndexEntry $index setting ([string]$key) $destination (Get-RelativeDisplayPath $root $MachinePath) machine
+        $machineSource = Get-RelativeDisplayPath $root $MachinePath
+        foreach ($key in $configuration.ApplicationSettings.Keys) {
+            Add-OwnershipIndexEntry $index setting ([string]$key) (New-OwnershipDestination machine) $machineSource machine
+        }
+        foreach ($component in $configuration.ComponentSettings.Keys) {
+            foreach ($key in $configuration.ComponentSettings[$component].Keys) {
+                Add-OwnershipIndexEntry $index setting ([string]$key) (New-OwnershipDestination machine-component ([string]$component)) $machineSource machine-component
+            }
+        }
+        foreach ($profileId in $configuration.ProfileSettings.Keys) {
+            foreach ($key in $configuration.ProfileSettings[$profileId].Keys) {
+                Add-OwnershipIndexEntry $index setting ([string]$key) (New-OwnershipDestination machine-profile ([string]$profileId)) $machineSource machine-profile
+            }
         }
     }
 
@@ -2388,12 +2568,12 @@ function Get-RoutedDestinationPath {
     switch ("$Kind|$type") {
         'setting|component' { return Join-Path $RepositoryRoot "components/$name/settings.jsonc" }
         'setting|platform' { return Join-Path $RepositoryRoot "platform/$name.jsonc" }
-        'setting|machine' { return $MachinePath }
+        { $_ -in @('setting|machine', 'setting|machine-component', 'setting|machine-profile') } { return $MachinePath }
         'setting|profile' { return Join-Path $RepositoryRoot "profiles/$name.settings.replace.jsonc" }
         'extension|component' { return Join-Path $RepositoryRoot "components/$name/extensions.txt" }
         'extension|platform' { return Join-Path $RepositoryRoot "platform/$name.extensions.txt" }
         'extension|profile' { return Join-Path $RepositoryRoot "profiles/$name.extensions.jsonc" }
-        'extension|machine' { throw 'Machine-owned extensions are not composable by the current VS Code profile artifact. Route the extension to a component, platform, profile, or exclude it.' }
+        { $_ -in @('extension|machine', 'extension|machine-component', 'extension|machine-profile') } { throw 'Machine-owned extensions are not composable by the current VS Code profile artifact. Route the extension to a component, platform, profile, or exclude it.' }
         default { return $null }
     }
 }
@@ -2410,13 +2590,29 @@ function Remove-PreviousOwnership {
     if ($existingCandidates.Count -ne 1) { return }
     $owner = $existingCandidates[0].owner
     if ((Get-OwnershipDestinationLabel $owner.destination) -ieq (Get-OwnershipDestinationLabel $Resolution.destination)) { return }
+    if (($Resolution.destination.type -eq 'machine-component' -and $owner.destination.type -eq 'component' -and
+        $Resolution.destination.name -ieq $owner.destination.name) -or
+        ($Resolution.destination.type -eq 'machine-profile' -and $owner.destination.type -eq 'profile' -and
+        $Resolution.destination.name -ieq $owner.destination.name)) {
+        return
+    }
     $stagedPath = Join-Path $StagingRoot $owner.path
     if (-not (Test-Path -LiteralPath $stagedPath -PathType Leaf)) { return }
     if ($Resolution.kind -eq 'setting') {
-        $map = Read-JsonCFile $stagedPath
-        if ($map.Contains($Resolution.item)) {
-            $map.Remove($Resolution.item)
-            Write-Utf8File $stagedPath (ConvertTo-PrettyJson $map)
+        if ([string]$owner.destination.type -like 'machine*') {
+            $configuration = Read-MachineConfiguration $stagedPath ([System.IO.Path]::GetFileNameWithoutExtension($stagedPath))
+            $map = Get-MachineScopeSettings $configuration $owner.destination
+            if ($null -ne $map -and $map.Contains($Resolution.item)) {
+                $map.Remove($Resolution.item)
+                Write-MachineConfiguration $stagedPath $configuration
+            }
+        }
+        else {
+            $map = Read-JsonCFile $stagedPath
+            if ($map.Contains($Resolution.item)) {
+                $map.Remove($Resolution.item)
+                Write-Utf8File $stagedPath (ConvertTo-PrettyJson $map)
+            }
         }
     }
     elseif ($owner.destination.type -eq 'profile') {
@@ -2455,14 +2651,18 @@ function Set-RoutedSettingValue {
     $relative = Get-RelativeDisplayPath $RepositoryRoot $originalPath
     $stagedPath = Join-Path $StagingRoot $relative
 
-    if ($Resolution.destination.type -eq 'machine') {
+    if ([string]$Resolution.destination.type -like 'machine*') {
         $configuration = Read-MachineConfiguration $stagedPath $ResolvedMachine.Id
-        $same = $configuration.Settings.Contains($Resolution.item) -and (Test-ValuesEqual $configuration.Settings[$Resolution.item] $Value)
+        if ($Resolution.destination.type -ne 'machine' -and $configuration.SchemaVersion -ne 2) {
+            throw "Scoped destination '$(Get-OwnershipDestinationLabel $Resolution.destination)' requires machine schemaVersion 2 at '$relative'."
+        }
+        $targetSettings = Get-MachineScopeSettings $configuration $Resolution.destination -Create
+        $same = $targetSettings.Contains($Resolution.item) -and (Test-ValuesEqual $targetSettings[$Resolution.item] $Value)
         if (-not $same) {
-            $exists = $configuration.Settings.Contains($Resolution.item)
-            $configuration.Settings[$Resolution.item] = Copy-ComposerValue $Value
+            $exists = $targetSettings.Contains($Resolution.item)
+            $targetSettings[$Resolution.item] = Copy-ComposerValue $Value
             Write-MachineConfiguration $stagedPath $configuration
-            $Changes.Add([pscustomobject]@{ action = if ($exists) { 'update' } else { 'create' }; path = $relative; item = $Resolution.item; owner = 'machine' })
+            $Changes.Add([pscustomobject]@{ action = if ($exists) { 'update' } else { 'create' }; path = $relative; item = $Resolution.item; owner = (Get-OwnershipDestinationLabel $Resolution.destination) })
             $ChangedRoots[$relative] = $true
         }
         return
@@ -2550,11 +2750,11 @@ function ConvertFrom-InteractiveDestination {
     if ($value -ieq 'machine') { return New-OwnershipDestination machine }
     if ($value -ieq 'exclude') { return New-OwnershipDestination exclude }
     if ($value -ieq 'unresolved') { return New-OwnershipDestination unresolved }
-    if ($value -match '^(?i)(component|platform|profile)/([A-Za-z0-9][A-Za-z0-9._-]*)$') {
+    if ($value -match '^(?i)(component|platform|profile|machine-component|machine-profile)/([A-Za-z0-9][A-Za-z0-9._-]*)$') {
         return New-OwnershipDestination $Matches[1].ToLowerInvariant() $Matches[2]
     }
     if ($value -ieq 'profile') { return New-OwnershipDestination profile $Profile }
-    throw "Invalid destination '$Text'. Use component/<name>, platform/<name>, machine, profile/<name>, exclude, or unresolved."
+    throw "Invalid destination '$Text'. Use component/<name>, platform/<name>, machine, machine-component/<name>, machine-profile/<name>, profile/<name>, exclude, or unresolved."
 }
 
 function Resolve-OwnershipInteractively {
@@ -2637,7 +2837,7 @@ function Resolve-OwnershipInteractively {
             if ($scope -match '^(?i)i$') {
                 $individual = [System.Collections.Generic.List[object]]::new()
                 foreach ($item in $group.items) {
-                    $destinationText = Read-Host "Destination for $($item.item) [component/<name>|platform/<name>|machine|profile/<name>|exclude|unresolved]"
+                    $destinationText = Read-Host "Destination for $($item.item) [component/<name>|platform/<name>|machine|machine-component/<name>|machine-profile/<name>|profile/<name>|exclude|unresolved]"
                     $persistence = Read-Host 'Persistence [run|exact]'
                     if ($persistence -notmatch '^(?i)(run|exact)$') { throw "Invalid individual persistence '$persistence'." }
                     $individual.Add([pscustomobject]@{
@@ -2657,7 +2857,7 @@ function Resolve-OwnershipInteractively {
                     New-OwnershipDestination unresolved
                 }
                 elseif ($scope -match '^(?i)g$') {
-                    $destinationText = Read-Host 'Destination [component/<name>|platform/<name>|machine|profile/<name>|exclude|unresolved]'
+                    $destinationText = Read-Host 'Destination [component/<name>|platform/<name>|machine|machine-component/<name>|machine-profile/<name>|profile/<name>|exclude|unresolved]'
                     ConvertFrom-InteractiveDestination $destinationText $Profile
                 }
                 else { throw "Invalid group choice '$scope'." }
@@ -2821,7 +3021,7 @@ function Sync-ComposerProfileFromExport {
     if ($Machine -and $MachineFile) { throw '-Machine and -MachineFile cannot be used together.' }
     $preflight = Test-ComposerRepository -RepositoryRoot $root -Platform $Platform
     if ($preflight.errors.Count -gt 0) {
-        throw "Profile sync requires a valid repository; found $($preflight.errors.Count) error(s)."
+        throw "Profile sync requires a valid repository; found $($preflight.errors.Count) error(s):`n  $(Format-ValidationDiagnostics $preflight)"
     }
     $definitions = @(Get-ProfileDefinitions $root)
     if ($Profile) {
@@ -2962,6 +3162,29 @@ function Sync-ComposerProfileFromExport {
         }
     }
 
+    $machineDefaultDestination = $null
+    $machineScopePath = $null
+    if ($Machine -or $MachineFile) {
+        $machineScopePath = Resolve-MachinePath -RepositoryRoot $root -Machine $Machine -MachineFile $MachineFile
+    }
+    else {
+        $defaultMachine = Get-LocalDefaultMachine $root
+        if ($defaultMachine) {
+            $machineScopePath = Resolve-MachinePath -RepositoryRoot $root -Machine $defaultMachine
+        }
+        else {
+            $definitions = @(Get-MachineDefinitions $root)
+            $compatible = @(if ($Platform) { $definitions | Where-Object { -not $_.Platform -or $_.Platform -ieq $Platform } } else { $definitions })
+            if ($compatible.Count -eq 1) { $machineScopePath = $compatible[0].Path }
+        }
+    }
+    if ($machineScopePath -and (Test-Path -LiteralPath $machineScopePath -PathType Leaf)) {
+        $machineScopeConfiguration = Read-MachineConfiguration $machineScopePath $(if ($Machine) { $Machine } else { $null })
+        if ($machineScopeConfiguration.SchemaVersion -eq 2) {
+            $machineDefaultDestination = New-OwnershipDestination machine-profile $profileId
+        }
+    }
+
     $ownershipIndex = Get-RepositoryOwnershipIndex -RepositoryRoot $root -Platform $Platform -Profile $profileId
     $resolutions = [System.Collections.Generic.List[object]]::new()
     $unresolved = [System.Collections.Generic.List[object]]::new()
@@ -2974,7 +3197,8 @@ function Sync-ComposerProfileFromExport {
         }
         $resolution = Resolve-OwnershipItem -Kind setting -Item $key -Value $resources.Settings[$key] `
             -ExistingOwners (Get-OwnershipIndexOwners $ownershipIndex setting $key) `
-            -ManagedRouter $managedRouter -CustomRouter $customRouter -RoutingMode $RoutingMode
+            -ManagedRouter $managedRouter -CustomRouter $customRouter -RoutingMode $RoutingMode `
+            -MachineDefaultDestination $machineDefaultDestination
         if ($resolution.resolved) { $resolutions.Add($resolution) } else { $unresolved.Add($resolution) }
     }
     foreach ($keyValue in $machineOwnedSettingIds) {
@@ -3041,7 +3265,7 @@ function Sync-ComposerProfileFromExport {
         }
     }
 
-    $needsMachine = @($resolutions | Where-Object { $_.destination.type -eq 'machine' }).Count -gt 0
+    $needsMachine = @($resolutions | Where-Object { [string]$_.destination.type -like 'machine*' }).Count -gt 0
     $resolvedSyncMachine = $null
     $machineRelativePath = $null
     if ($needsMachine -or $Machine -or $MachineFile) {
@@ -3049,7 +3273,7 @@ function Sync-ComposerProfileFromExport {
             $resolvedSyncMachine = Resolve-SyncMachine -RepositoryRoot $root -Platform $Platform -Machine $Machine -MachineFile $MachineFile
         }
         catch {
-            $affected = @($resolutions | Where-Object { $_.destination.type -eq 'machine' } | ForEach-Object item) -join ', '
+            $affected = @($resolutions | Where-Object { [string]$_.destination.type -like 'machine*' } | ForEach-Object item) -join ', '
             throw "Machine-owned items require a resolvable target ($affected). $($_.Exception.Message) Retry with: vscomp sync `"$sourcePath`" -Platform $(if ($Platform) { $Platform } else { '<platform>' }) -Machine <machine-id>"
         }
         $machineLocalRoot = [System.IO.Path]::GetFullPath((Join-Path $root 'machine/local'))
@@ -3211,18 +3435,24 @@ function Sync-ComposerProfileFromExport {
             applicationSensitiveSettingsExcluded = $applicationSensitiveExcludedCount
             exportGlobalSettingsIgnored = $globalSettingsIgnored
             platformSettingsIgnored = 0
-            machineSettingsRouted = @($resolutions | Where-Object { $_.destination.type -eq 'machine' }).Count
+            machineSettingsRouted = @($resolutions | Where-Object { [string]$_.destination.type -like 'machine*' }).Count
             machineSettingsAdded = @($changes | Where-Object {
-                $_.PSObject.Properties.Name -contains 'owner' -and $_.owner -eq 'machine' -and $_.action -eq 'create'
+                $_.PSObject.Properties.Name -contains 'owner' -and $_.owner -like 'machine*' -and $_.action -eq 'create'
             }).Count
             machineSettingsUpdated = @($changes | Where-Object {
-                $_.PSObject.Properties.Name -contains 'owner' -and $_.owner -eq 'machine' -and $_.action -eq 'update'
+                $_.PSObject.Properties.Name -contains 'owner' -and $_.owner -like 'machine*' -and $_.action -eq 'update'
             }).Count
-            machineSettingsRetained = @($resolutions | Where-Object { $_.destination.type -eq 'machine' }).Count - @($changes | Where-Object {
-                $_.PSObject.Properties.Name -contains 'owner' -and $_.owner -eq 'machine'
+            machineSettingsRetained = @($resolutions | Where-Object { [string]$_.destination.type -like 'machine*' }).Count - @($changes | Where-Object {
+                $_.PSObject.Properties.Name -contains 'owner' -and $_.owner -like 'machine*'
             }).Count
         }
         uiStateUpdated = $uiStateChanged
+        uiStateDelivery = [pscustomobject][ordered]@{
+            captured = -not [bool]$SkipUiState
+            seedPath = if ($SkipUiState) { $null } else { "machine/local/ui-state/$profileId/seed.code-profile" }
+            generatedArtifactsUpdated = $false
+            liveProfilesUpdated = $false
+        }
         dryRun = [bool]$DryRun
     }
 }
@@ -3390,7 +3620,7 @@ function Invoke-OwnershipRouterAudit {
             $diagnosticCode = if ($route.match.type -eq 'exact') { 'router-orphan-exact' } else { 'router-stale-pattern' }
             Add-ValidationItem $result $level $diagnosticCode "Route '$($route.id)' matches no current repository-owned item for the selected audit scope; retain it only if it intentionally targets future imports." $routerDisplayPath
         }
-        if ($route.kind -eq 'extension' -and $route.destination.type -eq 'machine') {
+        if ($route.kind -eq 'extension' -and [string]$route.destination.type -like 'machine*') {
             Add-ValidationItem $result errors 'router-uncomposable-extension' "Route '$($route.id)' sends an extension to machine ownership, which the current profile artifact cannot compose." $routerDisplayPath
         }
     }
@@ -3458,7 +3688,7 @@ function Explain-OwnershipRoute {
     }
     $resolution = Resolve-OwnershipItem -Kind $Kind -Item $Item -Value $Value -ExistingOwners $owners `
         -ManagedRouter $managed -CustomRouter $custom -RoutingMode $RoutingMode
-    $destinationPath = if ($resolution.resolved -and $resolution.destination.type -notin @('machine', 'exclude')) {
+    $destinationPath = if ($resolution.resolved -and [string]$resolution.destination.type -notlike 'machine*' -and $resolution.destination.type -ne 'exclude') {
         Get-RelativeDisplayPath $root (Get-RoutedDestinationPath $root $Kind $resolution.destination)
     }
     else { $null }
@@ -3560,7 +3790,8 @@ function Invoke-GlobalSettingsComposition {
     $validation = Test-ComposerRepository -RepositoryRoot $root -Machine $Machine -MachineFile $MachineFile
     if ($validation.errors.Count -gt 0 -or ($Strict -and $validation.warnings.Count -gt 0)) {
         $reason = if ($validation.errors.Count -gt 0) { "$($validation.errors.Count) validation error(s)" } else { "$($validation.warnings.Count) warning(s) in strict mode" }
-        throw "Global settings composition stopped because repository validation found $reason."
+        $levels = if ($validation.errors.Count -gt 0) { @('errors') } else { @('warnings') }
+        throw "Global settings composition stopped because repository validation found $reason`:`n  $(Format-ValidationDiagnostics $validation $levels)"
     }
 
     $sourcePath = Join-Path $root 'global/settings.jsonc'
@@ -3570,9 +3801,13 @@ function Invoke-GlobalSettingsComposition {
         Read-MachineConfiguration -Path $resolvedMachine -ExpectedId $Machine
     }
     else { $null }
-    $machineSettings = if ($machineConfiguration) { $machineConfiguration.Settings } else { $null }
+    $machineSettings = if ($machineConfiguration) { $machineConfiguration.ApplicationSettings } else { $null }
     $machineSettingIds = @()
-    if ($resolvedMachine) { $machineSettingIds = @(Get-MachineSettingIds $machineSettings) }
+    $allMachineSettingIds = @()
+    if ($resolvedMachine) {
+        $machineSettingIds = @(Get-MachineSettingIds $machineSettings)
+        $allMachineSettingIds = @(Get-AllMachineSettingIds $machineConfiguration)
+    }
     $machineId = if ($Machine) { $Machine } elseif ($resolvedMachine) { [System.IO.Path]::GetFileNameWithoutExtension($resolvedMachine) } else { $null }
     $overrides = [System.Collections.Generic.List[object]]::new()
 
@@ -3587,7 +3822,7 @@ function Invoke-GlobalSettingsComposition {
             if ($machineSettingIds -ccontains ([string]$id).TrimStart('-')) { continue }
             if ($ignoredSet.Add([string]$id)) { $ignored.Add([string]$id) }
         }
-        foreach ($id in $machineSettingIds) {
+        foreach ($id in $allMachineSettingIds) {
             if ($ignoredSet.Add($id)) { $ignored.Add($id) }
         }
         $settings['settingsSync.ignoredSettings'] = [string[]]$ignored.ToArray()
@@ -3603,6 +3838,7 @@ function Invoke-GlobalSettingsComposition {
             settingCount = $settings.Count - 1
             machineId = $machineId
             machineSettingCount = $machineSettingIds.Count
+            machineScopedSettingCount = $allMachineSettingIds.Count - $machineSettingIds.Count
             overrideCount = $overrides.Count
             dryRun = $true
         }
@@ -3631,6 +3867,7 @@ function Invoke-GlobalSettingsComposition {
         settingCount = $settings.Count - 1
         machineId = $machineId
         machineSettingCount = $machineSettingIds.Count
+        machineScopedSettingCount = $allMachineSettingIds.Count - $machineSettingIds.Count
         overrideCount = $overrides.Count
         dryRun = $false
     }
@@ -3658,7 +3895,8 @@ function Invoke-ProfileComposition {
     $validation = Test-ComposerRepository -RepositoryRoot $root -Platform $Platform -Machine $Machine -MachineFile $MachineFile
     if ($validation.errors.Count -gt 0 -or ($Strict -and $validation.warnings.Count -gt 0)) {
         $reason = if ($validation.errors.Count -gt 0) { "$($validation.errors.Count) validation error(s)" } else { "$($validation.warnings.Count) warning(s) in strict mode" }
-        throw "Composition stopped because repository validation found $reason."
+        $levels = if ($validation.errors.Count -gt 0) { @('errors') } else { @('warnings') }
+        throw "Composition stopped because repository validation found $reason`:`n  $(Format-ValidationDiagnostics $validation $levels)"
     }
 
     $definition = @(Get-ProfileDefinitions $root | Where-Object { $_.Id -ieq $Profile })
@@ -3686,18 +3924,30 @@ function Invoke-ProfileComposition {
         $uiStateSource = 'explicit-export'
         Resolve-UiStateSeedPath -RepositoryRoot $root -UiStateFromProfile $UiStateFromProfile
     }
-    elseif ($configuredUiStateProfile) {
-        $configuredSeedPath = Get-StoredUiStateSeedPath -RepositoryRoot $root -Profile $configuredUiStateProfile
-        if (Test-Path -LiteralPath $configuredSeedPath -PathType Leaf) {
-            $uiStateSource = "configured-default:$configuredUiStateProfile"
-            $configuredSeedPath
+    else {
+        $profileSeedPath = Get-StoredUiStateSeedPath -RepositoryRoot $root -Profile $profileId
+        if (Test-Path -LiteralPath $profileSeedPath -PathType Leaf) {
+            if ($configuredUiStateProfile -and $configuredUiStateProfile -ieq $profileId) {
+                $uiStateSource = "configured-default:$configuredUiStateProfile"
+            }
+            else {
+                $uiStateSource = "profile-seed:$profileId"
+            }
+            $profileSeedPath
         }
-        else {
-            $uiStateSource = "configured-default-missing:$configuredUiStateProfile"
-            $null
+        elseif ($configuredUiStateProfile) {
+            $configuredSeedPath = Get-StoredUiStateSeedPath -RepositoryRoot $root -Profile $configuredUiStateProfile
+            if (Test-Path -LiteralPath $configuredSeedPath -PathType Leaf) {
+                $uiStateSource = "configured-default:$configuredUiStateProfile"
+                $configuredSeedPath
+            }
+            else {
+                $uiStateSource = "configured-default-missing:$configuredUiStateProfile"
+                $null
+            }
         }
+        else { $null }
     }
-    else { $null }
     $uiState = if ($resolvedUiStateSeed) { Read-CodeProfileGlobalState -Path $resolvedUiStateSeed } else { $null }
     $recipe = Read-ProfileRecipe $definition[0].Path
     $inputFiles = [System.Collections.Generic.List[object]]::new()
@@ -3767,11 +4017,22 @@ function Invoke-ProfileComposition {
     $resolvedMachine = Resolve-MachinePath -RepositoryRoot $root -Machine $Machine -MachineFile $MachineFile
     $machineId = if ($Machine) { $Machine } elseif ($resolvedMachine) { [System.IO.Path]::GetFileNameWithoutExtension($resolvedMachine) } else { $null }
     $machineSettingIds = @()
+    $machineScopedSettings = $null
+    $machineScopedSettingIds = @()
     if ($resolvedMachine) {
         $source = Get-RelativeDisplayPath $root $resolvedMachine
-        $machineSettings = (Read-MachineConfiguration -Path $resolvedMachine -ExpectedId $Machine).Settings
-        $machineSettingIds = @(Get-MachineSettingIds $machineSettings)
+        $machineConfiguration = Read-MachineConfiguration -Path $resolvedMachine -ExpectedId $Machine
+        $machineSettingIds = @(Get-MachineSettingIds $machineConfiguration.ApplicationSettings)
         $inputFiles.Add([pscustomobject]@{ type = 'machine-application-settings'; path = $source })
+        if ($machineConfiguration.SchemaVersion -eq 2) {
+            $machineScopedSourceMap = [hashtable]::new([System.StringComparer]::Ordinal)
+            $machineScopedOverrides = [System.Collections.Generic.List[object]]::new()
+            $machineScopedSettings = Get-MachineProfileSettings -Configuration $machineConfiguration -Components $recipe.Components -Profile $profileId -Source $source -SourceMap $machineScopedSourceMap -Overrides $machineScopedOverrides
+            $machineScopedSettingIds = @(Get-MachineSettingIds $machineScopedSettings)
+            if ($machineScopedSettingIds.Count -gt 0) {
+                $inputFiles.Add([pscustomobject]@{ type = 'machine-scoped-profile-settings'; path = $source })
+            }
+        }
     }
 
     $settings = New-OrderedMap
@@ -3819,6 +4080,10 @@ function Invoke-ProfileComposition {
         $incoming = Read-JsonCFile $platformRecord.Path
         if (-not (Test-IsDictionary $incoming)) { throw "Settings root must be an object in '$($platformRecord.Source)'." }
         Merge-Settings $settings $incoming $platformRecord.Source $sourceMap $overrides | Out-Null
+    }
+    if ($null -ne $machineScopedSettings -and $machineScopedSettingIds.Count -gt 0) {
+        $machineSource = Get-RelativeDisplayPath $root $resolvedMachine
+        Merge-Settings $settings $machineScopedSettings "$machineSource#scoped-profile" $sourceMap $overrides | Out-Null
     }
     foreach ($settingId in $machineSettingIds) {
         $machinePath = "/$(ConvertTo-JsonPointerSegment $settingId)"
@@ -3889,6 +4154,8 @@ function Invoke-ProfileComposition {
             uiStateSeeded = ($null -ne $uiState)
             uiStateSource = $uiStateSource
             machineId = $machineId
+            machineScopedSettingCount = $machineScopedSettingIds.Count
+            portability = if ($machineScopedSettingIds.Count -gt 0) { 'machine-overlay-included' } else { 'portable' }
             inputFiles = [object[]]$inputFiles.ToArray()
             counts = [pscustomobject][ordered]@{
                 settings = $settings.Count
@@ -3943,6 +4210,8 @@ function Invoke-ProfileComposition {
         uiStateSeeded = ($null -ne $uiState)
         uiStateSource = $uiStateSource
         machineId = $machineId
+        machineScopedSettingCount = $machineScopedSettingIds.Count
+        portability = if ($machineScopedSettingIds.Count -gt 0) { 'machine-overlay-included' } else { 'portable' }
         counts = [pscustomobject][ordered]@{
             settings = $settings.Count
             extensions = $extensions.Count

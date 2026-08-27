@@ -2,6 +2,11 @@
 
 This guide is the practical, start-to-finish workflow for using and maintaining VS Code Profile Composer with repository-safe composition and guarded VS Code profile guidance.
 
+For a command-by-command reference with every accepted option, routing
+destination, exit code, mutation boundary, and machine schema 2 behavior, see
+the [Complete composer CLI guide](CLI-GUIDE.md). This file is the workflow
+tutorial; the CLI guide is the exhaustive reference.
+
 ## What the composer does
 
 The composer validates portable repository sources and produces two end-user
@@ -69,7 +74,7 @@ comparison.
 | --- | --- | --- |
 | `main` | Main | Main |
 | `cpp` | C++ | Main + C++ |
-| `unreal` | Unreal Engine | Main + C++ + Unreal |
+| `unreal` | Unreal Engine | Main + C++ + C# + Unreal |
 | `web` | Web | Main + Web |
 | `python` | Python | Main + Python |
 | `powershell` | PowerShell Development | Main + PowerShell |
@@ -138,7 +143,8 @@ validation failures, collisions, or unsafe paths.
 
 ```powershell
 pwsh ./scripts/ProfileComposer.ps1 help
-pwsh ./scripts/ProfileComposer.ps1 help rename-component
+pwsh ./scripts/ProfileComposer.ps1 rename-component help
+pwsh ./scripts/ProfileComposer.ps1 rename-component -Help
 ```
 
 ### Validate all repository sources
@@ -268,7 +274,8 @@ Use the stored Main layout to create the urgent Python + Database profile:
 pwsh ./scripts/ProfileComposer.ps1 compose python-database -Platform windows -Machine excalibur117-w
 ```
 
-`composer.jsonc.defaultUiStateProfile` selects Main's seed automatically.
+Because this profile has no stored seed of its own,
+`composer.jsonc.defaultUiStateProfile` selects Main's seed as the fallback.
 `-UiStateProfile` can name another recipe's stored seed for one run, and
 `-UiStateFromProfile` can use a private export directly for compatibility.
 `-NoUiState` explicitly creates an artifact without UI state. These explicit
@@ -363,7 +370,8 @@ Use `-VSCodeUserDataPath` for a nonstandard stable/Insiders User directory and `
 
 ## Portable profiles and machine-specific application settings
 
-A named-profile build uses components, optional recipe resource operations, and an optional platform overlay. Its `.code-profile` is portable because private machine values are never embedded:
+A named-profile build without `-Machine` uses portable components, recipe
+operations, and an optional platform overlay:
 
 ```powershell
 pwsh ./scripts/ProfileComposer.ps1 compose unreal -Platform windows
@@ -386,11 +394,13 @@ Edit the copied file locally and replace placeholders. Confirm Git ignores it:
 git check-ignore ./machine/local/main-windows.jsonc
 ```
 
-The command produces two ownership-correct artifacts: a portable named profile under `build/profiles/` and machine-specific application settings under `build/global/`. Machine values appear only in `build/global/settings.json`. They are excluded from the named profile and `.code-profile`, even when the same key exists in a component or platform layer.
+The command produces application settings under `build/global/` and a named
+profile under `build/profiles/`. Schema 2 application values appear only in
+the global artifact. Component/profile values appear only in matching named
+profiles and make those exports machine-specific.
 
-The selected machine values are routed only to `build/global/settings.json`;
-the `.code-profile` remains portable. Never commit the local overlay or
-generated output.
+Omit `-Machine` when the `.code-profile` must remain portable. Never commit the
+local overlay or generated output.
 
 `-MachineFile` remains available for backward compatibility and exceptional paths. Do not combine it with `-Machine`.
 
@@ -409,9 +419,14 @@ recipe components in declared order
 → optional exact profiles/<profile-id>.settings.replace.jsonc
 → optional profiles/<profile-id>.extensions.jsonc and .keybindings.jsonc operations
 → optional platform/<platform>.jsonc
+→ selected machine settings.components entries in recipe order
+→ selected machine settings.profiles.<profile-id>
 ```
 
-Separately, `global/settings.jsonc` is merged with the explicitly selected machine file to generate `build/global/settings.json`. Machine-owned keys are removed from named-profile output so VS Code does not display ignored gray duplicates. Later layers win within each of these two streams.
+Separately, `global/settings.jsonc` is merged with
+`settings.application` to generate `build/global/settings.json`. Application
+keys are removed from named profiles. Component/profile machine scopes merge
+only into matching named profiles.
 
 - Settings objects merge recursively.
 - Later scalar values, arrays, and null values replace earlier values.
@@ -456,9 +471,10 @@ Generated output is ignored and disposable. Never edit it as source; make change
 ## Import into VS Code safely
 
 The generated `.code-profile` contains composed settings, extension
-identifiers, keybindings, and the configured default seed's `globalState` when
-that ignored local seed exists. If it is absent, composition reports the
-unavailable seed and creates the profile without UI state.
+identifiers, keybindings, and the target profile seed's `globalState` when that
+ignored local seed exists. Otherwise, it uses the configured default seed. If
+neither seed exists, composition reports the unavailable automatic source and
+creates the profile without UI state.
 
 For the configured seed or an explicit `-UiStateFromProfile` or
 `-UiStateProfile` source, the composer validates and copies only the opaque
@@ -467,7 +483,7 @@ display name, and every other resource. It does not inspect individual UI
 entries, merge layouts, read the running VS Code profile, or record the private
 source path.
 
-The result is copy-on-create behavior: all generated profiles begin with the same captured layout, then diverge normally. Later changes to the source layout do not update existing profiles, and UI contributed by extensions that were not present in the seed uses VS Code's defaults.
+The result is copy-on-compose behavior: each generated profile begins with its selected captured layout, then diverges normally after import. Later changes to the source layout do not update a built artifact until composition or an existing live profile until reviewed import/replacement. UI contributed by extensions that were not present in the seed uses VS Code's defaults.
 
 Treat both the source and seeded exports as private. `globalState` can contain profile-scoped extension or account-related state. The composer preserves it as supplied and does not attempt unsafe partial redaction. Keep the source outside Git or under an ignored private location, inspect the import preview, and delete generated seeded exports when they are no longer needed.
 
@@ -516,6 +532,12 @@ their bytes. Use `-DryRun` first and inspect the Git diff.
 Settings owned by the selected `-Platform` overlay are also excluded from recipe deltas. Update the platform source deliberately when an OS-wide choice changes; the sync summary reports the filtered count.
 
 The source export must include UI State. Use `-SkipUiState` only when intentionally syncing the other resources. Snippet and task resources are rejected because the current composer schema does not own them. Credential-bearing settings, saved connections, private hosts/endpoints, account IDs, certificates, SSH keys, and authentication state also fail before writes and are never printed in full. Keep the export private: it can contain account or extension state. After a real sync, inspect `git diff`, validate, and compose before committing.
+
+When UI state is included, `sync` stores only the target recipe's ignored seed.
+It reports that the existing generated artifact and live VS Code profile remain
+unchanged. Run `compose` with the intended platform and machine options, review
+the resulting `.code-profile`, and then import or replace the live profile to
+deliver the captured layout.
 
 Use deterministic automation when prompts are not possible:
 

@@ -10,14 +10,18 @@
 
 Main is the shared foundation for every profile and already handles everyday PowerShell, Bash/Zsh shell scripts, Windows batch files, and the user's cross-profile extensions. It intentionally excludes database tooling.
 
+The standalone C++ profile composes `main + cpp + cmake + makefile`. The
+Unreal Engine profile composes `main + cpp + csharp + unreal`, so it receives
+general C/C++ intelligence, debugging, documentation, C# support for
+UnrealBuildTool rules, and agent symbol support without activating CMake or
+Makefile project discovery.
+
 ## Current rollout status
 
-The 2026-07-29 automated and read-only Main health check is complete. The
-canonical Main build is healthy; the live profile still has one stale
-machine-owned setting and one stale SQL Server keybinding to remove during its
-next reviewed cleanup. The Unreal Engine artifact has now been generated from
-Main + C++ + Unreal and is ready for manual import preview and validation in
-the primary Unreal workspace. See
+The 2026-07-29 automated and read-only Main health check is complete, and the
+live Main, C++, and Unreal profiles were reconciled on 2026-08-07. The Unreal
+Engine artifact is generated from Main + C++ + C# + Unreal and is ready for
+manual import preview and validation in the primary Unreal workspace. See
 [Main profile health check](audits/2026-07-29-main-profile-health.md).
 
 ## Available opt-in profiles
@@ -76,7 +80,6 @@ These are composition examples only. Employer-specific settings, connections, ac
 - Game Modding
 - Minecraft Modding
 - Containers / DevOps
-- C#
 - Unity
 - Data Science / Jupyter
 - Windows / Microsoft administration

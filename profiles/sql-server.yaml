@@ -1,5 +1,0 @@
-name: "SQL Server"
-components:
-  - main
-  - database
-  - sql-server

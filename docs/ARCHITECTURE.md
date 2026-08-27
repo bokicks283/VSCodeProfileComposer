@@ -13,14 +13,19 @@ Named profile: recipe components in declared order
 → optional recipe settings removals and recursive/exact overrides
 → optional recipe extension and keybinding operations
 → platform settings
-→ machine-local application settings
+→ machine component settings in recipe order
+→ machine profile settings
 → workspace settings
 
 Built-in Default/application settings: global settings
 → explicitly selected machine-local settings
 ```
 
-The global and selected machine layers are generated separately under `build/global/`; they are not merged into named profiles. Every selected machine key is added to both `workbench.settings.applyToAllProfiles` and `settingsSync.ignoredSettings`. The composer removes those keys from named-profile output so VS Code has one unambiguous owner: the selected computer's built-in Default profile. Workspace settings stay separate and are never appended to a personal profile. Manual VS Code profile import and Settings Sync remain the runtime delivery mechanisms.
+Machine application settings are generated under `build/global/` and excluded
+from named profiles. Schema 2 component and profile scopes are merged into the
+matching named profile instead. Every selected machine key is added to
+`settingsSync.ignoredSettings`; only application keys are added to
+`workbench.settings.applyToAllProfiles`. Workspace settings stay separate.
 
 ## Global settings
 
@@ -60,7 +65,8 @@ Main deliberately excludes database clients, database language servers, connecti
 
 - `main` is the shared portable and daily-driver base used by every recipe.
 - `cpp` owns general C/C++.
-- `unreal` owns only Unreal-specific concerns and reuses `cpp`.
+- `csharp` owns reusable C# language support.
+- `unreal` owns only Unreal-specific concerns and reuses `cpp` and `csharp`.
 - `web` and `python` own their language/workflow behavior without database tooling.
 - `powershell` owns only advanced PowerShell development concerns such as Command Explorer, module authoring, dedicated testing/analysis, advanced debugging, and administration tooling.
 - `database` owns vendor-neutral SQL tooling.
@@ -87,7 +93,12 @@ Committed Windows and Linux files contain reusable OS preferences. Windows prefe
 
 ## Machine-local overlays
 
-Ignored `machine/local/<machine-id>.jsonc` files contain absolute executable paths, SDK roots, compiler paths, module paths, and device tuning. Credential-bearing, saved-connection, private-host, certificate, account, and authentication resources are excluded rather than treated as ordinary machine settings. New files use a versioned envelope with stable ID, display name, platform, and optional hostname metadata; legacy plain settings maps remain compatible. `ProfileComposer.ps1 list-machines` shows locally available IDs; `-Machine <machine-id>` selects one for validating, composing, or syncing commands. Machine settings are composed into `build/global/settings.json`, automatically applied to all profiles, and automatically excluded from Settings Sync. They never enter a named profile or `.code-profile` export.
+Ignored `machine/local/<machine-id>.jsonc` files contain absolute executable
+paths, SDK roots, compiler paths, module paths, and device tuning. Schema 2
+separates application, component, and profile scopes. Application values enter
+`build/global/settings.json`; component/profile values enter matching named
+profiles after portable and platform layers. All are excluded from Settings
+Sync. Schema 0/1 remain application-only compatible formats.
 
 ## Workspace settings
 
@@ -101,10 +112,10 @@ Composition always creates a manual-import `.code-profile` containing composed
 settings, extension identifiers, and keybindings. It does not emit those
 resources as redundant standalone files. UI-state capture may retain one opaque
 `globalState` snapshot per recipe under ignored `machine/local/ui-state/`.
-Normal composition copies the seed named by
-`composer.jsonc.defaultUiStateProfile` when present. `-UiStateProfile` overrides
-that source, `-UiStateFromProfile` supplies a one-off compatibility source, and
-`-NoUiState` disables seeding. Exactly one opaque snapshot is copied; layouts
+Normal composition copies the target profile's seed when present, then falls
+back to the seed named by `composer.jsonc.defaultUiStateProfile`.
+`-UiStateProfile` overrides that source, `-UiStateFromProfile` supplies a one-off
+compatibility source, and `-NoUiState` disables seeding. Exactly one opaque snapshot is copied; layouts
 are never parsed or merged. Updating the default seed changes future composed
 artifacts, not already imported profiles. When the capture recipe is omitted,
 only `code --status` is read to resolve one exact recipe match.

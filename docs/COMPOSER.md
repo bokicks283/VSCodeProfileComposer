@@ -72,6 +72,7 @@ name: Unreal Engine
 components:
   - main
   - cpp
+  - csharp
   - unreal
 ```
 
@@ -113,11 +114,12 @@ The finished profile follows VS Code's `IUserDataProfileTemplate` JSON represent
 On import, VS Code reviews the resources and resolves/installs extension
 identifiers through its normal profile-import workflow.
 
-When the ignored seed named by `composer.jsonc.defaultUiStateProfile` exists,
-the export contains its opaque `globalState` resource automatically. If the
-local seed is absent, composition still succeeds and reports that the
-configured seed is unavailable. Accidental component-level `globalState` or
-`ui-state` source files still fail repository validation.
+When an ignored seed exists for the target profile, the export contains its
+opaque `globalState` resource automatically. Otherwise, composition falls back
+to the seed named by `composer.jsonc.defaultUiStateProfile`. If neither local
+seed exists, composition still succeeds and reports that the automatic source
+is unavailable. Accidental component-level `globalState` or `ui-state` source
+files still fail repository validation.
 
 The normal update workflow is:
 
@@ -129,8 +131,8 @@ pwsh ./scripts/ProfileComposer.ps1 compose-all -Platform windows
 The composer validates the stored wrapper and passes only its opaque
 `globalState` string through unchanged. It does not copy source settings,
 extensions, keybindings, name, or path, and it does not interpret or merge the
-UI payload. Generated profiles receive the same starting snapshot, after which
-VS Code owns each live layout independently.
+UI payload. Each generated profile receives its selected starting snapshot,
+after which VS Code owns that live layout independently.
 
 Advanced runs can override or disable the configured source:
 
@@ -141,8 +143,9 @@ pwsh ./scripts/ProfileComposer.ps1 compose python-database -Platform windows -No
 ```
 
 Precedence is `-NoUiState`, explicit `-UiStateProfile`, explicit
-`-UiStateFromProfile`, then `defaultUiStateProfile`. The explicit switches are
-mutually exclusive. Stored files contain only a generic name and `globalState`;
+`-UiStateFromProfile`, the target profile's stored seed, then
+`defaultUiStateProfile`. The explicit switches are mutually exclusive. Stored
+files contain only a generic name and `globalState`;
 their original paths and other export resources are discarded. Stored UI data
 is local and private, not canonical component input.
 
@@ -174,6 +177,10 @@ validates the final routed plan and synchronizes:
 
 For routed settings, machine resolution is explicit `-Machine`/`-MachineFile`, then ignored `machine/local/.default-machine`, then one unique platform-compatible definition. Multiple matches never resolve by hostname or path text. A sync `-MachineFile` must resolve under `machine/local/` so it can join the rollback transaction. The route report records add, update, or retain by setting key, destination file, selection mode, and any earlier portable/platform owner without printing the value.
 
+Storing the target recipe's UI seed is a source update only. `sync` reports that
+generated artifacts and live profiles remain unchanged. Delivering that seed
+requires a later `compose` followed by a reviewed VS Code import or replacement.
+
 Application settings are read from the selected VS Code User directory. The composer appends every top-level value missing from `workbench.settings.applyToAllProfiles` before routing, so the live array cannot silently orphan a value. Portable values update `global/settings.jsonc`. Keys present in `settingsSync.ignoredSettings` or classified as machine-local update the selected private machine overlay; newly classified machine keys are also added to the ignored list. A leading `-` means VS Code force-syncs that key and does not itself establish machine ownership. Sensitive application values are excluded from repository storage. `-SkipGlobal` disables application reconciliation; `-SkipUiState` permits an export without UI state.
 
 Global reconciliation rewrites `global/settings.jsonc` as normalized JSON because live application settings carry no repository comments. Preview and review this diff before committing.
@@ -204,9 +211,10 @@ Generate a portable profile plus application settings for one named machine:
 pwsh ./scripts/ProfileComposer.ps1 compose unreal -Platform windows -Machine windows
 ```
 
-Machine values are written only to `build/global/settings.json`; the
-`.code-profile` remains portable. When explicitly requested, an opaque UI-state
-seed is embedded directly in that finished artifact.
+Machine application values are written only to `build/global/settings.json`.
+Schema 2 component/profile values are embedded in matching `.code-profile`
+artifacts and reported as `machine-overlay-included`. Omit `-Machine` for a
+portable artifact.
 
 Import through VS Code's Profiles editor:
 
@@ -255,7 +263,7 @@ The suite covers recipe and JSONC parsing, validation, global ownership repair, 
 - `sync-machine-local-path`: review the redacted route and select a machine explicitly when local default or unique platform metadata cannot resolve one.
 - `sync-sensitive-setting`: remove the credential/private resource from the export or manage it with the owning extension or a dedicated secret store; ordinary machine JSONC is not an approved secret store.
 - `invalid-export-filename`: keep the profile display name free of path separators, traversal sequences, and reserved Windows names.
-- `unsupported-ui-state-source`: remove the component-level file; starting UI state is accepted only through the configured ignored seed, an explicit `-UiStateProfile` or `-UiStateFromProfile` override, or omitted with `-NoUiState`.
+- `unsupported-ui-state-source`: remove the component-level file; starting UI state is accepted only through the target profile's ignored seed, the configured fallback seed, an explicit `-UiStateProfile` or `-UiStateFromProfile` override, or omitted with `-NoUiState`.
 - missing or invalid UI seed: manually export the arranged source profile again and confirm it contains a non-empty `globalState` resource.
 - sync reports a missing UI resource: export **UI State** with the profile, or intentionally add `-SkipUiState`.
 - sync rejects application settings: use `-VSCodeUserDataPath` for the intended stable/Insiders User directory, or `-SkipGlobal` for a recipe-only reconciliation.

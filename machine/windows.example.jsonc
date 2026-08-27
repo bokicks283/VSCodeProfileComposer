@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "machine": {
     // Copy to machine/local/main-windows.jsonc and keep id equal to the filename.
     "id": "main-windows",
@@ -8,10 +8,18 @@
     "hostnames": []
   },
   "settings": {
-    "todo-tree.ripgrep.ripgrep": "C:\\Users\\<username>\\AppData\\Local\\Microsoft\\WinGet\\Links\\rg.exe"
-
-    // Examples only:
-    // "C_Cpp.default.compilerPath": "C:\\Path\\To\\compiler.exe",
-    // "vscode-kubernetes.kubectl-path": "C:\\Path\\To\\kubectl.exe"
+    "application": {
+      "todo-tree.ripgrep.ripgrep": "C:\\Users\\<username>\\AppData\\Local\\Microsoft\\WinGet\\Links\\rg.exe"
+    },
+    "components": {
+      "cpp": {
+        // "C_Cpp.default.compilerPath": "C:\\Path\\To\\compiler.exe"
+      }
+    },
+    "profiles": {
+      "unreal": {
+        // "some.unreal.machineSetting": "C:\\Path\\To\\UnrealEngine"
+      }
+    }
   }
 }

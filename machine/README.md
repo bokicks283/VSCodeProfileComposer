@@ -1,10 +1,10 @@
 # Machine-local settings
 
-Copy the matching example into `machine/local/`, give it a stable computer ID, and replace placeholders locally. Files under `machine/local/` are ignored. New files use schema version 1:
+Copy the matching example into `machine/local/`, give it a stable computer ID, and replace placeholders locally. Files under `machine/local/` are ignored. New files use schema version 2:
 
 ```jsonc
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "machine": {
     "id": "main-windows",
     "name": "Main Windows",
@@ -12,12 +12,22 @@ Copy the matching example into `machine/local/`, give it a stable computer ID, a
     "hostnames": []
   },
   "settings": {
-    "todo-tree.ripgrep.ripgrep": "C:\\Users\\<username>\\bin\\rg.exe"
+    "application": {
+      "todo-tree.ripgrep.ripgrep": "C:\\Users\\<username>\\bin\\rg.exe"
+    },
+    "components": {
+      "cpp": {
+        "C_Cpp.default.compilerPath": "C:\\Toolchains\\clang++.exe"
+      }
+    },
+    "profiles": {
+      "unreal": {}
+    }
   }
 }
 ```
 
-The durable `machine.id` must match the filename. The display name and optional hostnames may change without changing identity. Existing plain settings maps remain compatible as legacy schema 0.
+The durable `machine.id` must match the filename. The display name and optional hostnames may change without changing identity. Schema 1 and legacy plain settings maps remain compatible as application-only definitions.
 
 For example:
 
@@ -47,7 +57,12 @@ Set-Content ./machine/local/.default-machine 'main-windows'
 
 If more than one compatible machine remains, sync fails and recommends an explicit command.
 
-The selected values are generated only into `build/global/settings.json`. The composer adds their keys to both `workbench.settings.applyToAllProfiles` and `settingsSync.ignoredSettings`, so they apply in every profile on this computer without syncing to another computer. Named-profile settings and `.code-profile` exports remain portable.
+Application values are generated only into `build/global/settings.json`; their
+keys are added to both `workbench.settings.applyToAllProfiles` and
+`settingsSync.ignoredSettings`. Component values enter every selected recipe
+containing that component, while profile values enter only the named profile.
+All scoped keys are Sync-ignored. A `.code-profile` containing scoped machine
+values is machine-specific and reported as `machine-overlay-included`.
 
 Typical values:
 

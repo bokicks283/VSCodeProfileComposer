@@ -20,7 +20,7 @@ Usage:
   pwsh ./scripts/ProfileComposer.ps1 <command> [arguments] [options]
 
 Commands:
-  help [command]                    Show general or command-specific help.
+  help [command]                    Show general or command-specific help (legacy form).
   validate                          Validate repository sources and ownership.
   fix global                       Repair mechanically safe global ownership issues.
   compose <profile>                 Compose one named profile and application settings.
@@ -42,7 +42,8 @@ Aliases:
   list profiles | list machines
   rename profile <old> <new> | rename component <old> <new>
 
-Use "help <command>" or "<command> -Help" for options and examples.
+Use "<command> help" or "<command> -Help" for options and examples.
+The legacy "help <command>" form remains supported.
 '@ | Write-Host
 }
 
@@ -89,14 +90,14 @@ Options:
   -Platform <id>              Apply a committed platform overlay.
   -Machine <id>               Apply ignored machine/local/<id>.jsonc to application settings.
   -MachineFile <path>         Backward-compatible explicit machine overlay path.
-  -NoUiState                  Omit UI state even when a configured default seed exists.
-  -UiStateProfile <id>        Advanced: override the configured default with a stored seed.
+  -NoUiState                  Omit UI state even when an automatic seed exists.
+  -UiStateProfile <id>        Override automatic selection with a stored profile seed.
   -UiStateFromProfile <path>  Compatibility: use one private export without storing it.
   -DryRun                     Validate and print planned output without writing build/.
   -Strict                     Treat warnings as errors.
 
-  Without an explicit UI option, composition uses the stored seed named by
-  composer.jsonc defaultUiStateProfile when that local seed exists.
+  Without an explicit UI option, composition uses the target profile's stored
+  seed when present, then falls back to composer.jsonc defaultUiStateProfile.
 
 Example:
   pwsh ./scripts/ProfileComposer.ps1 compose python-database -Platform windows -DryRun
@@ -144,6 +145,11 @@ sync [<profile>] <private-export> [-Platform <id>] [-Machine <id>]
   prompts and exits nonzero without repository writes if anything is unresolved.
   -WriteUnresolved writes a reusable provisional router file for review.
 
+  When UI state is included, sync stores the target recipe's opaque seed only.
+  It does not regenerate build artifacts or modify an existing live VS Code
+  profile. Run compose for the recipe, then complete a reviewed import or
+  replacement to deliver the captured UI state.
+
   RoutingMode defaults to Supplement. Override suppresses managed matches when a
   custom route matches. Isolated disables the managed router, while exact existing
   ownership and classification remain active. Dry-run performs no repository
@@ -181,7 +187,8 @@ Actions:
   import <custom-router> [-DryRun]
 
 Typed destinations:
-  -Component <name> | -Platform <name> | -Machine | -Profile <name> |
+  -Component <name> | -Platform <name> | -Machine |
+  -MachineComponent <name> | -MachineProfile <name> | -Profile <name> |
   -Exclude | -Unresolved
 
 Route metadata defaults:
@@ -304,6 +311,10 @@ function Read-CommandOptions {
     $positionals = [System.Collections.Generic.List[string]]::new()
     for ($index = 0; $index -lt $Arguments.Count; $index++) {
         $argument = $Arguments[$index]
+        if ($argument -ieq 'help') {
+            $options.Help = $true
+            continue
+        }
         if (-not $argument.StartsWith('-')) {
             $positionals.Add($argument)
             continue
@@ -548,6 +559,8 @@ function Get-RouteDestinationFromOptions {
         @{ Key = 'component'; Type = 'component'; Value = $true },
         @{ Key = 'platform'; Type = 'platform'; Value = $true },
         @{ Key = 'profile'; Type = 'profile'; Value = $true },
+        @{ Key = 'machinecomponent'; Type = 'machine-component'; Value = $true },
+        @{ Key = 'machineprofile'; Type = 'machine-profile'; Value = $true },
         @{ Key = 'machine'; Type = 'machine'; Value = $false },
         @{ Key = 'exclude'; Type = 'exclude'; Value = $false },
         @{ Key = 'unresolved'; Type = 'unresolved'; Value = $false }
@@ -557,7 +570,7 @@ function Get-RouteDestinationFromOptions {
         }
     }
     if ($selected.Count -ne 1) {
-        throw 'Choose exactly one destination: -Component, -Platform, -Machine, -Profile, -Exclude, or -Unresolved.'
+        throw 'Choose exactly one destination: -Component, -Platform, -Machine, -MachineComponent, -MachineProfile, -Profile, -Exclude, or -Unresolved.'
     }
     $choice = $selected[0]
     $name = if ($choice.Value) { [string]$Options[$choice.Key] } else { $null }
@@ -634,7 +647,7 @@ function Invoke-RouteCommand {
         }
         { $_ -in @('add-setting', 'add-extension', 'add-prefix', 'add-publisher') } {
             $parsed = Read-CommandOptions $remaining @('Machine', 'Exclude', 'Unresolved', 'ConfirmBroadRule', 'DryRun') @(
-                'Component', 'Platform', 'Profile', 'RepositoryRoot', 'Id', 'Reason', 'Source', 'Status', 'Kind'
+                'Component', 'Platform', 'Profile', 'MachineComponent', 'MachineProfile', 'RepositoryRoot', 'Id', 'Reason', 'Source', 'Status', 'Kind'
             )
             if ($parsed.Options.Help) { Write-CommandHelp "route $action"; return }
             if ($parsed.Positionals.Count -ne 1) { throw "route $action requires one key, extension ID, prefix, or publisher." }
@@ -724,7 +737,8 @@ function Invoke-Compose {
         $uiLabel = if ($result.uiStateSeeded) { " [UI: $($result.uiStateSource)]" }
             elseif ($result.uiStateSource -like 'configured-default-missing:*') { " [UI seed unavailable: $($result.uiStateSource.Split(':', 2)[1])]" }
             else { '' }
-        Write-Host "$verb '$($result.profileId)': $($result.codeProfileExportPath)$uiLabel"
+        $machineScopeLabel = if ($result.machineScopedSettingCount -gt 0) { " [machine-scoped: $($result.machineScopedSettingCount)]" } else { '' }
+        Write-Host "$verb '$($result.profileId)': $($result.codeProfileExportPath)$uiLabel$machineScopeLabel"
     }
     $globalLabel = if ($parsed.Options.dryrun) { 'DRY RUN application settings' } else { 'Application settings' }
     Write-Host "$globalLabel`: $($globalResult.settingsPath)"
@@ -873,6 +887,12 @@ try {
             if ($result.machine) {
                 Write-Host "  Selected machine: $($result.machine.id) [$($result.machine.selection)] -> $($result.machine.path)"
             }
+            if ($result.uiStateDelivery.captured) {
+                $seedVerb = if ($result.dryRun) { 'would store or retain' } elseif ($result.uiStateUpdated) { 'stored' } else { 'retained' }
+                Write-Host "  UI state: $seedVerb target seed at '$($result.uiStateDelivery.seedPath)'."
+                Write-Host "  Generated artifacts: unchanged; run 'vscomp compose $($result.profileId)' with the required platform/machine options."
+                Write-Host '  Live VS Code profiles: unchanged until reviewed import or replacement of the composed artifact.'
+            }
             $displayRoutes = @($result.routes | Where-Object { $_.changed -or $_.ruleId -ne 'existing-repository-owner' -or $_.classification -notin @('portable', 'extension') })
             foreach ($route in $displayRoutes) {
                 Write-Host "    $($route.kind.ToUpperInvariant()) $($route.item) -> $($route.destination) [$($route.ruleId); precedence $($route.precedence); $($route.classification)]"
@@ -931,6 +951,6 @@ try {
 }
 catch {
     [Console]::Error.WriteLine("Profile Composer error: $($_.Exception.Message)")
-    [Console]::Error.WriteLine("Run 'pwsh ./scripts/ProfileComposer.ps1 help $Command' for usage.")
+    [Console]::Error.WriteLine("Run 'pwsh ./scripts/ProfileComposer.ps1 $Command -Help' for usage.")
     exit 1
 }

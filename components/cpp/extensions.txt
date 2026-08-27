@@ -1,1 +1,3 @@
+cschlosser.doxdocgen
+ms-vscode.cpp-devtools
 ms-vscode.cpptools

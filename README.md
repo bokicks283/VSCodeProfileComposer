@@ -2,7 +2,7 @@
 
 This repository contains reusable VS Code settings and extension components plus a safe PowerShell 7 composer. `scripts/ProfileComposer.ps1` is the unified CLI for validation, composition, discovery, reviewed export synchronization, UI-state capture, transactional source maintenance, and guarded VS Code profile guidance. Ordinary composition remains repository-only.
 
-For a complete first-run walkthrough, profile-selection guide, import procedure, Settings Sync precautions, maintenance workflow, and troubleshooting reference, start with [Complete usage guide](docs/USAGE.md).
+For a complete first-run walkthrough, profile-selection guide, import procedure, Settings Sync precautions, maintenance workflow, and troubleshooting reference, start with [Complete usage guide](docs/USAGE.md). For every command, subcommand, option, destination, output, exit behavior, and safety boundary, use the [Complete composer CLI guide](docs/CLI-GUIDE.md).
 
 ## Quick start
 
@@ -17,7 +17,8 @@ The composer has no external runtime dependencies and never installs modules aut
 ```powershell
 # Discover commands and detailed command-specific help.
 pwsh ./scripts/ProfileComposer.ps1 help
-pwsh ./scripts/ProfileComposer.ps1 help compose
+pwsh ./scripts/ProfileComposer.ps1 compose help
+pwsh ./scripts/ProfileComposer.ps1 compose -Help
 
 # Validate every component and recipe.
 pwsh ./scripts/ProfileComposer.ps1 validate
@@ -101,7 +102,8 @@ Named profile: Main shared base
 → optional recipe-specific settings removals, recursive overrides, and exact replacements
 → optional recipe-specific extension/keybinding operations
 → platform/<platform>.jsonc
-→ selected machine-local settings in built-in Default/application settings
+→ selected schema 2 machine component settings
+→ selected schema 2 machine profile settings
 → workspace settings owned by the active repository
 
 Built-in Default/application settings: global/settings.jsonc
@@ -152,9 +154,9 @@ other top-level key in generated application settings is included exactly once.
 During `sync`, the same normalization runs before ownership routing, so a value
 cannot become orphaned merely because its array entry was missing.
 
-Explicitly selected machine-local values remain intact only in
-`build/global/settings.json`; they are never written to named-profile settings
-or exports.
+Machine application values remain only in `build/global/settings.json`.
+Schema 2 component/profile values are written only to matching named profiles;
+those exports are explicitly reported as machine-specific.
 
 Repository validation checks recipes, JSONC/YAML structure, extension IDs and duplicates, portable personal paths and likely secrets, requested overlays, ignored machine-local boundaries, profile IDs, and output containment.
 
@@ -167,9 +169,13 @@ contains the fully composed settings, recipe-owned extension identifiers, and
 generated keybindings. VS Code handles extension acquisition during its normal
 import workflow—composition never installs extensions.
 
-Machine overlays are deliberately excluded from named-profile settings and `.code-profile` exports. Selecting `-Machine` or `-MachineFile` instead adds those keys to `build/global/settings.json`, `workbench.settings.applyToAllProfiles`, and `settingsSync.ignoredSettings`. This makes the values effective on the selected computer without sending its paths through Settings Sync. A generated export containing any UI seed is private and non-portable; use `-NoUiState` when a portable UI-free artifact is required.
+Schema 2 machine application values are excluded from named-profile settings
+and added to `build/global/settings.json`, `applyToAllProfiles`, and
+`settingsSync.ignoredSettings`. Component/profile values are added only to
+matching profile exports and their keys are Sync-ignored. Such exports are
+machine-specific; omit `-Machine` for a portable artifact.
 
-`ProfileComposer.ps1 capture-ui-state [<profile-id>] <export-path>` validates a manually exported `.code-profile` and stores only its opaque `globalState` resource at `machine/local/ui-state/<profile>/seed.code-profile`. When the recipe ID is omitted, the CLI reads `code --status` and accepts exactly one active profile name matching a recipe ID or display name. Zero or multiple matches fail safely. The source settings, extensions, keybindings, name, and path are not copied. Normal composition automatically uses the stored seed named by `composer.jsonc.defaultUiStateProfile`; `-UiStateProfile <id>` is an advanced per-run override, `-UiStateFromProfile <path>` is a one-off compatibility source, and `-NoUiState` explicitly omits UI state. This is copy-on-compose, not live inheritance: updating Main's seed and rerunning `compose-all` updates every generated artifact, but already imported profiles remain unchanged until reviewed re-import or replacement. Views introduced by other extensions use their defaults. Stored and generated UI-seeded files are private because `globalState` can include extension or account-related state.
+`ProfileComposer.ps1 capture-ui-state [<profile-id>] <export-path>` validates a manually exported `.code-profile` and stores only its opaque `globalState` resource at `machine/local/ui-state/<profile>/seed.code-profile`. When the recipe ID is omitted, the CLI reads `code --status` and accepts exactly one active profile name matching a recipe ID or display name. Zero or multiple matches fail safely. The source settings, extensions, keybindings, name, and path are not copied. Normal composition automatically uses the target profile's stored seed when present, then falls back to the seed named by `composer.jsonc.defaultUiStateProfile`; `-UiStateProfile <id>` is an advanced per-run override, `-UiStateFromProfile <path>` is a one-off compatibility source, and `-NoUiState` explicitly omits UI state. This is copy-on-compose, not live inheritance: capturing or syncing a seed does not regenerate a built artifact or change an imported profile. Run `compose` (or `compose-all`) and then complete a reviewed import or replacement to deliver it. Views introduced by other extensions use their defaults. Stored and generated UI-seeded files are private because `globalState` can include extension or account-related state.
 
 `ProfileComposer.ps1 sync [<profile-id>] <export-path>` is the reviewed reverse
 path. It consumes settings, extensions, keybindings, and optional
@@ -178,7 +184,9 @@ unresolved items for terminal decisions; validates the complete plan; and
 updates authoritative files atomically. Missing imported resources do not
 delete shared ownership. Explicit profile routes may use the existing profile
 sidecar formats, and a reviewed keybinding order remains profile-local. The
-private UI resource remains ignored under `machine/local/ui-state/`.
+private UI resource remains ignored under `machine/local/ui-state/`. Storing it
+does not regenerate `build/` or modify a live VS Code profile; `sync` reports
+those delivery boundaries and points to the required compose/import steps.
 
 ## Guided VS Code profile management
 
@@ -205,8 +213,8 @@ File → Preferences → Profiles
 → Create Profile
 ```
 
-When the configured local default seed exists, UI placement is included
-automatically. The composer passes one opaque snapshot through without
+When a target-profile seed or configured fallback seed exists, UI placement is
+included automatically. The composer passes one opaque snapshot through without
 interpreting or merging it. After import, VS Code owns and syncs the resulting
 live UI state. Review every import preview: re-importing may create a profile or
 replace selected profile resources according to VS Code's current import
@@ -252,4 +260,4 @@ pwsh -NoProfile -NonInteractive -File ./scripts/Test-Documentation.ps1
 
 Unattended installation, replacement, deletion, and export remain deferred because VS Code 1.130 exposes no supported complete profile-management CLI. The guided commands may read profile names/location IDs and `code --status`, and `vscode open` may launch an existing profile; they never write profile storage, invoke import/export automatically, install extensions, or alter Settings Sync. `sync` requires a manually exported private `.code-profile` and reads application settings only for explicit global ownership reconciliation. Settings Sync remains the primary cross-machine delivery mechanism for imported active profiles.
 
-See [Complete usage guide](docs/USAGE.md), [Ownership router and sync](docs/OWNERSHIP-ROUTER.md), [Composer details](docs/COMPOSER.md), [Architecture](docs/ARCHITECTURE.md), [Schema and ownership contract](docs/SCHEMA.md), [Main profile health check](docs/audits/2026-07-29-main-profile-health.md), [Sync routing and schema-model audit](docs/audits/2026-07-23-sync-schema-model.md), [Main-profile ownership audit](docs/audits/2026-07-22-main-profile-ownership.md), [Portability](docs/PORTABILITY.md), [Migration](docs/MIGRATION.md), and the sanitized [historical extension reference](reference/extensions/README.md).
+See [Complete composer CLI guide](docs/CLI-GUIDE.md), [Complete usage guide](docs/USAGE.md), [C++ and Unreal performance settings](docs/CPP-UNREAL-PERFORMANCE.md), [Ownership router and sync](docs/OWNERSHIP-ROUTER.md), [Composer details](docs/COMPOSER.md), [Architecture](docs/ARCHITECTURE.md), [Schema and ownership contract](docs/SCHEMA.md), [Main profile health check](docs/audits/2026-07-29-main-profile-health.md), [Sync routing and schema-model audit](docs/audits/2026-07-23-sync-schema-model.md), [Main-profile ownership audit](docs/audits/2026-07-22-main-profile-ownership.md), [Portability](docs/PORTABILITY.md), [Migration](docs/MIGRATION.md), and the sanitized [historical extension reference](reference/extensions/README.md).

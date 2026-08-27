@@ -1,6 +1,30 @@
 {
   // Example only: copy reviewed entries into the owning Unreal workspace.
+  "files.associations": {
+    "*.usf": "hlsl",
+    "*.ush": "hlsl"
+  },
+  "C_Cpp.files.exclude": {
+    // C/C++-specific exclusions also apply to browse paths outside the
+    // workspace and do not hide these folders in Explorer.
+    "**/.trunk": true,
+    "**/.vs": true,
+    "**/.vscode": true,
+    "**/Binaries": true,
+    "**/Content": true,
+    "**/DerivedDataCache": true,
+    "**/Saved": true,
+    "**/node_modules": true
+  },
   "files.exclude": {
+    "**/.trunk": true,
+    "**/.vs": true,
+    "**/Binaries": true,
+    "**/DerivedDataCache": true,
+    "**/Saved": true,
+    "**/node_modules": true,
+    "**/*.uasset": true,
+    "**/*.umap": true,
     "**/.trunk/*actions/": true,
     "**/.trunk/*logs/": true,
     "**/.trunk/*notifications/": true,
@@ -10,20 +34,31 @@
     "**/Content/__ExternalObjects__/": true
   },
   "files.watcherExclude": {
+    "**/.trunk/**": true,
+    "**/.vs/**": true,
     "**/.trunk/*actions/**": true,
     "**/.trunk/*logs/**": true,
     "**/.trunk/*notifications/**": true,
     "**/.trunk/*out/**": true,
     "**/.trunk/*plugins/**": true,
     "**/Binaries/**": true,
+    "**/Content/**": true,
     "**/DerivedDataCache/**": true,
-    "**/Intermediate/**": true,
-    "**/Saved/**": true
+    "**/Saved/**": true,
+    "**/node_modules/**": true
   },
   "search.exclude": {
+    "**/.trunk/**": true,
+    "**/.vs/**": true,
     "**/Binaries/**": true,
+    "**/Content/**": true,
     "**/DerivedDataCache/**": true,
     "**/Intermediate/**": true,
-    "**/Saved/**": true
-  }
+    "**/Saved/**": true,
+    "**/node_modules/**": true
+  },
+
+  // Avoid recursively searching large workspace folders for nested Git repos.
+  "git.autoRepositoryDetection": "openEditors",
+  "git.repositoryScanMaxDepth": 1
 }

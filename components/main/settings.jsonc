@@ -56,9 +56,6 @@
   "github.copilot.enable": {
     "plaintext": true
   },
-  "gitlens.ai.gitkraken.model": "gemini:gemini-2.5-flash",
-  "gitlens.ai.model": "gitkraken",
-  "gitlens.statusBar.enabled": false,
   "rainbow_csv.comment_prefix": "#",
   "search.quickOpen.includeSymbols": true,
   "search.searchView.keywordSuggestions": true,
@@ -94,13 +91,5 @@
   },
   "workbench.editorLargeFileConfirmation": 4096,
   "workbench.iconTheme": "vscode-icons",
-  "workbench.settings.enableNaturalLanguageSearch": false,
-  "yaml.disableSchemaDetection": [
-    "**/.github/workflows/*.yml",
-    "**/.github/workflows/*.yaml",
-    "**/.gitea/workflows/*.yml",
-    "**/.gitea/workflows/*.yaml",
-    "**/.forgejo/workflows/*.yml",
-    "**/.forgejo/workflows/*.yaml"
-  ]
+  "workbench.settings.enableNaturalLanguageSearch": false
 }

@@ -110,7 +110,7 @@ Trunk CLI, CI, and repository `.trunk` files remain valid external tooling.
 - PostgreSQL, MySQL/MariaDB, and SQLite component selection
 - SQLTools vendor-driver ownership
 - `mdb.mcp.server` ownership
-- Flask, PHP, Java, C#, Unity, game/minecraft modding
+- Flask, PHP, Java, Unity, game/minecraft modding
 - CMake/Make, CodeLLDB, Jupyter/data science
 - framework-specific Web splits
 - Python formatter/linter ownership
@@ -130,17 +130,19 @@ Trunk CLI, CI, and repository `.trunk` files remain valid external tooling.
 
 No generated profile packages, rollout/apply scripts, fragment builders, performance harnesses, temporary workflows, or artifact trees were migrated during the ownership refinements. The later unified CLI adds a reviewed `sync` transaction for manually exported profiles; it creates recipe-specific deltas and does not retroactively treat flattened historical exports as component sources.
 
-## Machine schema 1 and sync-routing migration
+## Machine schema 2 and sync-routing migration
 
 Machine definitions created from the committed examples now use
-`schemaVersion: 1` with explicit durable ID, display name, platform, optional
-hostnames, and a nested `settings` object. Existing ignored plain settings maps
-remain supported as legacy schema 0 and are not rewritten merely by validation
-or composition. A changed legacy file keeps its legacy shape.
+`schemaVersion: 2` with explicit durable ID, display name, platform, optional
+hostnames, and `settings.application`, `settings.components`, and
+`settings.profiles` objects. Schema 1 envelopes and ignored plain schema 0 maps
+remain supported as application-only definitions and are not rewritten merely
+by validation or composition.
 
 No tracked personal value migration is required. To adopt the new schema,
 copy the matching example to `machine/local/<id>.jsonc`, keep `machine.id`
-equal to `<id>`, and privately transfer only reviewed non-secret settings.
+equal to `<id>`, move former flat settings under `settings.application`, and
+privately transfer only reviewed non-secret settings.
 Optionally put that ID in ignored `machine/local/.default-machine`.
 
 Reverse synchronization now classifies imported values before tracked changes

@@ -1,0 +1,9 @@
+{
+  // Main owns the shared files.associations object. This profile-local,
+  // recursive override adds Unreal shader types without duplicating component
+  // ownership or affecting non-Unreal profiles.
+  "files.associations": {
+    "*.usf": "hlsl",
+    "*.ush": "hlsl"
+  }
+}

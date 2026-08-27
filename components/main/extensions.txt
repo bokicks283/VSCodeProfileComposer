@@ -7,7 +7,6 @@ bierner.markdown-emoji
 bierner.markdown-footnotes
 bierner.markdown-preview-github-styles
 codezombiech.gitignore
-eamodio.gitlens
 editorconfig.editorconfig
 github.vscode-github-actions
 github.vscode-pull-request-github

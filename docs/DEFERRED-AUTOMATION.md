@@ -31,7 +31,7 @@
 - Settings Sync remains the primary cross-machine delivery mechanism after a profile is imported.
 - This repository is the canonical human-readable configuration and composition source.
 - Live VS Code profiles remain the runtime source of truth for UI placement and other VS Code-owned state.
-- `ProfileComposer.ps1 capture-ui-state [<profile-id>] <export-path>` can extract and retain only the opaque UI resource from a manually exported profile under ignored local data. Automatic recipe selection reads status text only and fails closed. Normal composition automatically copies the configured default seed; explicit overrides and `-NoUiState` remain available. Direct live capture, layout parsing or merging, and continuing inheritance remain deferred.
+- `ProfileComposer.ps1 capture-ui-state [<profile-id>] <export-path>` can extract and retain only the opaque UI resource from a manually exported profile under ignored local data. Automatic recipe selection reads status text only and fails closed. Normal composition automatically copies the target profile's stored seed or falls back to the configured default seed; explicit overrides and `-NoUiState` remain available. Direct live capture, layout parsing or merging, and continuing inheritance remain deferred.
 - `ProfileComposer.ps1 sync [<profile-id>] <export-path>` is the reviewed reverse path for the repository-owned resources in that export. Existing exact owners are updated directly; new flattened differences require an approved route or grouped decision, and profile-local ownership is explicit rather than a fallback.
 - Stable profiles may be exported and stored privately.
 - Main is the shared base and already provides everyday shell-language support to every profile.
