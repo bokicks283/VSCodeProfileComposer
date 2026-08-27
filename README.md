@@ -29,6 +29,10 @@ pwsh ./scripts/ProfileComposer.ps1 fix global -DryRun
 # Compose one profile.
 pwsh ./scripts/ProfileComposer.ps1 compose main -Platform windows
 
+# Compose the two current project profiles.
+pwsh ./scripts/ProfileComposer.ps1 compose react -Platform windows
+pwsh ./scripts/ProfileComposer.ps1 compose project-zomboid-mod -Platform windows
+
 # List and select private machine-local overlays by ID.
 pwsh ./scripts/ProfileComposer.ps1 list-machines
 pwsh ./scripts/ProfileComposer.ps1 compose unreal -Platform windows -Machine windows

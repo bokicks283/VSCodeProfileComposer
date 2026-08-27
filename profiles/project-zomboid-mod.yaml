@@ -1,0 +1,6 @@
+name: "Project Zomboid Modding"
+components:
+  - main
+  - web
+  - lua
+  - project-zomboid

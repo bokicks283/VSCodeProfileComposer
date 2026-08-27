@@ -706,6 +706,32 @@ Describe 'Current profile acceptance compositions' {
         { Invoke-ProfileComposition $fixture web -Platform windows } | Should -Not -Throw
     }
 
+    It 'composes the Bokicks Labs React profile with focused React and Web tooling' {
+        $fixture = New-ComposerFixture 'compose-react'
+        { Invoke-ProfileComposition $fixture react -Platform windows } | Should -Not -Throw
+        $resources = Read-ComposedProfileResources $fixture react
+        $resources.Extensions | Should -Contain 'bradlc.vscode-tailwindcss'
+        $resources.Extensions | Should -Contain 'dbaeumer.vscode-eslint'
+        $resources.Extensions | Should -Contain 'r5n.es-js-snippets'
+        $resources.Extensions | Should -Not -Contain 'sumneko.lua'
+        $resources.Settings['reactSnippets.settings.importReactOnTop'] | Should -BeFalse
+        $resources.Settings['reactSnippets.settings.typescriptPropsNaming'] | Should -BeExactly 'component'
+    }
+
+    It 'composes Project Zomboid Modding with Web, Lua, and Build 42 tooling' {
+        $fixture = New-ComposerFixture 'compose-project-zomboid-mod'
+        { Invoke-ProfileComposition $fixture project-zomboid-mod -Platform windows } | Should -Not -Throw
+        $resources = Read-ComposedProfileResources $fixture project-zomboid-mod
+        $resources.Extensions | Should -Contain 'dbaeumer.vscode-eslint'
+        $resources.Extensions | Should -Contain 'sumneko.lua'
+        $resources.Extensions | Should -Contain 'JohnnyMorganz.stylua'
+        $resources.Extensions | Should -Contain 'cyberbobjr.pz-syntax-extension'
+        $resources.Extensions | Should -Contain 'escapepz.pzstudio'
+        $resources.Extensions | Should -Not -Contain 'r5n.es-js-snippets'
+        $resources.Settings['Lua.runtime.version'] | Should -BeExactly 'Lua 5.1'
+        $resources.Settings['[lua]']['editor.defaultFormatter'] | Should -BeExactly 'JohnnyMorganz.stylua'
+    }
+
     It 'composes the current Python profile in isolation' {
         $fixture = New-ComposerFixture 'compose-python'
         { Invoke-ProfileComposition $fixture python -Platform windows } | Should -Not -Throw

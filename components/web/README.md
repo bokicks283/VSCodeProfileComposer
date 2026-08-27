@@ -23,7 +23,9 @@ components:
 
 ## Reused by
 
-Web and future Flask, React, Angular/Nx, Web Testing, React Native, and Web + Database profiles.
+Web, Bokicks Labs React, Project Zomboid Modding, and future Flask, Angular/Nx,
+Web Testing, React Native, and Web + Database profiles. React-specific tooling
+is owned by the focused React component rather than this framework-neutral base.
 
 Database-enabled Web work composes `database` and, when needed, a vendor component. The Web component remains independently usable.
 

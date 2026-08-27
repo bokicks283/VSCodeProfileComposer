@@ -1,0 +1,2 @@
+cyberbobjr.pz-syntax-extension
+escapepz.pzstudio

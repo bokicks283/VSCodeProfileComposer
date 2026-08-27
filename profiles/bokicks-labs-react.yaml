@@ -1,0 +1,5 @@
+name: "Bokicks Labs React"
+components:
+  - main
+  - web
+  - react

@@ -7,6 +7,8 @@
 3. Unreal Engine
 4. Web
 5. Python
+6. Bokicks Labs React
+7. Project Zomboid Modding
 
 Main is the shared foundation for every profile and already handles everyday PowerShell, Bash/Zsh shell scripts, Windows batch files, and the user's cross-profile extensions. It intentionally excludes database tooling.
 
@@ -15,6 +17,12 @@ Unreal Engine profile composes `main + cpp + csharp + unreal`, so it receives
 general C/C++ intelligence, debugging, documentation, C# support for
 UnrealBuildTool rules, and agent symbol support without activating CMake or
 Makefile project discovery.
+
+The Bokicks Labs React profile composes `main + web + react` for the current
+React 19, TypeScript 5, Vite 8, Tailwind CSS 4 portfolio at
+`C:\Users\Rim28\Projects\personal-portfolio`. The Project Zomboid Modding
+profile composes `main + web + lua + project-zomboid`; Web is intentional
+because the planned Lua mod also edits a browser-facing page.
 
 ## Current rollout status
 
@@ -32,6 +40,11 @@ manual import preview and validation in the primary Unreal workspace. See
 - Python + Database = Main + Python + Database
 - SQL Server = Main + Database + SQL Server
 - MongoDB = Main + Database + MongoDB
+
+The two project-focused profiles are available now:
+
+- Bokicks Labs React = Main + Web + React
+- Project Zomboid Modding = Main + Web + Lua + Project Zomboid
 
 Use PowerShell Development for module authoring, Command Explorer, dedicated Pester/PSScriptAnalyzer workflows, advanced debugging, administration tooling, or publishing—not for ordinary script editing.
 
@@ -77,7 +90,7 @@ These are composition examples only. Employer-specific settings, connections, ac
 - MySQL / MariaDB
 - SQLite
 - Java
-- Game Modding
+- Additional game-modding ecosystems
 - Minecraft Modding
 - Containers / DevOps
 - Unity

@@ -32,6 +32,36 @@
       "reason": "Portable ESLint behavior belongs to the Web component."
     },
     {
+      "id": "react-snippets-settings",
+      "kind": "setting",
+      "match": {
+        "type": "prefix",
+        "value": "reactSnippets.settings."
+      },
+      "destination": {
+        "type": "component",
+        "name": "react"
+      },
+      "source": "repository-policy",
+      "status": "approved",
+      "reason": "Portable React snippet behavior belongs to the React component."
+    },
+    {
+      "id": "lua-settings",
+      "kind": "setting",
+      "match": {
+        "type": "prefix",
+        "value": "Lua."
+      },
+      "destination": {
+        "type": "component",
+        "name": "lua"
+      },
+      "source": "repository-policy",
+      "status": "approved",
+      "reason": "Portable Lua language-server behavior belongs to the Lua component."
+    },
+    {
       "id": "python-extension",
       "kind": "extension",
       "match": {
@@ -45,6 +75,81 @@
       "source": "repository-policy",
       "status": "approved",
       "reason": "The Microsoft Python extension is owned by the Python component."
+    },
+    {
+      "id": "react-snippets-extension",
+      "kind": "extension",
+      "match": {
+        "type": "exact",
+        "value": "r5n.es-js-snippets"
+      },
+      "destination": {
+        "type": "component",
+        "name": "react"
+      },
+      "source": "repository-policy",
+      "status": "approved",
+      "reason": "Modern React snippets are owned by the React component."
+    },
+    {
+      "id": "lua-language-server-extension",
+      "kind": "extension",
+      "match": {
+        "type": "exact",
+        "value": "sumneko.lua"
+      },
+      "destination": {
+        "type": "component",
+        "name": "lua"
+      },
+      "source": "repository-policy",
+      "status": "approved",
+      "reason": "Lua language intelligence is owned by the Lua component."
+    },
+    {
+      "id": "stylua-extension",
+      "kind": "extension",
+      "match": {
+        "type": "exact",
+        "value": "JohnnyMorganz.stylua"
+      },
+      "destination": {
+        "type": "component",
+        "name": "lua"
+      },
+      "source": "repository-policy",
+      "status": "approved",
+      "reason": "Lua formatting is owned by the Lua component."
+    },
+    {
+      "id": "project-zomboid-syntax-extension",
+      "kind": "extension",
+      "match": {
+        "type": "exact",
+        "value": "cyberbobjr.pz-syntax-extension"
+      },
+      "destination": {
+        "type": "component",
+        "name": "project-zomboid"
+      },
+      "source": "repository-policy",
+      "status": "approved",
+      "reason": "Project Zomboid script support is owned by the Project Zomboid component."
+    },
+    {
+      "id": "project-zomboid-studio-extension",
+      "kind": "extension",
+      "match": {
+        "type": "exact",
+        "value": "escapepz.pzstudio"
+      },
+      "destination": {
+        "type": "component",
+        "name": "project-zomboid"
+      },
+      "source": "repository-policy",
+      "status": "approved",
+      "reason": "Project Zomboid project tooling is owned by the Project Zomboid component."
     },
     {
       "id": "user-extension-github.copilot-chat",

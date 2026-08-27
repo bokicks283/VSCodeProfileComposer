@@ -1,0 +1,5 @@
+{
+  // Project Zomboid's embedded Lua environment is Lua 5.1-compatible. API
+  // libraries and game locations remain workspace or machine owned.
+  "Lua.runtime.version": "Lua 5.1"
+}

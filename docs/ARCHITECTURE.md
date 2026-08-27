@@ -68,6 +68,11 @@ Main deliberately excludes database clients, database language servers, connecti
 - `csharp` owns reusable C# language support.
 - `unreal` owns only Unreal-specific concerns and reuses `cpp` and `csharp`.
 - `web` and `python` own their language/workflow behavior without database tooling.
+- `react` owns React-specific authoring aids and reuses the framework-neutral
+  `web` component.
+- `lua` owns general Lua language intelligence and manual formatting support.
+- `project-zomboid` owns Build 42-specific script and project tooling and
+  reuses `lua`; recipes add `web` only when the mod includes browser content.
 - `powershell` owns only advanced PowerShell development concerns such as Command Explorer, module authoring, dedicated testing/analysis, advanced debugging, and administration tooling.
 - `database` owns vendor-neutral SQL tooling.
 - `sql-server` owns the official SQL Server extension and reviewed `mssql.*` behavior.
@@ -81,6 +86,8 @@ Web + Database    = Main + Web + Database
 Python + Database = Main + Python + Database
 SQL Server        = Main + Database + SQL Server
 MongoDB           = Main + Database + MongoDB
+Bokicks Labs React = Main + Web + React
+Project Zomboid Modding = Main + Web + Lua + Project Zomboid
 ```
 
 Generic and vendor-specific concerns remain separate. PostgreSQL, MySQL/MariaDB, and SQLite are planned only; no empty components are created without reviewed content.

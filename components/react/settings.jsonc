@@ -1,0 +1,8 @@
+{
+  // Match the portfolio's React 19 + TypeScript conventions. React 17 and
+  // newer do not require a React import solely for JSX.
+  "reactSnippets.settings.importReactOnTop": false,
+  "reactSnippets.settings.typescript": true,
+  "reactSnippets.settings.typescriptPropsNaming": "component",
+  "reactSnippets.settings.componentNameSource": "filename"
+}

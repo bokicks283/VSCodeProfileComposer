@@ -1,0 +1,7 @@
+{
+  // StyLua is available as the explicit Lua formatter, but format-on-save is
+  // left to each repository so importing this profile cannot rewrite a mod.
+  "[lua]": {
+    "editor.defaultFormatter": "JohnnyMorganz.stylua"
+  }
+}

@@ -26,6 +26,9 @@ Every focused component must work in a recipe with `main`.
 - Unreal-only → Unreal
 - Advanced PowerShell development → PowerShell
 - Browser/Web → Web
+- React-specific authoring aids → React
+- General Lua language and formatting support → Lua
+- Project Zomboid-only authoring and build tooling → Project Zomboid
 - General Python → Python
 - Generic SQL and vendor-neutral database behavior → Database
 - `mssql.*` and SQL Server behavior → SQL Server
@@ -38,7 +41,12 @@ Every focused component must work in a recipe with `main`.
 
 Basic language support must not be duplicated in an advanced component. The PowerShell component may assume the Microsoft PowerShell extension is already available from Main.
 
-Web and Python must not absorb database tooling. Database-enabled variants compose `database` and any required vendor component explicitly.
+Web, React, Lua, and Python must not absorb database tooling. Database-enabled
+variants compose `database` and any required vendor component explicitly.
+
+React recipes explicitly compose both `web` and `react`. Project Zomboid
+recipes explicitly compose `lua` and `project-zomboid`, plus `web` only when
+the project actually includes browser-facing files.
 
 ## Extension ownership
 
