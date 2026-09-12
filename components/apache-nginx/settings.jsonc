@@ -1,0 +1,4 @@
+{
+  // Filename and directory associations are profile-local because Main owns
+  // the shared files.associations object.
+}

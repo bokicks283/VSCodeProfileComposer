@@ -1,0 +1,14 @@
+{
+  // Both server extensions claim generic .conf files. These specific patterns
+  // make common Linux layouts deterministic while leaving unrelated .conf
+  // files alone.
+  "files.associations": {
+    "**/apache2/**/*.conf": "apacheconf",
+    "**/httpd/**/*.conf": "apacheconf",
+    "apache2.conf": "apacheconf",
+    "httpd.conf": "apacheconf",
+    ".htaccess": "apacheconf",
+    "**/nginx/**/*.conf": "nginx",
+    "nginx.conf": "nginx"
+  }
+}

@@ -1,0 +1,8 @@
+name: "LAMP + LEMP"
+components:
+  - main
+  - web
+  - php
+  - database
+  - mysql-mariadb
+  - apache-nginx

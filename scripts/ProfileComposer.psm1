@@ -3638,7 +3638,7 @@ function Invoke-OwnershipRouterAudit {
         }
         if ($route.kind -eq 'setting' -and $owners.Count -eq 1) {
             $ownerPath = Join-Path $root $owners[0].path
-            if (Test-Path -LiteralPath $ownerPath -PathType Leaf -and $ownerPath -match '\.jsonc?$') {
+            if ((Test-Path -LiteralPath $ownerPath -PathType Leaf) -and $ownerPath -match '\.jsonc?$') {
                 $settings = Read-JsonCFile $ownerPath
                 if (Test-IsDictionary $settings -and $settings.Contains($route.match.value)) {
                     $classification = Get-SettingValueClassification $route.match.value $settings[$route.match.value]

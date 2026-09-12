@@ -62,6 +62,51 @@
       "reason": "Portable Lua language-server behavior belongs to the Lua component."
     },
     {
+      "id": "intelephense-settings",
+      "kind": "setting",
+      "match": {
+        "type": "prefix",
+        "value": "intelephense."
+      },
+      "destination": {
+        "type": "component",
+        "name": "php"
+      },
+      "source": "repository-policy",
+      "status": "approved",
+      "reason": "Portable Intelephense behavior belongs to the PHP component."
+    },
+    {
+      "id": "php-debug-settings",
+      "kind": "setting",
+      "match": {
+        "type": "prefix",
+        "value": "php.debug."
+      },
+      "destination": {
+        "type": "component",
+        "name": "php"
+      },
+      "source": "repository-policy",
+      "status": "approved",
+      "reason": "Portable Xdebug client behavior belongs to the PHP component."
+    },
+    {
+      "id": "php-validation-setting",
+      "kind": "setting",
+      "match": {
+        "type": "exact",
+        "value": "php.validate.enable"
+      },
+      "destination": {
+        "type": "component",
+        "name": "php"
+      },
+      "source": "repository-policy",
+      "status": "approved",
+      "reason": "PHP validation-provider selection belongs to the PHP component."
+    },
+    {
       "id": "python-extension",
       "kind": "extension",
       "match": {
@@ -120,6 +165,81 @@
       "source": "repository-policy",
       "status": "approved",
       "reason": "Lua formatting is owned by the Lua component."
+    },
+    {
+      "id": "intelephense-extension",
+      "kind": "extension",
+      "match": {
+        "type": "exact",
+        "value": "bmewburn.vscode-intelephense-client"
+      },
+      "destination": {
+        "type": "component",
+        "name": "php"
+      },
+      "source": "repository-policy",
+      "status": "approved",
+      "reason": "PHP language intelligence is owned by the PHP component."
+    },
+    {
+      "id": "xdebug-extension",
+      "kind": "extension",
+      "match": {
+        "type": "exact",
+        "value": "xdebug.php-debug"
+      },
+      "destination": {
+        "type": "component",
+        "name": "php"
+      },
+      "source": "repository-policy",
+      "status": "approved",
+      "reason": "PHP Xdebug client support is owned by the PHP component."
+    },
+    {
+      "id": "mysql-mariadb-driver-extension",
+      "kind": "extension",
+      "match": {
+        "type": "exact",
+        "value": "mtxr.sqltools-driver-mysql"
+      },
+      "destination": {
+        "type": "component",
+        "name": "mysql-mariadb"
+      },
+      "source": "repository-policy",
+      "status": "approved",
+      "reason": "The SQLTools MySQL and MariaDB driver is owned by the MySQL and MariaDB component."
+    },
+    {
+      "id": "nginx-configuration-extension",
+      "kind": "extension",
+      "match": {
+        "type": "exact",
+        "value": "ahmadalli.vscode-nginx-conf"
+      },
+      "destination": {
+        "type": "component",
+        "name": "apache-nginx"
+      },
+      "source": "repository-policy",
+      "status": "approved",
+      "reason": "NGINX configuration support is owned by the Apache and NGINX component."
+    },
+    {
+      "id": "apache-configuration-extension",
+      "kind": "extension",
+      "match": {
+        "type": "exact",
+        "value": "mrmlnc.vscode-apache"
+      },
+      "destination": {
+        "type": "component",
+        "name": "apache-nginx"
+      },
+      "source": "repository-policy",
+      "status": "approved",
+      "reason": "Apache configuration syntax is owned by the Apache and NGINX component."
     },
     {
       "id": "project-zomboid-syntax-extension",

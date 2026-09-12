@@ -76,8 +76,9 @@ comparison.
 | `cpp` | C++ | Main + C++ |
 | `unreal` | Unreal Engine | Main + C++ + C# + Unreal |
 | `web` | Web | Main + Web |
-| `react` | Bokicks Labs React | Main + Web + React |
+| `bokicks-labs-react` | Bokicks Labs React | Main + Web + React |
 | `project-zomboid-mod` | Project Zomboid Modding | Main + Web + Lua + Project Zomboid |
+| `lamp-lemp` | LAMP + LEMP | Main + Web + PHP + Database + MySQL/MariaDB + Apache/NGINX |
 | `python` | Python | Main + Python |
 | `powershell` | PowerShell Development | Main + PowerShell |
 | `database` | Database | Main + Database |
@@ -86,7 +87,7 @@ comparison.
 | `sql-server` | SQL Server | Main + Database + SQL Server |
 | `mongodb` | MongoDB | Main + Database + MongoDB |
 
-Main is the general daily profile and the shared base for every focused profile. Its 35 extensions are therefore present in all current compositions. Bokicks Labs React is tailored to the React 19 + TypeScript + Vite + Tailwind portfolio. Project Zomboid Modding adds Lua and Build 42 tooling and deliberately includes Web for the mod's browser-facing page. PowerShell Development is for advanced module, testing, analysis, debugging, publishing, or administration work. Database profiles are opt-in so database clients and connection explorers do not become part of Main.
+Main is the general daily profile and the shared base for every focused profile. Its 35 extensions are therefore present in all current compositions. Bokicks Labs React is tailored to the React 19 + TypeScript + Vite + Tailwind portfolio. Project Zomboid Modding adds Lua and Build 42 tooling and deliberately includes Web for the mod's browser-facing page. LAMP + LEMP adds PHP, Xdebug client support, MySQL/MariaDB connectivity, and Apache/NGINX configuration languages without installing or configuring Linux services. PowerShell Development is for advanced module, testing, analysis, debugging, publishing, or administration work. Database profiles are opt-in so database clients and connection explorers do not become part of Main.
 
 You can also list the recipe IDs directly:
 

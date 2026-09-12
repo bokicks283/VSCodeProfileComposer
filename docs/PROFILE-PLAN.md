@@ -9,6 +9,7 @@
 5. Python
 6. Bokicks Labs React
 7. Project Zomboid Modding
+8. LAMP + LEMP
 
 Main is the shared foundation for every profile and already handles everyday PowerShell, Bash/Zsh shell scripts, Windows batch files, and the user's cross-profile extensions. It intentionally excludes database tooling.
 
@@ -23,6 +24,12 @@ React 19, TypeScript 5, Vite 8, Tailwind CSS 4 portfolio at
 `C:\Users\Rim28\Projects\personal-portfolio`. The Project Zomboid Modding
 profile composes `main + web + lua + project-zomboid`; Web is intentional
 because the planned Lua mod also edits a browser-facing page.
+
+The LAMP + LEMP profile composes
+`main + web + php + database + mysql-mariadb + apache-nginx`. It supports PHP
+authoring/debugging, MySQL/MariaDB access, and both server configuration
+languages while leaving distro packages, active services, ports, sockets,
+credentials, and deployment policy to the Linux host and project.
 
 ## Current rollout status
 
@@ -40,6 +47,7 @@ manual import preview and validation in the primary Unreal workspace. See
 - Python + Database = Main + Python + Database
 - SQL Server = Main + Database + SQL Server
 - MongoDB = Main + Database + MongoDB
+- LAMP + LEMP = Main + Web + PHP + Database + MySQL/MariaDB + Apache/NGINX
 
 The two project-focused profiles are available now:
 
@@ -53,7 +61,6 @@ Use database profiles only when database editing, querying, schema work, migrati
 ## Near-term compositions
 
 - Flask + Database = Main + Python + Web + future Flask + Database
-- PHP + Database = Main + future PHP + Web + Database
 - Python + PostgreSQL = Main + Python + Database + future PostgreSQL
 
 These remain planning examples until their missing components contain reviewed configuration.
@@ -85,9 +92,7 @@ These are composition examples only. Employer-specific settings, connections, ac
 ## Later profiles and components
 
 - Flask
-- PHP
 - PostgreSQL
-- MySQL / MariaDB
 - SQLite
 - Java
 - Additional game-modding ecosystems
@@ -108,7 +113,7 @@ No empty vendor component is created without real reviewed content.
 - Should HLSL Tools and C++ Dev Tools be mandatory in Unreal?
 - Which Unreal INI solution handles Unreal operators safely?
 - Should SQLTools remain the generic database client?
-- Which PostgreSQL, MySQL/MariaDB, and SQLite extensions should own future vendor components?
+- Which PostgreSQL and SQLite extensions should own future vendor components?
 - Should SQL Server use only the official MSSQL extension or also a SQLTools driver in selected profiles?
 - What is the intended ownership of the previous `mdb.mcp.server` preference?
 - Which advanced Pester, PSScriptAnalyzer, module-publishing, or administration settings belong in PowerShell Development?
@@ -129,3 +134,5 @@ Import each generated `.code-profile` into a new, clearly named test profile and
 8. SQL Server and MongoDB only when their vendor workflows are needed.
 9. PowerShell Development only when advanced module, testing, analysis, debugging, or administration work needs validation.
 10. Add future composites only after the owning components are stable.
+11. LAMP + LEMP on a disposable Linux development stack, validating Apache
+    and NGINX separately so they never contend for the same listener.

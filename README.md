@@ -30,8 +30,11 @@ pwsh ./scripts/ProfileComposer.ps1 fix global -DryRun
 pwsh ./scripts/ProfileComposer.ps1 compose main -Platform windows
 
 # Compose the two current project profiles.
-pwsh ./scripts/ProfileComposer.ps1 compose react -Platform windows
+pwsh ./scripts/ProfileComposer.ps1 compose bokicks-labs-react -Platform windows
 pwsh ./scripts/ProfileComposer.ps1 compose project-zomboid-mod -Platform windows
+
+# Compose the portable LAMP/LEMP development profile for Linux.
+pwsh ./scripts/ProfileComposer.ps1 compose lamp-lemp -Platform linux
 
 # List and select private machine-local overlays by ID.
 pwsh ./scripts/ProfileComposer.ps1 list-machines
@@ -264,4 +267,4 @@ pwsh -NoProfile -NonInteractive -File ./scripts/Test-Documentation.ps1
 
 Unattended installation, replacement, deletion, and export remain deferred because VS Code 1.130 exposes no supported complete profile-management CLI. The guided commands may read profile names/location IDs and `code --status`, and `vscode open` may launch an existing profile; they never write profile storage, invoke import/export automatically, install extensions, or alter Settings Sync. `sync` requires a manually exported private `.code-profile` and reads application settings only for explicit global ownership reconciliation. Settings Sync remains the primary cross-machine delivery mechanism for imported active profiles.
 
-See [Complete composer CLI guide](docs/CLI-GUIDE.md), [Complete usage guide](docs/USAGE.md), [C++ and Unreal performance settings](docs/CPP-UNREAL-PERFORMANCE.md), [Ownership router and sync](docs/OWNERSHIP-ROUTER.md), [Composer details](docs/COMPOSER.md), [Architecture](docs/ARCHITECTURE.md), [Schema and ownership contract](docs/SCHEMA.md), [Main profile health check](docs/audits/2026-07-29-main-profile-health.md), [Sync routing and schema-model audit](docs/audits/2026-07-23-sync-schema-model.md), [Main-profile ownership audit](docs/audits/2026-07-22-main-profile-ownership.md), [Portability](docs/PORTABILITY.md), [Migration](docs/MIGRATION.md), and the sanitized [historical extension reference](reference/extensions/README.md).
+See [Complete composer CLI guide](docs/CLI-GUIDE.md), [Complete usage guide](docs/USAGE.md), [LAMP + LEMP Linux handoff](docs/handoffs/LAMP-LEMP-LINUX-HANDOFF.md), [C++ and Unreal performance settings](docs/CPP-UNREAL-PERFORMANCE.md), [Ownership router and sync](docs/OWNERSHIP-ROUTER.md), [Composer details](docs/COMPOSER.md), [Architecture](docs/ARCHITECTURE.md), [Schema and ownership contract](docs/SCHEMA.md), [Main profile health check](docs/audits/2026-07-29-main-profile-health.md), [Sync routing and schema-model audit](docs/audits/2026-07-23-sync-schema-model.md), [Main-profile ownership audit](docs/audits/2026-07-22-main-profile-ownership.md), [Portability](docs/PORTABILITY.md), [Migration](docs/MIGRATION.md), and the sanitized [historical extension reference](reference/extensions/README.md).

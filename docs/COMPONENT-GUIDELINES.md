@@ -27,10 +27,13 @@ Every focused component must work in a recipe with `main`.
 - Advanced PowerShell development → PowerShell
 - Browser/Web → Web
 - React-specific authoring aids → React
+- General PHP language and debugging support → PHP
+- Apache and NGINX configuration-language support → Apache and NGINX
 - General Lua language and formatting support → Lua
 - Project Zomboid-only authoring and build tooling → Project Zomboid
 - General Python → Python
 - Generic SQL and vendor-neutral database behavior → Database
+- MySQL/MariaDB SQLTools driver behavior → MySQL and MariaDB
 - `mssql.*` and SQL Server behavior → SQL Server
 - `mongodbLanguageServer.*` and MongoDB behavior → MongoDB
 - OS default shell and reusable OS preference → Platform
@@ -58,6 +61,7 @@ Use this database placement rule:
 Generic and vendor-neutral → Database
 SQL Server-specific        → SQL Server
 MongoDB-specific           → MongoDB
+MySQL/MariaDB-specific     → MySQL and MariaDB
 Machine- or employer-owned → Exclude from portable components
 ```
 
@@ -83,6 +87,11 @@ and Makefile components, while Unreal explicitly adds C# and omits both native
 build-system components.
 
 Vendor-specific database recipes explicitly include both `database` and the vendor component.
+
+The LAMP + LEMP recipe explicitly composes `web`, `php`, `database`,
+`mysql-mariadb`, and `apache-nginx`. Runtime installation, service selection,
+ports, sockets, document roots, and database connections remain outside the
+portable profile.
 
 ## Platform and machine boundaries
 

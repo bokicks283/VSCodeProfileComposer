@@ -706,10 +706,31 @@ Describe 'Current profile acceptance compositions' {
         { Invoke-ProfileComposition $fixture web -Platform windows } | Should -Not -Throw
     }
 
+    It 'composes LAMP and LEMP with PHP, MySQL/MariaDB, and deterministic server config languages' {
+        $fixture = New-ComposerFixture 'compose-lamp-lemp'
+        { Invoke-ProfileComposition $fixture lamp-lemp -Platform linux } | Should -Not -Throw
+        $resources = Read-ComposedProfileResources $fixture lamp-lemp
+        $resources.Extensions | Should -Contain 'bmewburn.vscode-intelephense-client'
+        $resources.Extensions | Should -Contain 'xdebug.php-debug'
+        $resources.Extensions | Should -Contain 'mtxr.sqltools'
+        $resources.Extensions | Should -Contain 'mtxr.sqltools-driver-mysql'
+        $resources.Extensions | Should -Contain 'mrmlnc.vscode-apache'
+        $resources.Extensions | Should -Contain 'ahmadalli.vscode-nginx-conf'
+        $resources.Settings['php.validate.enable'] | Should -BeFalse
+        $resources.Settings['[php]']['editor.defaultFormatter'] |
+            Should -BeExactly 'bmewburn.vscode-intelephense-client'
+        $resources.Settings['files.associations']['**/apache2/**/*.conf'] |
+            Should -BeExactly 'apacheconf'
+        $resources.Settings['files.associations']['**/nginx/**/*.conf'] |
+            Should -BeExactly 'nginx'
+        $resources.Settings['terminal.integrated.defaultProfile.linux'] |
+            Should -BeExactly 'Bash'
+    }
+
     It 'composes the Bokicks Labs React profile with focused React and Web tooling' {
         $fixture = New-ComposerFixture 'compose-react'
-        { Invoke-ProfileComposition $fixture react -Platform windows } | Should -Not -Throw
-        $resources = Read-ComposedProfileResources $fixture react
+        { Invoke-ProfileComposition $fixture bokicks-labs-react -Platform windows } | Should -Not -Throw
+        $resources = Read-ComposedProfileResources $fixture bokicks-labs-react
         $resources.Extensions | Should -Contain 'bradlc.vscode-tailwindcss'
         $resources.Extensions | Should -Contain 'dbaeumer.vscode-eslint'
         $resources.Extensions | Should -Contain 'r5n.es-js-snippets'

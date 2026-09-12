@@ -1,0 +1,2 @@
+ahmadalli.vscode-nginx-conf
+mrmlnc.vscode-apache

@@ -1,0 +1,11 @@
+{
+  // Intelephense provides PHP parsing and diagnostics without requiring VS Code
+  // to invoke a machine-specific PHP executable for every validation pass.
+  "php.validate.enable": false,
+
+  // Select a formatter without enabling format-on-save. Repositories retain
+  // ownership of automatic formatting and their PHP style rules.
+  "[php]": {
+    "editor.defaultFormatter": "bmewburn.vscode-intelephense-client"
+  }
+}

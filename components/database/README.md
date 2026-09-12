@@ -23,7 +23,8 @@ components:
 
 ## Reused by
 
-Database, Web + Database, Python + Database, future Flask/PHP composites, and vendor-specific profiles.
+Database, Web + Database, Python + Database, LAMP + LEMP, future Flask
+composites, and vendor-specific profiles.
 
 ## Portability classification
 
@@ -33,7 +34,8 @@ The component contains only the generic SQLTools extension. No connection object
 
 - SQL Server behavior belongs in `sql-server`.
 - MongoDB behavior belongs in `mongodb`.
-- PostgreSQL, MySQL/MariaDB, and SQLite remain planned components until reviewed configuration justifies creating them.
+- MySQL/MariaDB behavior belongs in `mysql-mariadb`.
+- PostgreSQL and SQLite remain planned components until reviewed configuration justifies creating them.
 
 ## Platform concerns
 
@@ -53,4 +55,5 @@ Database extensions can add background services, language servers, connection ex
 
 ## Deferred decisions
 
-Whether SQLTools remains the preferred generic client, which formatter should own `[sql]`, and whether PostgreSQL, MySQL/MariaDB, or SQLite components should be created.
+Whether SQLTools remains the preferred generic client, which formatter should
+own `[sql]`, and whether PostgreSQL or SQLite components should be created.
